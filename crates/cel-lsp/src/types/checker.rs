@@ -2,8 +2,86 @@
 
 use cel_parser::ast::Expr;
 
-use crate::functions::{get_builtin, FunctionKind};
-use crate::CelType;
+use super::builtins::get_builtin;
+use super::cel_type::CelType;
+use super::function::{Arity, FunctionKind};
+
+/// Result of arity validation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArityCheck {
+    /// Arity is valid.
+    Valid,
+    /// Too few arguments provided.
+    TooFew {
+        expected: Arity,
+        got: usize,
+    },
+    /// Too many arguments provided.
+    TooMany {
+        expected: Arity,
+        got: usize,
+    },
+    /// Unknown function (no arity info available).
+    Unknown,
+}
+
+/// Check if the argument count is valid for a standalone function call.
+///
+/// Returns `ArityCheck::Valid` if the arity is correct, `TooFew`/`TooMany` if not,
+/// or `Unknown` if the function doesn't exist or has no standalone form.
+pub fn check_standalone_arity(name: &str, arg_count: usize) -> ArityCheck {
+    let Some(builtin) = get_builtin(name) else {
+        return ArityCheck::Unknown;
+    };
+
+    let Some(arity) = builtin.standalone_arity else {
+        // Function exists but not callable as standalone
+        return ArityCheck::Unknown;
+    };
+
+    check_arity(arity, arg_count)
+}
+
+/// Check if the argument count is valid for a method call.
+///
+/// Returns `ArityCheck::Valid` if the arity is correct, `TooFew`/`TooMany` if not,
+/// or `Unknown` if the function doesn't exist or has no method form.
+pub fn check_method_arity(name: &str, arg_count: usize) -> ArityCheck {
+    let Some(builtin) = get_builtin(name) else {
+        return ArityCheck::Unknown;
+    };
+
+    let Some(arity) = builtin.method_arity else {
+        // Function exists but not callable as method
+        return ArityCheck::Unknown;
+    };
+
+    check_arity(arity, arg_count)
+}
+
+/// Internal helper to check an arity constraint.
+fn check_arity(arity: Arity, count: usize) -> ArityCheck {
+    if arity.is_valid(count) {
+        return ArityCheck::Valid;
+    }
+
+    let min = match arity {
+        Arity::Exact(n) => n,
+        Arity::Range(min, _) => min,
+    };
+
+    if count < min {
+        ArityCheck::TooFew {
+            expected: arity,
+            got: count,
+        }
+    } else {
+        ArityCheck::TooMany {
+            expected: arity,
+            got: count,
+        }
+    }
+}
 
 /// Infer the type of a literal expression.
 ///
@@ -175,5 +253,87 @@ mod tests {
         let size_types = get_allowed_receiver_types("size").unwrap();
         assert!(size_types.contains(&CelType::String));
         assert!(size_types.contains(&CelType::List));
+    }
+
+    #[test]
+    fn check_standalone_arity_size() {
+        // size() standalone takes 1 argument
+        assert_eq!(check_standalone_arity("size", 1), ArityCheck::Valid);
+        assert!(matches!(
+            check_standalone_arity("size", 0),
+            ArityCheck::TooFew { .. }
+        ));
+        assert!(matches!(
+            check_standalone_arity("size", 2),
+            ArityCheck::TooMany { .. }
+        ));
+    }
+
+    #[test]
+    fn check_method_arity_size() {
+        // size() as method takes 0 arguments
+        assert_eq!(check_method_arity("size", 0), ArityCheck::Valid);
+        assert!(matches!(
+            check_method_arity("size", 1),
+            ArityCheck::TooMany { .. }
+        ));
+    }
+
+    #[test]
+    fn check_method_arity_ends_with() {
+        // endsWith() as method takes 1 argument
+        assert_eq!(check_method_arity("endsWith", 1), ArityCheck::Valid);
+        assert!(matches!(
+            check_method_arity("endsWith", 0),
+            ArityCheck::TooFew { .. }
+        ));
+        assert!(matches!(
+            check_method_arity("endsWith", 2),
+            ArityCheck::TooMany { .. }
+        ));
+    }
+
+    #[test]
+    fn check_method_arity_map_macro() {
+        // map() macro takes 2-3 arguments
+        assert_eq!(check_method_arity("map", 2), ArityCheck::Valid);
+        assert_eq!(check_method_arity("map", 3), ArityCheck::Valid);
+        assert!(matches!(
+            check_method_arity("map", 1),
+            ArityCheck::TooFew { .. }
+        ));
+        assert!(matches!(
+            check_method_arity("map", 4),
+            ArityCheck::TooMany { .. }
+        ));
+    }
+
+    #[test]
+    fn check_method_arity_timestamp_methods() {
+        // Timestamp methods take 0-1 arguments (optional timezone)
+        assert_eq!(check_method_arity("getHours", 0), ArityCheck::Valid);
+        assert_eq!(check_method_arity("getHours", 1), ArityCheck::Valid);
+        assert!(matches!(
+            check_method_arity("getHours", 2),
+            ArityCheck::TooMany { .. }
+        ));
+    }
+
+    #[test]
+    fn check_arity_unknown_function() {
+        assert_eq!(check_standalone_arity("unknownFunc", 1), ArityCheck::Unknown);
+        assert_eq!(check_method_arity("unknownFunc", 1), ArityCheck::Unknown);
+    }
+
+    #[test]
+    fn check_standalone_arity_method_only() {
+        // endsWith is method-only, so standalone check returns Unknown
+        assert_eq!(check_standalone_arity("endsWith", 1), ArityCheck::Unknown);
+    }
+
+    #[test]
+    fn check_method_arity_standalone_only() {
+        // int is standalone-only, so method check returns Unknown
+        assert_eq!(check_method_arity("int", 0), ArityCheck::Unknown);
     }
 }

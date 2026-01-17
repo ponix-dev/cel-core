@@ -3,12 +3,12 @@
 use cel_parser::{Expr, SpannedExpr};
 use tower_lsp::lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position};
 
-use cel_types::{get_builtin, BuiltinFunction};
-use crate::text::LineIndex;
-use crate::validation::{ValidationError, ValidationErrorKind};
+use crate::document::{LineIndex, ProtoDocumentState};
+use crate::protovalidate::get_protovalidate_builtin;
+use crate::types::{get_builtin, FunctionDef, ValidationError, ValidationErrorKind};
 
 /// Format builtin function documentation as markdown.
-fn format_builtin_docs(builtin: &BuiltinFunction) -> String {
+fn format_builtin_docs(builtin: &FunctionDef) -> String {
     let mut doc = format!("**{}**`{}`\n\n{}", builtin.name, builtin.signature, builtin.description);
     if let Some(example) = builtin.example {
         doc.push_str(&format!("\n\n*Example:* `{}`", example));
@@ -96,6 +96,27 @@ fn format_validation_error(error: &ValidationError) -> String {
                 error.name, error.name
             )
         }
+        ValidationErrorKind::TooFewArguments => {
+            format!(
+                "**Error:** Too few arguments for `{}`\n\n\
+                 {}",
+                error.name, error.message
+            )
+        }
+        ValidationErrorKind::TooManyArguments => {
+            format!(
+                "**Error:** Too many arguments for `{}`\n\n\
+                 {}",
+                error.name, error.message
+            )
+        }
+        ValidationErrorKind::InvalidArgumentType => {
+            format!(
+                "**Error:** Invalid argument type for `{}`\n\n\
+                 {}",
+                error.name, error.message
+            )
+        }
     }
 }
 
@@ -158,6 +179,64 @@ pub fn hover_at_position(
 ) -> Option<Hover> {
     let node = find_node_at_position(line_index, ast, position)?;
     hover_for_node(line_index, node, validation_errors)
+}
+
+/// Get hover information for a position in a proto document.
+///
+/// This finds the CEL region at the given position, locates the AST node,
+/// and returns hover information with proper offset mapping.
+pub fn hover_at_position_proto(state: &ProtoDocumentState, position: Position) -> Option<Hover> {
+    // Convert position to byte offset in host document
+    let host_offset = state.line_index.position_to_offset(position)?;
+
+    // Find which CEL region contains this offset
+    let region_state = state.region_at_offset(host_offset)?;
+
+    // Convert host offset to CEL-local offset
+    let cel_offset = region_state.host_to_cel_offset(host_offset)?;
+
+    // Find AST node at the CEL-local offset
+    let ast = region_state.ast.as_ref()?;
+    let node = find_node_containing_offset(ast, cel_offset)?;
+
+    // Check if this node has a validation error
+    if let Some(error) = find_validation_error_at(node, &region_state.validation_errors) {
+        let host_span = region_state.mapper.span_to_host(&error.span);
+        return Some(Hover {
+            contents: HoverContents::Markup(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value: format_validation_error(error),
+            }),
+            range: Some(state.line_index.span_to_range(&host_span)),
+        });
+    }
+
+    // Fall back to builtin documentation (including protovalidate functions for proto files)
+    let get_function_docs = |name: &str| -> Option<String> {
+        get_builtin(name)
+            .or_else(|| get_protovalidate_builtin(name))
+            .map(format_builtin_docs)
+    };
+
+    let description = match &node.node {
+        Expr::Ident(name) => get_function_docs(name),
+        Expr::Member { field, .. } => get_function_docs(field),
+        Expr::Call { expr, .. } => match &expr.node {
+            Expr::Ident(name) => get_function_docs(name),
+            Expr::Member { field, .. } => get_function_docs(field),
+            _ => None,
+        },
+        _ => None,
+    }?;
+
+    let host_span = region_state.mapper.span_to_host(&node.span);
+    Some(Hover {
+        contents: HoverContents::Markup(MarkupContent {
+            kind: MarkupKind::Markdown,
+            value: description,
+        }),
+        range: Some(state.line_index.span_to_range(&host_span)),
+    })
 }
 
 #[cfg(test)]

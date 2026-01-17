@@ -5,8 +5,8 @@ use tower_lsp::lsp_types::{
     SemanticToken, SemanticTokenModifier, SemanticTokenType, SemanticTokensLegend,
 };
 
-use cel_types::is_builtin;
-use crate::text::LineIndex;
+use crate::document::{LineIndex, ProtoDocumentState};
+use crate::types::is_builtin;
 
 /// Token type indices (must match LEGEND order).
 pub mod token_types {
@@ -411,6 +411,67 @@ pub fn tokens_for_ast(line_index: &LineIndex, ast: &SpannedExpr) -> Vec<Semantic
     let mut collector = TokenCollector::new(line_index.source());
     collector.visit_expr(ast);
     collector.into_semantic_tokens(line_index)
+}
+
+/// Generate semantic tokens for a proto document containing CEL regions.
+///
+/// This processes all CEL regions, generates tokens for each, and maps
+/// them to host document coordinates.
+pub fn tokens_for_proto(state: &ProtoDocumentState) -> Vec<SemanticToken> {
+    let mut all_tokens: Vec<RawToken> = Vec::new();
+
+    for region_state in &state.regions {
+        if let Some(ast) = &region_state.ast {
+            // Generate tokens with CEL-local offsets
+            let mut collector = TokenCollector::new(&region_state.region.source);
+            collector.visit_expr(ast);
+
+            // Convert to host coordinates
+            for token in collector.tokens {
+                let host_start = region_state.mapper.to_host(token.start);
+                all_tokens.push(RawToken {
+                    start: host_start,
+                    length: token.length,
+                    token_type: token.token_type,
+                    token_modifiers: token.token_modifiers,
+                });
+            }
+        }
+    }
+
+    // Sort by position and convert to delta-encoded format
+    all_tokens.sort_by_key(|t| t.start);
+    encode_tokens(&all_tokens, &state.line_index)
+}
+
+/// Convert raw tokens to delta-encoded semantic tokens.
+fn encode_tokens(tokens: &[RawToken], line_index: &LineIndex) -> Vec<SemanticToken> {
+    let mut result = Vec::with_capacity(tokens.len());
+    let mut prev_line = 0u32;
+    let mut prev_start = 0u32;
+
+    for token in tokens {
+        let pos = line_index.offset_to_position(token.start);
+        let delta_line = pos.line - prev_line;
+        let delta_start = if delta_line == 0 {
+            pos.character - prev_start
+        } else {
+            pos.character
+        };
+
+        result.push(SemanticToken {
+            delta_line,
+            delta_start,
+            length: token.length as u32,
+            token_type: token.token_type,
+            token_modifiers_bitset: token.token_modifiers,
+        });
+
+        prev_line = pos.line;
+        prev_start = pos.character;
+    }
+
+    result
 }
 
 #[cfg(test)]

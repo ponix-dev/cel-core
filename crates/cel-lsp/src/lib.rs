@@ -4,14 +4,12 @@ use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService};
 
-mod diagnostics;
 mod document;
-mod hover;
-mod semantic_tokens;
-mod text;
-mod validation;
+mod lsp;
+pub mod protovalidate;
+pub mod types;
 
-use document::{DocumentState, DocumentStore};
+use document::{DocumentKind, DocumentStore};
 
 pub struct Backend {
     client: Client,
@@ -33,15 +31,24 @@ impl Backend {
     }
 
     /// Publish diagnostics for a document.
-    async fn publish_diagnostics_for(&self, uri: &Url, state: &DocumentState) {
-        let diagnostics = diagnostics::to_diagnostics(
-            &state.errors,
-            &state.validation_errors,
-            &state.line_index,
-        );
+    async fn publish_diagnostics_for(&self, uri: &Url, state: &DocumentKind) {
+        let (diagnostics, version) = match state {
+            DocumentKind::Cel(cel_state) => {
+                let diags = lsp::to_diagnostics(
+                    &cel_state.errors,
+                    &cel_state.validation_errors,
+                    &cel_state.line_index,
+                );
+                (diags, cel_state.version)
+            }
+            DocumentKind::Proto(proto_state) => {
+                let diags = lsp::proto_to_diagnostics(proto_state);
+                (diags, proto_state.version)
+            }
+        };
 
         self.client
-            .publish_diagnostics(uri.clone(), diagnostics, Some(state.version))
+            .publish_diagnostics(uri.clone(), diagnostics, Some(version))
             .await;
     }
 }
@@ -58,7 +65,7 @@ impl LanguageServer for Backend {
                 semantic_tokens_provider: Some(
                     SemanticTokensServerCapabilities::SemanticTokensOptions(
                         SemanticTokensOptions {
-                            legend: semantic_tokens::legend(),
+                            legend: lsp::legend(),
                             full: Some(SemanticTokensFullOptions::Bool(true)),
                             range: None,
                             work_done_progress_options: WorkDoneProgressOptions::default(),
@@ -118,16 +125,22 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
 
-        let Some(ast) = doc.ast() else {
-            return Ok(None);
-        };
-
-        Ok(hover::hover_at_position(
-            &doc.line_index,
-            ast,
-            &doc.validation_errors,
-            position,
-        ))
+        match doc.as_ref() {
+            DocumentKind::Cel(state) => {
+                let Some(ast) = state.ast() else {
+                    return Ok(None);
+                };
+                Ok(lsp::hover_at_position(
+                    &state.line_index,
+                    ast,
+                    &state.validation_errors,
+                    position,
+                ))
+            }
+            DocumentKind::Proto(state) => {
+                Ok(lsp::hover_at_position_proto(state, position))
+            }
+        }
     }
 
     async fn semantic_tokens_full(
@@ -140,11 +153,17 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
 
-        let Some(ast) = doc.ast() else {
-            return Ok(None);
+        let tokens = match doc.as_ref() {
+            DocumentKind::Cel(state) => {
+                let Some(ast) = state.ast() else {
+                    return Ok(None);
+                };
+                lsp::tokens_for_ast(&state.line_index, ast)
+            }
+            DocumentKind::Proto(state) => {
+                lsp::tokens_for_proto(state)
+            }
         };
-
-        let tokens = semantic_tokens::tokens_for_ast(&doc.line_index, ast);
 
         Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
             result_id: None,

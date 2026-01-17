@@ -5,7 +5,7 @@ edition.workspace = true
 
 [dependencies]
 cel-parser = { path = "../cel-parser" }
-cel-types = { path = "../cel-types" }
 dashmap = "5.5"
 tower-lsp = "0.20"
 tokio = { version = "1", features = ["full"] }
+regex = "1.10"

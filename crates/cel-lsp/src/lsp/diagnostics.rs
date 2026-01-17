@@ -3,8 +3,8 @@
 use cel_parser::ParseError;
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString};
 
-use crate::text::LineIndex;
-use crate::validation::{ValidationError, ValidationErrorKind};
+use crate::document::{LineIndex, ProtoDocumentState};
+use crate::types::{ValidationError, ValidationErrorKind};
 
 /// Convert parser errors to LSP diagnostics.
 fn parse_errors_to_diagnostics(errors: &[ParseError], line_index: &LineIndex) -> Vec<Diagnostic> {
@@ -40,6 +40,9 @@ fn validation_errors_to_diagnostics(
                 ValidationErrorKind::UndefinedMethod => "undefined-method",
                 ValidationErrorKind::StandaloneCalledAsMethod => "standalone-as-method",
                 ValidationErrorKind::MethodCalledAsStandalone => "method-as-standalone",
+                ValidationErrorKind::TooFewArguments => "too-few-arguments",
+                ValidationErrorKind::TooManyArguments => "too-many-arguments",
+                ValidationErrorKind::InvalidArgumentType => "invalid-argument-type",
             };
 
             Diagnostic {
@@ -65,6 +68,64 @@ pub fn to_diagnostics(
 ) -> Vec<Diagnostic> {
     let mut diagnostics = parse_errors_to_diagnostics(parse_errors, line_index);
     diagnostics.extend(validation_errors_to_diagnostics(validation_errors, line_index));
+    diagnostics
+}
+
+/// Convert all errors from a proto document to LSP diagnostics.
+///
+/// This processes all CEL regions in the proto document, converting their
+/// parse and validation errors with proper offset mapping to host coordinates.
+pub fn proto_to_diagnostics(state: &ProtoDocumentState) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+
+    for region_state in &state.regions {
+        let mapper = &region_state.mapper;
+
+        // Convert parse errors
+        for error in &region_state.parse_errors {
+            let host_span = mapper.span_to_host(&error.span);
+            let range = state.line_index.span_to_range(&host_span);
+            diagnostics.push(Diagnostic {
+                range,
+                severity: Some(DiagnosticSeverity::ERROR),
+                code: None,
+                code_description: None,
+                source: Some("cel".to_string()),
+                message: error.message.clone(),
+                related_information: None,
+                tags: None,
+                data: None,
+            });
+        }
+
+        // Convert validation errors
+        for error in &region_state.validation_errors {
+            let host_span = mapper.span_to_host(&error.span);
+            let range = state.line_index.span_to_range(&host_span);
+            let code = match error.kind {
+                ValidationErrorKind::UndefinedVariable => "undefined-variable",
+                ValidationErrorKind::UndefinedMethod => "undefined-method",
+                ValidationErrorKind::StandaloneCalledAsMethod => "standalone-as-method",
+                ValidationErrorKind::MethodCalledAsStandalone => "method-as-standalone",
+                ValidationErrorKind::TooFewArguments => "too-few-arguments",
+                ValidationErrorKind::TooManyArguments => "too-many-arguments",
+                ValidationErrorKind::InvalidArgumentType => "invalid-argument-type",
+            };
+
+            diagnostics.push(Diagnostic {
+                range,
+                severity: Some(DiagnosticSeverity::ERROR),
+                code: Some(NumberOrString::String(code.to_string())),
+                code_description: None,
+                source: Some("cel".to_string()),
+                message: error.message.clone(),
+                related_information: None,
+                tags: None,
+                data: None,
+            });
+        }
+    }
+
     diagnostics
 }
 
