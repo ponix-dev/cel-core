@@ -1,0 +1,7 @@
+[package]
+name = "cel-parser"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+logos.workspace = true

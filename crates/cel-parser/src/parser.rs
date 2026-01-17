@@ -1,0 +1,803 @@
+//! CEL parser - hand-written recursive descent.
+
+use crate::ast::{BinaryOp, Expr, Spanned, SpannedExpr, UnaryOp};
+use crate::lexer::{Span, SpannedToken, Token};
+
+/// Parse error with span information.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParseError {
+    pub message: String,
+    pub span: Span,
+}
+
+/// Recursive descent parser for CEL expressions.
+pub struct Parser<'a> {
+    tokens: &'a [SpannedToken],
+    pos: usize,
+}
+
+impl<'a> Parser<'a> {
+    /// Create a new parser for the given token stream.
+    pub fn new(tokens: &'a [SpannedToken]) -> Self {
+        Self { tokens, pos: 0 }
+    }
+
+    // === Utility Methods ===
+
+    /// Peek at the current token without consuming it.
+    fn peek(&self) -> Option<&Token> {
+        self.tokens.get(self.pos).map(|(t, _)| t)
+    }
+
+    /// Get the span of the current token.
+    fn peek_span(&self) -> Span {
+        self.tokens
+            .get(self.pos)
+            .map(|(_, s)| s.clone())
+            .unwrap_or_else(|| self.eof_span())
+    }
+
+    /// Get the span representing end-of-input.
+    fn eof_span(&self) -> Span {
+        let end = self
+            .tokens
+            .last()
+            .map(|(_, s)| s.end)
+            .unwrap_or(0);
+        end..end
+    }
+
+    /// Advance to the next token, returning the current one.
+    fn advance(&mut self) -> Option<&SpannedToken> {
+        let token = self.tokens.get(self.pos);
+        if token.is_some() {
+            self.pos += 1;
+        }
+        token
+    }
+
+    /// Check if the current token matches the given token.
+    fn check(&self, token: &Token) -> bool {
+        self.peek().map_or(false, |t| t == token)
+    }
+
+    /// Consume the current token if it matches, returning true if consumed.
+    fn match_token(&mut self, token: &Token) -> bool {
+        if self.check(token) {
+            self.advance();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Expect a specific token, returning an error if not found.
+    fn expect(&mut self, token: &Token) -> Result<Span, ParseError> {
+        if self.check(token) {
+            let span = self.peek_span();
+            self.advance();
+            Ok(span)
+        } else {
+            Err(ParseError {
+                message: format!("expected '{}', found {:?}", token, self.peek()),
+                span: self.peek_span(),
+            })
+        }
+    }
+
+    /// Check if we've reached the end of the token stream.
+    pub fn at_end(&self) -> bool {
+        self.pos >= self.tokens.len()
+    }
+
+    // === Expression Parsing ===
+
+    /// Parse an expression (entry point).
+    pub fn parse_expr(&mut self) -> Result<SpannedExpr, ParseError> {
+        self.parse_ternary()
+    }
+
+    /// Parse ternary conditional: expr ? expr : expr
+    fn parse_ternary(&mut self) -> Result<SpannedExpr, ParseError> {
+        let cond = self.parse_or()?;
+
+        if self.match_token(&Token::Question) {
+            let then_expr = self.parse_expr()?;
+            self.expect(&Token::Colon)?;
+            let else_expr = self.parse_expr()?;
+            let span = cond.span.start..else_expr.span.end;
+
+            Ok(Spanned::new(
+                Expr::Ternary {
+                    cond: Box::new(cond),
+                    then_expr: Box::new(then_expr),
+                    else_expr: Box::new(else_expr),
+                },
+                span,
+            ))
+        } else {
+            Ok(cond)
+        }
+    }
+
+    /// Parse logical OR: expr || expr
+    fn parse_or(&mut self) -> Result<SpannedExpr, ParseError> {
+        let mut left = self.parse_and()?;
+
+        while self.match_token(&Token::Or) {
+            let right = self.parse_and()?;
+            let span = left.span.start..right.span.end;
+            left = Spanned::new(
+                Expr::Binary {
+                    op: BinaryOp::Or,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                },
+                span,
+            );
+        }
+
+        Ok(left)
+    }
+
+    /// Parse logical AND: expr && expr
+    fn parse_and(&mut self) -> Result<SpannedExpr, ParseError> {
+        let mut left = self.parse_relation()?;
+
+        while self.match_token(&Token::And) {
+            let right = self.parse_relation()?;
+            let span = left.span.start..right.span.end;
+            left = Spanned::new(
+                Expr::Binary {
+                    op: BinaryOp::And,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                },
+                span,
+            );
+        }
+
+        Ok(left)
+    }
+
+    /// Parse relational operators: == != < <= > >= in
+    fn parse_relation(&mut self) -> Result<SpannedExpr, ParseError> {
+        let mut left = self.parse_addition()?;
+
+        while let Some(op) = self.peek_relop() {
+            self.advance();
+            let right = self.parse_addition()?;
+            let span = left.span.start..right.span.end;
+            left = Spanned::new(
+                Expr::Binary {
+                    op,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                },
+                span,
+            );
+        }
+
+        Ok(left)
+    }
+
+    /// Check if the current token is a relational operator.
+    fn peek_relop(&self) -> Option<BinaryOp> {
+        match self.peek()? {
+            Token::EqEq => Some(BinaryOp::Eq),
+            Token::Ne => Some(BinaryOp::Ne),
+            Token::Lt => Some(BinaryOp::Lt),
+            Token::Le => Some(BinaryOp::Le),
+            Token::Gt => Some(BinaryOp::Gt),
+            Token::Ge => Some(BinaryOp::Ge),
+            Token::In => Some(BinaryOp::In),
+            _ => None,
+        }
+    }
+
+    /// Parse additive operators: + -
+    fn parse_addition(&mut self) -> Result<SpannedExpr, ParseError> {
+        let mut left = self.parse_mult()?;
+
+        loop {
+            let op = if self.match_token(&Token::Plus) {
+                BinaryOp::Add
+            } else if self.match_token(&Token::Minus) {
+                BinaryOp::Sub
+            } else {
+                break;
+            };
+
+            let right = self.parse_mult()?;
+            let span = left.span.start..right.span.end;
+            left = Spanned::new(
+                Expr::Binary {
+                    op,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                },
+                span,
+            );
+        }
+
+        Ok(left)
+    }
+
+    /// Parse multiplicative operators: * / %
+    fn parse_mult(&mut self) -> Result<SpannedExpr, ParseError> {
+        let mut left = self.parse_unary()?;
+
+        loop {
+            let op = if self.match_token(&Token::Star) {
+                BinaryOp::Mul
+            } else if self.match_token(&Token::Slash) {
+                BinaryOp::Div
+            } else if self.match_token(&Token::Percent) {
+                BinaryOp::Mod
+            } else {
+                break;
+            };
+
+            let right = self.parse_unary()?;
+            let span = left.span.start..right.span.end;
+            left = Spanned::new(
+                Expr::Binary {
+                    op,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                },
+                span,
+            );
+        }
+
+        Ok(left)
+    }
+
+    /// Parse unary operators: - !
+    fn parse_unary(&mut self) -> Result<SpannedExpr, ParseError> {
+        let start = self.peek_span().start;
+
+        if self.match_token(&Token::Minus) {
+            let expr = self.parse_unary()?;
+            let span = start..expr.span.end;
+            Ok(Spanned::new(
+                Expr::Unary {
+                    op: UnaryOp::Neg,
+                    expr: Box::new(expr),
+                },
+                span,
+            ))
+        } else if self.match_token(&Token::Not) {
+            let expr = self.parse_unary()?;
+            let span = start..expr.span.end;
+            Ok(Spanned::new(
+                Expr::Unary {
+                    op: UnaryOp::Not,
+                    expr: Box::new(expr),
+                },
+                span,
+            ))
+        } else {
+            self.parse_postfix()
+        }
+    }
+
+    /// Parse postfix operators: . [] () {}
+    fn parse_postfix(&mut self) -> Result<SpannedExpr, ParseError> {
+        let mut expr = self.parse_atom()?;
+
+        loop {
+            if self.check(&Token::LParen) {
+                // Function call
+                expr = self.parse_call(expr)?;
+            } else if self.check(&Token::LBracket) {
+                // Index
+                expr = self.parse_index(expr)?;
+            } else if self.check(&Token::Dot) {
+                // Member access
+                expr = self.parse_member(expr)?;
+            } else if self.check(&Token::LBrace) && self.is_type_expr(&expr) {
+                // Struct literal (only if expr is an ident or member chain)
+                expr = self.parse_struct_init(expr)?;
+            } else {
+                break;
+            }
+        }
+
+        Ok(expr)
+    }
+
+    /// Check if the expression can be used as a type name for struct literals.
+    fn is_type_expr(&self, expr: &SpannedExpr) -> bool {
+        matches!(
+            expr.node,
+            Expr::Ident(_) | Expr::RootIdent(_) | Expr::Member { .. }
+        )
+    }
+
+    /// Parse a function call: expr(args...)
+    fn parse_call(&mut self, callee: SpannedExpr) -> Result<SpannedExpr, ParseError> {
+        let start = callee.span.start;
+        self.expect(&Token::LParen)?;
+
+        let mut args = Vec::new();
+        if !self.check(&Token::RParen) {
+            args.push(self.parse_expr()?);
+            while self.match_token(&Token::Comma) {
+                if self.check(&Token::RParen) {
+                    break; // trailing comma
+                }
+                args.push(self.parse_expr()?);
+            }
+        }
+
+        let end_span = self.expect(&Token::RParen)?;
+
+        Ok(Spanned::new(
+            Expr::Call {
+                expr: Box::new(callee),
+                args,
+            },
+            start..end_span.end,
+        ))
+    }
+
+    /// Parse an index operation: expr[index]
+    fn parse_index(&mut self, base: SpannedExpr) -> Result<SpannedExpr, ParseError> {
+        let start = base.span.start;
+        self.expect(&Token::LBracket)?;
+        let index = self.parse_expr()?;
+        let end_span = self.expect(&Token::RBracket)?;
+
+        Ok(Spanned::new(
+            Expr::Index {
+                expr: Box::new(base),
+                index: Box::new(index),
+            },
+            start..end_span.end,
+        ))
+    }
+
+    /// Parse member access: expr.field
+    fn parse_member(&mut self, base: SpannedExpr) -> Result<SpannedExpr, ParseError> {
+        let start = base.span.start;
+        self.expect(&Token::Dot)?;
+
+        let (field, end) = match self.advance() {
+            Some((Token::Ident(name), span)) => (name.clone(), span.end),
+            other => {
+                return Err(ParseError {
+                    message: format!("expected identifier after '.', found {:?}", other.map(|(t, _)| t)),
+                    span: self.peek_span(),
+                });
+            }
+        };
+
+        Ok(Spanned::new(
+            Expr::Member {
+                expr: Box::new(base),
+                field,
+            },
+            start..end,
+        ))
+    }
+
+    /// Parse struct initialization: Type{field: value, ...}
+    fn parse_struct_init(&mut self, type_name: SpannedExpr) -> Result<SpannedExpr, ParseError> {
+        let start = type_name.span.start;
+        self.expect(&Token::LBrace)?;
+
+        let mut fields = Vec::new();
+        if !self.check(&Token::RBrace) {
+            fields.push(self.parse_struct_field()?);
+            while self.match_token(&Token::Comma) {
+                if self.check(&Token::RBrace) {
+                    break; // trailing comma
+                }
+                fields.push(self.parse_struct_field()?);
+            }
+        }
+
+        let end_span = self.expect(&Token::RBrace)?;
+
+        Ok(Spanned::new(
+            Expr::Struct {
+                type_name: Box::new(type_name),
+                fields,
+            },
+            start..end_span.end,
+        ))
+    }
+
+    /// Parse a struct field: name: value
+    fn parse_struct_field(&mut self) -> Result<(String, SpannedExpr), ParseError> {
+        let name = match self.advance() {
+            Some((Token::Ident(name), _)) => name.clone(),
+            other => {
+                return Err(ParseError {
+                    message: format!("expected field name, found {:?}", other.map(|(t, _)| t)),
+                    span: self.peek_span(),
+                });
+            }
+        };
+
+        self.expect(&Token::Colon)?;
+        let value = self.parse_expr()?;
+
+        Ok((name, value))
+    }
+
+    /// Parse an atom: literal, identifier, parenthesized expression, list, or map.
+    fn parse_atom(&mut self) -> Result<SpannedExpr, ParseError> {
+        let span = self.peek_span();
+
+        // Clone the token to avoid borrowing issues
+        let token = self.peek().cloned();
+
+        match token {
+            // Literals
+            Some(Token::Int(n)) => {
+                self.advance();
+                Ok(Spanned::new(Expr::Int(n), span))
+            }
+            Some(Token::UInt(n)) => {
+                self.advance();
+                Ok(Spanned::new(Expr::UInt(n), span))
+            }
+            Some(Token::Float(n)) => {
+                self.advance();
+                Ok(Spanned::new(Expr::Float(n), span))
+            }
+            Some(Token::String(s)) => {
+                self.advance();
+                Ok(Spanned::new(Expr::String(s), span))
+            }
+            Some(Token::Bytes(b)) => {
+                self.advance();
+                Ok(Spanned::new(Expr::Bytes(b), span))
+            }
+            Some(Token::True) => {
+                self.advance();
+                Ok(Spanned::new(Expr::Bool(true), span))
+            }
+            Some(Token::False) => {
+                self.advance();
+                Ok(Spanned::new(Expr::Bool(false), span))
+            }
+            Some(Token::Null) => {
+                self.advance();
+                Ok(Spanned::new(Expr::Null, span))
+            }
+
+            // Identifier
+            Some(Token::Ident(name)) => {
+                self.advance();
+                Ok(Spanned::new(Expr::Ident(name), span))
+            }
+
+            // Reserved word - error
+            Some(Token::Reserved(word)) => {
+                Err(ParseError {
+                    message: format!("'{}' is a reserved word and cannot be used as an identifier", word),
+                    span,
+                })
+            }
+
+            // Root identifier: .name
+            Some(Token::Dot) => {
+                self.advance();
+                match self.advance() {
+                    Some((Token::Ident(name), end_span)) => {
+                        Ok(Spanned::new(
+                            Expr::RootIdent(name.clone()),
+                            span.start..end_span.end,
+                        ))
+                    }
+                    _ => Err(ParseError {
+                        message: "expected identifier after '.'".to_string(),
+                        span: self.peek_span(),
+                    }),
+                }
+            }
+
+            // Parenthesized expression
+            Some(Token::LParen) => {
+                self.advance();
+                let expr = self.parse_expr()?;
+                self.expect(&Token::RParen)?;
+                Ok(expr)
+            }
+
+            // List literal
+            Some(Token::LBracket) => self.parse_list(),
+
+            // Map literal
+            Some(Token::LBrace) => self.parse_map(),
+
+            // Error cases
+            Some(token) => Err(ParseError {
+                message: format!("unexpected token: {:?}", token),
+                span,
+            }),
+
+            None => Err(ParseError {
+                message: "unexpected end of input".to_string(),
+                span: self.eof_span(),
+            }),
+        }
+    }
+
+    /// Parse a list literal: [expr, expr, ...]
+    fn parse_list(&mut self) -> Result<SpannedExpr, ParseError> {
+        let start = self.peek_span().start;
+        self.expect(&Token::LBracket)?;
+
+        let mut items = Vec::new();
+        if !self.check(&Token::RBracket) {
+            items.push(self.parse_expr()?);
+            while self.match_token(&Token::Comma) {
+                if self.check(&Token::RBracket) {
+                    break; // trailing comma
+                }
+                items.push(self.parse_expr()?);
+            }
+        }
+
+        let end_span = self.expect(&Token::RBracket)?;
+
+        Ok(Spanned::new(Expr::List(items), start..end_span.end))
+    }
+
+    /// Parse a map literal: {expr: expr, expr: expr, ...}
+    fn parse_map(&mut self) -> Result<SpannedExpr, ParseError> {
+        let start = self.peek_span().start;
+        self.expect(&Token::LBrace)?;
+
+        let mut entries = Vec::new();
+        if !self.check(&Token::RBrace) {
+            let key = self.parse_expr()?;
+            self.expect(&Token::Colon)?;
+            let value = self.parse_expr()?;
+            entries.push((key, value));
+
+            while self.match_token(&Token::Comma) {
+                if self.check(&Token::RBrace) {
+                    break; // trailing comma
+                }
+                let key = self.parse_expr()?;
+                self.expect(&Token::Colon)?;
+                let value = self.parse_expr()?;
+                entries.push((key, value));
+            }
+        }
+
+        let end_span = self.expect(&Token::RBrace)?;
+
+        Ok(Spanned::new(Expr::Map(entries), start..end_span.end))
+    }
+}
+
+/// Parse tokens into an AST.
+/// Returns the AST and any errors encountered.
+pub fn parse_tokens(tokens: &[SpannedToken]) -> (Option<SpannedExpr>, Vec<ParseError>) {
+    if tokens.is_empty() {
+        return (
+            None,
+            vec![ParseError {
+                message: "empty input".to_string(),
+                span: 0..0,
+            }],
+        );
+    }
+
+    let mut parser = Parser::new(tokens);
+    match parser.parse_expr() {
+        Ok(ast) => {
+            if parser.at_end() {
+                (Some(ast), vec![])
+            } else {
+                (
+                    Some(ast),
+                    vec![ParseError {
+                        message: "unexpected tokens after expression".to_string(),
+                        span: parser.peek_span(),
+                    }],
+                )
+            }
+        }
+        Err(e) => (None, vec![e]),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lexer::lex;
+
+    fn parse_expr(input: &str) -> SpannedExpr {
+        let tokens = lex(input).unwrap();
+        let (ast, errors) = parse_tokens(&tokens);
+        assert!(errors.is_empty(), "unexpected errors: {:?}", errors);
+        ast.expect("expected AST")
+    }
+
+    fn parse_expr_node(input: &str) -> Expr {
+        parse_expr(input).node
+    }
+
+    #[test]
+    fn parse_literals() {
+        assert_eq!(parse_expr_node("123"), Expr::Int(123));
+        assert_eq!(parse_expr_node("123u"), Expr::UInt(123));
+        assert_eq!(parse_expr_node("1.5"), Expr::Float(1.5));
+        assert_eq!(
+            parse_expr_node(r#""hello""#),
+            Expr::String("hello".to_string())
+        );
+        assert_eq!(parse_expr_node("true"), Expr::Bool(true));
+        assert_eq!(parse_expr_node("false"), Expr::Bool(false));
+        assert_eq!(parse_expr_node("null"), Expr::Null);
+    }
+
+    #[test]
+    fn parse_identifier() {
+        assert_eq!(parse_expr_node("foo"), Expr::Ident("foo".to_string()));
+    }
+
+    #[test]
+    fn parse_list() {
+        if let Expr::List(items) = parse_expr_node("[1, 2, 3]") {
+            assert_eq!(items.len(), 3);
+            assert_eq!(items[0].node, Expr::Int(1));
+            assert_eq!(items[1].node, Expr::Int(2));
+            assert_eq!(items[2].node, Expr::Int(3));
+        } else {
+            panic!("expected list");
+        }
+    }
+
+    #[test]
+    fn parse_map() {
+        if let Expr::Map(entries) = parse_expr_node(r#"{"a": 1, "b": 2}"#) {
+            assert_eq!(entries.len(), 2);
+            assert_eq!(entries[0].0.node, Expr::String("a".to_string()));
+            assert_eq!(entries[0].1.node, Expr::Int(1));
+        } else {
+            panic!("expected map");
+        }
+    }
+
+    #[test]
+    fn parse_binary_ops() {
+        if let Expr::Binary { op, left, right } = parse_expr_node("1 + 2") {
+            assert_eq!(op, BinaryOp::Add);
+            assert_eq!(left.node, Expr::Int(1));
+            assert_eq!(right.node, Expr::Int(2));
+        } else {
+            panic!("expected binary");
+        }
+    }
+
+    #[test]
+    fn parse_precedence() {
+        // 1 + 2 * 3 should parse as 1 + (2 * 3)
+        if let Expr::Binary { op, left, right } = parse_expr_node("1 + 2 * 3") {
+            assert_eq!(op, BinaryOp::Add);
+            assert_eq!(left.node, Expr::Int(1));
+            if let Expr::Binary {
+                op: inner_op,
+                left: inner_left,
+                right: inner_right,
+            } = &right.node
+            {
+                assert_eq!(*inner_op, BinaryOp::Mul);
+                assert_eq!(inner_left.node, Expr::Int(2));
+                assert_eq!(inner_right.node, Expr::Int(3));
+            } else {
+                panic!("expected inner binary");
+            }
+        } else {
+            panic!("expected binary");
+        }
+    }
+
+    #[test]
+    fn parse_associativity() {
+        // 1 - 2 - 3 should parse as (1 - 2) - 3 (left associative)
+        if let Expr::Binary { op, left, right } = parse_expr_node("1 - 2 - 3") {
+            assert_eq!(op, BinaryOp::Sub);
+            assert_eq!(right.node, Expr::Int(3));
+            if let Expr::Binary {
+                op: inner_op,
+                left: inner_left,
+                right: inner_right,
+            } = &left.node
+            {
+                assert_eq!(*inner_op, BinaryOp::Sub);
+                assert_eq!(inner_left.node, Expr::Int(1));
+                assert_eq!(inner_right.node, Expr::Int(2));
+            } else {
+                panic!("expected inner binary");
+            }
+        } else {
+            panic!("expected binary");
+        }
+    }
+
+    #[test]
+    fn parse_unary() {
+        if let Expr::Unary { op, expr } = parse_expr_node("-x") {
+            assert_eq!(op, UnaryOp::Neg);
+            assert_eq!(expr.node, Expr::Ident("x".to_string()));
+        } else {
+            panic!("expected unary");
+        }
+    }
+
+    #[test]
+    fn parse_member_access() {
+        if let Expr::Member { expr, field } = parse_expr_node("a.b") {
+            assert_eq!(expr.node, Expr::Ident("a".to_string()));
+            assert_eq!(field, "b");
+        } else {
+            panic!("expected member access");
+        }
+    }
+
+    #[test]
+    fn parse_index() {
+        if let Expr::Index { expr, index } = parse_expr_node("a[0]") {
+            assert_eq!(expr.node, Expr::Ident("a".to_string()));
+            assert_eq!(index.node, Expr::Int(0));
+        } else {
+            panic!("expected index");
+        }
+    }
+
+    #[test]
+    fn parse_call() {
+        if let Expr::Call { expr, args } = parse_expr_node("f(x, y)") {
+            assert_eq!(expr.node, Expr::Ident("f".to_string()));
+            assert_eq!(args.len(), 2);
+            assert_eq!(args[0].node, Expr::Ident("x".to_string()));
+            assert_eq!(args[1].node, Expr::Ident("y".to_string()));
+        } else {
+            panic!("expected call");
+        }
+    }
+
+    #[test]
+    fn parse_ternary() {
+        if let Expr::Ternary {
+            cond,
+            then_expr,
+            else_expr,
+        } = parse_expr_node("a ? b : c")
+        {
+            assert_eq!(cond.node, Expr::Ident("a".to_string()));
+            assert_eq!(then_expr.node, Expr::Ident("b".to_string()));
+            assert_eq!(else_expr.node, Expr::Ident("c".to_string()));
+        } else {
+            panic!("expected ternary");
+        }
+    }
+
+    #[test]
+    fn parse_chained_member_access() {
+        if let Expr::Member { expr, field } = parse_expr_node("a.b.c") {
+            assert_eq!(field, "c");
+            if let Expr::Member {
+                expr: inner_expr,
+                field: inner_field,
+            } = &expr.node
+            {
+                assert_eq!(inner_expr.node, Expr::Ident("a".to_string()));
+                assert_eq!(inner_field, "b");
+            } else {
+                panic!("expected inner member");
+            }
+        } else {
+            panic!("expected member access");
+        }
+    }
+}

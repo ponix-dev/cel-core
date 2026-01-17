@@ -1,0 +1,18 @@
+[tools]
+rust = "latest"
+
+[tasks.test]
+description = "Run all tests"
+run = "cargo test --workspace"
+
+[tasks."test:unit"]
+description = "Run unit tests only (lib tests)"
+run = "cargo test -p cel-lsp --lib"
+
+[tasks."test:integration"]
+description = "Run integration tests only"
+run = "cargo test -p cel-lsp --test '*'"
+
+[tasks.install]
+description = "Build and install cel-lsp binary to PATH"
+run = "cargo install --path crates/cel-lsp"
