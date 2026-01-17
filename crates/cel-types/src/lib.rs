@@ -10,7 +10,7 @@ mod checker;
 mod functions;
 mod types;
 
-pub use checker::{infer_literal_type, is_valid_method_call};
+pub use checker::{infer_literal_type, is_method_only, is_standalone_only, is_valid_method_call};
 pub use functions::{
     get_builtin, is_builtin, BuiltinFunction, FunctionKind, BUILTINS,
 };

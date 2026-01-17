@@ -38,6 +38,8 @@ fn validation_errors_to_diagnostics(
             let code = match error.kind {
                 ValidationErrorKind::UndefinedVariable => "undefined-variable",
                 ValidationErrorKind::UndefinedMethod => "undefined-method",
+                ValidationErrorKind::StandaloneCalledAsMethod => "standalone-as-method",
+                ValidationErrorKind::MethodCalledAsStandalone => "method-as-standalone",
             };
 
             Diagnostic {

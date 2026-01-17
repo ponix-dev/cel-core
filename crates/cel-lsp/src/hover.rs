@@ -82,6 +82,20 @@ fn format_validation_error(error: &ValidationError) -> String {
                 error.name
             )
         }
+        ValidationErrorKind::StandaloneCalledAsMethod => {
+            format!(
+                "**Error:** `{}` is a standalone function\n\n\
+                 Use `{}(...)` instead of calling it as a method.",
+                error.name, error.name
+            )
+        }
+        ValidationErrorKind::MethodCalledAsStandalone => {
+            format!(
+                "**Error:** `{}` must be called as a method\n\n\
+                 Use `receiver.{}(...)` instead of calling it standalone.",
+                error.name, error.name
+            )
+        }
     }
 }
 
