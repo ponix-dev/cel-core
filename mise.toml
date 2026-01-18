@@ -1,18 +1,42 @@
 [tools]
 rust = "latest"
+gh = "latest"
 
 [tasks.test]
-description = "Run all tests"
-run = "cargo test --workspace"
+description = "Run all tests (excludes conformance)"
+run = "cargo test --workspace --exclude cel-conformance"
 
 [tasks."test:unit"]
-description = "Run unit tests only (lib tests)"
-run = "cargo test -p cel-lsp --lib"
+description = "Run unit tests only (excludes conformance)"
+run = "cargo test --workspace --exclude cel-conformance --lib"
 
 [tasks."test:integration"]
-description = "Run integration tests only"
-run = "cargo test -p cel-lsp --test '*'"
+description = "Run integration tests only (excludes conformance)"
+run = "cargo test --workspace --exclude cel-conformance --test '*'"
 
 [tasks.install]
 description = "Build and install cel-lsp binary to PATH"
 run = "cargo install --path crates/cel-lsp"
+
+[tasks."conformance:setup"]
+description = "Initialize cel-spec submodule with sparse checkout"
+run = """
+git submodule update --init crates/cel-conformance/cel-spec
+cd crates/cel-conformance/cel-spec
+git sparse-checkout init --no-cone
+git sparse-checkout set /tests/simple/testdata/
+git read-tree -mu HEAD
+"""
+
+[tasks."conformance:update"]
+description = "Pull latest cel-spec test data"
+run = """
+cd crates/cel-conformance/cel-spec
+git fetch origin
+git checkout origin/master
+"""
+
+[tasks."conformance:test"]
+description = "Run CEL conformance tests (requires BSR authentication)"
+depends = ["conformance:setup"]
+run = "cargo test -p cel-conformance"

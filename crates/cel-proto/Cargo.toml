@@ -1,0 +1,9 @@
+[package]
+name = "cel-proto"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+cel-parser = { path = "../cel-parser" }
+google_cel-spec_community_neoeinstein-prost = { version = "0.5.0-20251103204847-96eff7bcf453.2", registry = "buf" }
+thiserror = "2"

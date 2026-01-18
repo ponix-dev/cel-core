@@ -1,0 +1,12 @@
+[package]
+name = "cel-conformance"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+cel-parser = { path = "../cel-parser" }
+cel-proto = { path = "../cel-proto" }
+google_cel-spec_community_neoeinstein-prost = { version = "0.5.0-20251103204847-96eff7bcf453.2", registry = "buf" }
+prost = "0.14"
+prost-reflect = { version = "0.16", features = ["text-format"] }
+protoc-wkt = "1.0"

@@ -1,0 +1,7 @@
+{
+    "buf.commandLine.path": "/Users/srall/.local/share/mise/shims/buf",
+    "go.goroot": "/Users/srall/.local/share/mise/installs/go/1.25.5",
+    "go.alternateTools": {
+        "go": "/Users/srall/.local/share/mise/shims/go"
+    }
+}
