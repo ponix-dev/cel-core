@@ -19,7 +19,6 @@ use std::collections::HashMap;
 
 /// Bidirectional converter between cel-parser AST and proto Expr.
 pub struct AstConverter {
-    next_id: i64,
     positions: HashMap<i64, i32>,
     line_offsets: Vec<i32>,
 }
@@ -29,16 +28,9 @@ impl AstConverter {
     pub fn new(source: &str) -> Self {
         let line_offsets = compute_line_offsets(source);
         Self {
-            next_id: 1,
             positions: HashMap::new(),
             line_offsets,
         }
-    }
-
-    fn next_id(&mut self) -> i64 {
-        let id = self.next_id;
-        self.next_id += 1;
-        id
     }
 
     /// Convert a cel-parser AST to a proto Expr.
@@ -46,7 +38,7 @@ impl AstConverter {
         &mut self,
         spanned: &SpannedExpr,
     ) -> google_cel_spec_community_neoeinstein_prost::cel::expr::Expr {
-        let id = self.next_id();
+        let id = spanned.id;
         // Record position as byte offset from start
         self.positions.insert(id, spanned.span.start as i32);
 
@@ -92,7 +84,8 @@ impl AstConverter {
                 let converted: Vec<Entry> = entries
                     .iter()
                     .map(|(k, v)| {
-                        let entry_id = self.next_id();
+                        // Use key's ID for entry ID
+                        let entry_id = k.id;
                         self.positions.insert(entry_id, k.span.start as i32);
                         Entry {
                             id: entry_id,
@@ -171,7 +164,8 @@ impl AstConverter {
                 let converted: Vec<Entry> = fields
                     .iter()
                     .map(|(name, value)| {
-                        let entry_id = self.next_id();
+                        // Use value's ID for entry ID
+                        let entry_id = value.id;
                         self.positions.insert(entry_id, value.span.start as i32);
                         Entry {
                             id: entry_id,
@@ -211,7 +205,7 @@ impl AstConverter {
     /// Convert a proto Expr back to a cel-parser AST.
     ///
     /// Note: Proto only stores start offsets, so spans will be zero-length
-    /// at the recorded position.
+    /// at the recorded position. IDs from the proto are preserved.
     pub fn expr_to_ast(
         &self,
         expr: &google_cel_spec_community_neoeinstein_prost::cel::expr::Expr,
@@ -219,6 +213,7 @@ impl AstConverter {
     ) -> Result<SpannedExpr, ConversionError> {
         let pos = get_position(source_info, expr.id).unwrap_or(0);
         let span = pos..pos; // Zero-length span at recorded position
+        let id = expr.id; // Preserve ID from proto
 
         let node = match &expr.expr_kind {
             None => Expr::Error,
@@ -252,7 +247,7 @@ impl AstConverter {
             },
         };
 
-        Ok(Spanned::new(node, span))
+        Ok(Spanned::new(id, node, span))
     }
 
     fn const_to_ast(&self, expr_id: i64, c: &Constant) -> Result<Expr, ConversionError> {
@@ -354,7 +349,9 @@ impl AstConverter {
             // Method call: target.function(args)
             let receiver = self.expr_to_ast(target, source_info)?;
             let pos = get_position(source_info, expr_id).unwrap_or(0);
+            // Use 0 for synthetic nodes created during proto->AST conversion
             let call_expr = Spanned::new(
+                0,
                 Expr::Member {
                     expr: Box::new(receiver),
                     field: function.clone(),
@@ -368,7 +365,8 @@ impl AstConverter {
         } else {
             // Global function call: function(args)
             let pos = get_position(source_info, expr_id).unwrap_or(0);
-            let ident_expr = Spanned::new(Expr::Ident(function.clone()), pos..pos);
+            // Use 0 for synthetic nodes created during proto->AST conversion
+            let ident_expr = Spanned::new(0, Expr::Ident(function.clone()), pos..pos);
             Ok(Expr::Call {
                 expr: Box::new(ident_expr),
                 args,
@@ -457,6 +455,7 @@ fn extract_type_name(expr: &SpannedExpr) -> String {
 }
 
 /// Build a type name expression from a dotted string.
+/// Uses ID 0 for synthetic nodes created during proto->AST conversion.
 fn build_type_name_expr(name: &str, pos: usize) -> SpannedExpr {
     let span = pos..pos;
 
@@ -464,12 +463,13 @@ fn build_type_name_expr(name: &str, pos: usize) -> SpannedExpr {
         // Root-scoped type
         let parts: Vec<&str> = rest.split('.').collect();
         if parts.len() == 1 {
-            Spanned::new(Expr::RootIdent(parts[0].to_string()), span)
+            Spanned::new(0, Expr::RootIdent(parts[0].to_string()), span)
         } else {
             // .a.b.c -> Member(Member(RootIdent(a), b), c)
-            let mut expr = Spanned::new(Expr::RootIdent(parts[0].to_string()), span.clone());
+            let mut expr = Spanned::new(0, Expr::RootIdent(parts[0].to_string()), span.clone());
             for part in &parts[1..] {
                 expr = Spanned::new(
+                    0,
                     Expr::Member {
                         expr: Box::new(expr),
                         field: (*part).to_string(),
@@ -482,12 +482,13 @@ fn build_type_name_expr(name: &str, pos: usize) -> SpannedExpr {
     } else {
         let parts: Vec<&str> = name.split('.').collect();
         if parts.len() == 1 {
-            Spanned::new(Expr::Ident(parts[0].to_string()), span)
+            Spanned::new(0, Expr::Ident(parts[0].to_string()), span)
         } else {
             // a.b.c -> Member(Member(Ident(a), b), c)
-            let mut expr = Spanned::new(Expr::Ident(parts[0].to_string()), span.clone());
+            let mut expr = Spanned::new(0, Expr::Ident(parts[0].to_string()), span.clone());
             for part in &parts[1..] {
                 expr = Spanned::new(
+                    0,
                     Expr::Member {
                         expr: Box::new(expr),
                         field: (*part).to_string(),
@@ -506,7 +507,8 @@ mod tests {
     use cel_parser::{BinaryOp, UnaryOp};
 
     fn make_ast(node: Expr) -> SpannedExpr {
-        Spanned::new(node, 0..1)
+        // Use ID 0 for test nodes since exact ID doesn't matter for roundtrip tests
+        Spanned::new(0, node, 0..1)
     }
 
     fn roundtrip(ast: &SpannedExpr) -> SpannedExpr {

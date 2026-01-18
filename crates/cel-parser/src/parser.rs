@@ -14,12 +14,25 @@ pub struct ParseError {
 pub struct Parser<'a> {
     tokens: &'a [SpannedToken],
     pos: usize,
+    /// Counter for generating unique node IDs (starts at 1)
+    next_id: i64,
 }
 
 impl<'a> Parser<'a> {
     /// Create a new parser for the given token stream.
     pub fn new(tokens: &'a [SpannedToken]) -> Self {
-        Self { tokens, pos: 0 }
+        Self {
+            tokens,
+            pos: 0,
+            next_id: 1,
+        }
+    }
+
+    /// Allocate the next unique node ID.
+    fn next_id(&mut self) -> i64 {
+        let id = self.next_id;
+        self.next_id += 1;
+        id
     }
 
     // === Utility Methods ===
@@ -108,6 +121,7 @@ impl<'a> Parser<'a> {
             let span = cond.span.start..else_expr.span.end;
 
             Ok(Spanned::new(
+                self.next_id(),
                 Expr::Ternary {
                     cond: Box::new(cond),
                     then_expr: Box::new(then_expr),
@@ -128,6 +142,7 @@ impl<'a> Parser<'a> {
             let right = self.parse_and()?;
             let span = left.span.start..right.span.end;
             left = Spanned::new(
+                self.next_id(),
                 Expr::Binary {
                     op: BinaryOp::Or,
                     left: Box::new(left),
@@ -148,6 +163,7 @@ impl<'a> Parser<'a> {
             let right = self.parse_relation()?;
             let span = left.span.start..right.span.end;
             left = Spanned::new(
+                self.next_id(),
                 Expr::Binary {
                     op: BinaryOp::And,
                     left: Box::new(left),
@@ -169,6 +185,7 @@ impl<'a> Parser<'a> {
             let right = self.parse_addition()?;
             let span = left.span.start..right.span.end;
             left = Spanned::new(
+                self.next_id(),
                 Expr::Binary {
                     op,
                     left: Box::new(left),
@@ -211,6 +228,7 @@ impl<'a> Parser<'a> {
             let right = self.parse_mult()?;
             let span = left.span.start..right.span.end;
             left = Spanned::new(
+                self.next_id(),
                 Expr::Binary {
                     op,
                     left: Box::new(left),
@@ -241,6 +259,7 @@ impl<'a> Parser<'a> {
             let right = self.parse_unary()?;
             let span = left.span.start..right.span.end;
             left = Spanned::new(
+                self.next_id(),
                 Expr::Binary {
                     op,
                     left: Box::new(left),
@@ -261,6 +280,7 @@ impl<'a> Parser<'a> {
             let expr = self.parse_unary()?;
             let span = start..expr.span.end;
             Ok(Spanned::new(
+                self.next_id(),
                 Expr::Unary {
                     op: UnaryOp::Neg,
                     expr: Box::new(expr),
@@ -271,6 +291,7 @@ impl<'a> Parser<'a> {
             let expr = self.parse_unary()?;
             let span = start..expr.span.end;
             Ok(Spanned::new(
+                self.next_id(),
                 Expr::Unary {
                     op: UnaryOp::Not,
                     expr: Box::new(expr),
@@ -334,6 +355,7 @@ impl<'a> Parser<'a> {
         let end_span = self.expect(&Token::RParen)?;
 
         Ok(Spanned::new(
+            self.next_id(),
             Expr::Call {
                 expr: Box::new(callee),
                 args,
@@ -350,6 +372,7 @@ impl<'a> Parser<'a> {
         let end_span = self.expect(&Token::RBracket)?;
 
         Ok(Spanned::new(
+            self.next_id(),
             Expr::Index {
                 expr: Box::new(base),
                 index: Box::new(index),
@@ -374,6 +397,7 @@ impl<'a> Parser<'a> {
         };
 
         Ok(Spanned::new(
+            self.next_id(),
             Expr::Member {
                 expr: Box::new(base),
                 field,
@@ -401,6 +425,7 @@ impl<'a> Parser<'a> {
         let end_span = self.expect(&Token::RBrace)?;
 
         Ok(Spanned::new(
+            self.next_id(),
             Expr::Struct {
                 type_name: Box::new(type_name),
                 fields,
@@ -438,41 +463,41 @@ impl<'a> Parser<'a> {
             // Literals
             Some(Token::Int(n)) => {
                 self.advance();
-                Ok(Spanned::new(Expr::Int(n), span))
+                Ok(Spanned::new(self.next_id(), Expr::Int(n), span))
             }
             Some(Token::UInt(n)) => {
                 self.advance();
-                Ok(Spanned::new(Expr::UInt(n), span))
+                Ok(Spanned::new(self.next_id(), Expr::UInt(n), span))
             }
             Some(Token::Float(n)) => {
                 self.advance();
-                Ok(Spanned::new(Expr::Float(n), span))
+                Ok(Spanned::new(self.next_id(), Expr::Float(n), span))
             }
             Some(Token::String(s)) => {
                 self.advance();
-                Ok(Spanned::new(Expr::String(s), span))
+                Ok(Spanned::new(self.next_id(), Expr::String(s), span))
             }
             Some(Token::Bytes(b)) => {
                 self.advance();
-                Ok(Spanned::new(Expr::Bytes(b), span))
+                Ok(Spanned::new(self.next_id(), Expr::Bytes(b), span))
             }
             Some(Token::True) => {
                 self.advance();
-                Ok(Spanned::new(Expr::Bool(true), span))
+                Ok(Spanned::new(self.next_id(), Expr::Bool(true), span))
             }
             Some(Token::False) => {
                 self.advance();
-                Ok(Spanned::new(Expr::Bool(false), span))
+                Ok(Spanned::new(self.next_id(), Expr::Bool(false), span))
             }
             Some(Token::Null) => {
                 self.advance();
-                Ok(Spanned::new(Expr::Null, span))
+                Ok(Spanned::new(self.next_id(), Expr::Null, span))
             }
 
             // Identifier
             Some(Token::Ident(name)) => {
                 self.advance();
-                Ok(Spanned::new(Expr::Ident(name), span))
+                Ok(Spanned::new(self.next_id(), Expr::Ident(name), span))
             }
 
             // Reserved word - error
@@ -488,9 +513,12 @@ impl<'a> Parser<'a> {
                 self.advance();
                 match self.advance() {
                     Some((Token::Ident(name), end_span)) => {
+                        let name = name.clone();
+                        let end = end_span.end;
                         Ok(Spanned::new(
-                            Expr::RootIdent(name.clone()),
-                            span.start..end_span.end,
+                            self.next_id(),
+                            Expr::RootIdent(name),
+                            span.start..end,
                         ))
                     }
                     _ => Err(ParseError {
@@ -545,7 +573,7 @@ impl<'a> Parser<'a> {
 
         let end_span = self.expect(&Token::RBracket)?;
 
-        Ok(Spanned::new(Expr::List(items), start..end_span.end))
+        Ok(Spanned::new(self.next_id(), Expr::List(items), start..end_span.end))
     }
 
     /// Parse a map literal: {expr: expr, expr: expr, ...}
@@ -573,7 +601,7 @@ impl<'a> Parser<'a> {
 
         let end_span = self.expect(&Token::RBrace)?;
 
-        Ok(Spanned::new(Expr::Map(entries), start..end_span.end))
+        Ok(Spanned::new(self.next_id(), Expr::Map(entries), start..end_span.end))
     }
 }
 
@@ -798,6 +826,80 @@ mod tests {
             }
         } else {
             panic!("expected member access");
+        }
+    }
+
+    // === ID Assignment Tests ===
+
+    #[test]
+    fn ids_start_at_one() {
+        let ast = parse_expr("123");
+        assert_eq!(ast.id, 1);
+    }
+
+    #[test]
+    fn ids_are_unique_in_expression() {
+        let ast = parse_expr("1 + 2");
+
+        // Collect all IDs from the expression tree
+        fn collect_ids(expr: &SpannedExpr, ids: &mut Vec<i64>) {
+            ids.push(expr.id);
+            match &expr.node {
+                Expr::Binary { left, right, .. } => {
+                    collect_ids(left, ids);
+                    collect_ids(right, ids);
+                }
+                Expr::Unary { expr, .. } => {
+                    collect_ids(expr, ids);
+                }
+                Expr::List(elements) => {
+                    for e in elements {
+                        collect_ids(e, ids);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let mut ids = Vec::new();
+        collect_ids(&ast, &mut ids);
+
+        // All IDs should be unique
+        let mut sorted = ids.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(ids.len(), sorted.len(), "IDs should be unique");
+    }
+
+    #[test]
+    fn ids_reset_per_parse() {
+        // First parse
+        let ast1 = parse_expr("123");
+
+        // Second parse (separate call)
+        let ast2 = parse_expr("456");
+
+        // Both should start at 1 since each parse gets a fresh counter
+        assert_eq!(ast1.id, 1);
+        assert_eq!(ast2.id, 1);
+    }
+
+    #[test]
+    fn ids_are_depth_first() {
+        // For "1 + 2", the parser creates nodes in this order:
+        // 1. Parse left operand (1) -> ID 1
+        // 2. Parse right operand (2) -> ID 2
+        // 3. Create binary node -> ID 3
+        let ast = parse_expr("1 + 2");
+
+        if let Expr::Binary { left, right, .. } = &ast.node {
+            // Child nodes should have lower IDs than parent
+            assert!(left.id < ast.id, "left child should have lower ID than parent");
+            assert!(right.id < ast.id, "right child should have lower ID than parent");
+            // Left should be parsed before right
+            assert!(left.id < right.id, "left child should have lower ID than right child");
+        } else {
+            panic!("expected binary");
         }
     }
 }

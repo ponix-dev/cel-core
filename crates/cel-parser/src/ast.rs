@@ -4,16 +4,18 @@
 /// Uses byte offsets into the source string.
 pub type Span = std::ops::Range<usize>;
 
-/// AST node with source location.
+/// AST node with source location and unique ID.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Spanned<T> {
+    /// Unique identifier for this node (1-indexed, assigned during parsing)
+    pub id: i64,
     pub node: T,
     pub span: Span,
 }
 
 impl<T> Spanned<T> {
-    pub fn new(node: T, span: Span) -> Self {
-        Self { node, span }
+    pub fn new(id: i64, node: T, span: Span) -> Self {
+        Self { id, node, span }
     }
 }
 
