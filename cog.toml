@@ -13,3 +13,10 @@ path = "CHANGELOG.md"
 [packages.cel-core]
 path = "."
 public_api = false
+
+# Configure commit types that trigger version bumps
+[commit_types]
+feat = { changelog_title = "Features", bump_minor = true }
+fix = { changelog_title = "Bug Fixes", bump_patch = true }
+refactor = { changelog_title = "Refactoring", bump_patch = true }
+perf = { changelog_title = "Performance", bump_patch = true }
