@@ -1,10 +1,10 @@
 ---
-description: Create an implementation plan for the next CEL feature based on the roadmap
+description: Start implementation of the next CEL feature from the roadmap
 ---
 
-# CEL Implementation Planning
+# CEL Implementation: Start Feature
 
-You are planning the next step in our CEL implementation. Our goal is to achieve full parity with cel-go, the reference implementation.
+You are beginning work on the next step in our CEL implementation. Our goal is to achieve full parity with cel-go, the reference implementation.
 
 ## Context
 
@@ -40,14 +40,6 @@ Before beginning any implementation work, you MUST create a feature branch for t
    ```bash
    git checkout -b {short-description}
    ```
-
-3. **Commit incrementally** as you complete logical units of work.
-
-4. **Commit message guidelines**:
-   - Follow conventional commit format: `type: short description`
-   - Types: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`
-   - Keep messages short and concise
-   - Do NOT reference Claude in commit messages (PRs can reference Claude)
 
 ## Planning Process
 
@@ -89,77 +81,6 @@ Your plan should include:
 - If refactoring is needed to align with cel-go, do that first
 - Always check conformance tests for acceptance criteria
 - Consider how this change affects the LSP functionality
-
-## Handoff Protocol
-
-After completing implementation work, update `.claude/handoff.md` with:
-
-```markdown
-# Roadmap Handoff
-
-## Last Updated
-[Date]
-
-## Just Completed
-- [x] Milestone item that was checked off
-- Summary of what was implemented
-- Key files added/modified
-- Any notable decisions or trade-offs made
-
-## Next Up
-- [ ] Next milestone item to tackle
-- Why this is the logical next step
-- Any prerequisites or dependencies
-- Potential challenges to watch for
-
-## Open Questions
-- Any unresolved design decisions
-- Areas that may need revisiting
-- Technical debt introduced (if any)
-```
-
-This handoff ensures continuity between planning sessions and helps pick up where we left off.
-
-## Pull Request Creation
-
-After implementation is complete and the user has confirmed the changes look good, create a pull request:
-
-1. **Ensure all changes are committed** on the feature branch
-
-2. **Push the branch to remote**:
-   ```bash
-   git push -u origin {branch-name}
-   ```
-
-3. **Create the PR** with a summary of changes:
-   - Title: Brief description of the feature (e.g., "feat: add macro expansion to parser")
-   - Body should include:
-     - **Summary**: What was implemented and why
-     - **Changes**: Key files and modifications
-     - **Testing**: How the changes were verified
-     - **Roadmap Reference**: Link to the section in ROADMAP.md
-
-4. **PR Template**:
-   ```markdown
-   ## Summary
-   Implements section {X.Y} ({Section Title}) from the CEL implementation roadmap.
-
-   [1-2 sentence description of what was added/changed]
-
-   ## Changes
-   - [Key change 1]
-   - [Key change 2]
-   - [Key change 3]
-
-   ## Testing
-   - [How changes were tested]
-   - [Conformance tests added/passing]
-
-   ## Roadmap
-   See ROADMAP.md section {X.Y} for full context.
-   ```
-
-5. **Wait for user confirmation** before creating the PR - ask the user if they want to proceed with PR creation.
 
 ## User Request
 
