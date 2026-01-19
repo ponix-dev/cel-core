@@ -3,6 +3,7 @@ rust = "latest"
 gh = "latest"
 buf = "latest"
 cocogitto = "latest"
+"cargo:cargo-edit" = "latest"
 
 [tasks.test]
 description = "Run all tests (excludes conformance)"

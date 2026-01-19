@@ -1,12 +1,15 @@
-# Packages in the workspace (for version bumping)
-[packages.cel-core-parser]
-path = "crates/cel-core-parser"
+# Skip untracked files check (for submodules)
+skip_untracked = true
 
-[packages.cel-core-proto]
-path = "crates/cel-core-proto"
-
-[packages.cel-core-lsp]
-path = "crates/cel-core-lsp"
+# Update workspace version in Cargo.toml before creating bump commit
+pre_bump_hooks = [
+    "mise exec -- cargo set-version {{version}}",
+]
 
 [changelog]
 path = "CHANGELOG.md"
+
+# Define the workspace root as a package
+[packages.cel-core]
+path = "."
+public_api = false
