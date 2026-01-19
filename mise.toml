@@ -4,6 +4,8 @@ gh = "latest"
 buf = "latest"
 cocogitto = "latest"
 "cargo:cargo-edit" = "latest"
+"cargo:protoc-gen-prost-crate" = "latest"
+"cargo:protoc-gen-prost" = "latest"
 
 [tasks.test]
 description = "Run all tests (excludes conformance)"

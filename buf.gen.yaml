@@ -1,7 +1,12 @@
-version: v2
-plugins:
-  - remote: buf.build/community/neoeinstein-prost
-    out: crates/cel-core-proto/src/gen
-    opt:
-      - bytes=.
-      - file_descriptor_set
+  version: v2
+  plugins:
+    - local: protoc-gen-prost
+      out: crates/cel-core-proto/src/gen
+      opt:
+        - bytes=.
+        - file_descriptor_set
+    - local: protoc-gen-prost-crate
+      out: crates/cel-core-proto/src/gen
+      strategy: all
+      opt:
+        - no_features
