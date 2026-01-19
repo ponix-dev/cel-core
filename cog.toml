@@ -6,7 +6,7 @@ tag_prefix = "v"
 
 # Update workspace version in Cargo.toml before creating bump commit
 pre_bump_hooks = [
-    "mise exec -- cargo set-version {{version}}",
+    "sed -i '' 's/version = \"[0-9]*\\.[0-9]*\\.[0-9]*\"/version = \"{{version}}\"/g' Cargo.toml",
 ]
 
 [changelog]
