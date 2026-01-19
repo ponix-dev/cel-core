@@ -340,6 +340,26 @@ impl<'a> TokenCollector<'a> {
                 // Closing brace
                 self.push_punctuation(expr.span.end - 1, 1);
             }
+            Expr::Comprehension {
+                iter_range,
+                accu_init,
+                loop_condition,
+                loop_step,
+                result,
+                ..
+            } => {
+                // Comprehensions are synthetic - visit sub-expressions
+                // Note: The original macro call is in source_info.macro_calls for IDE display
+                self.visit_expr(iter_range);
+                self.visit_expr(accu_init);
+                self.visit_expr(loop_condition);
+                self.visit_expr(loop_step);
+                self.visit_expr(result);
+            }
+            Expr::MemberTestOnly { expr: inner, .. } => {
+                // MemberTestOnly is synthetic from has() - visit inner expression
+                self.visit_expr(inner);
+            }
             Expr::Error => {
                 // Skip error nodes
             }

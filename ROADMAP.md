@@ -103,9 +103,9 @@ The evaluator walks the compiled program with concrete variable values and produ
 
 **Goal:** Ensure parser output can support all downstream phases.
 
-#### 1.1 Node IDs in AST
+#### 1.1 Node IDs in AST ✅
 
-Currently, node IDs are assigned during proto conversion. For proper checked expression support, we should track IDs from parsing:
+~~Currently, node IDs are assigned during proto conversion.~~ Node IDs are now assigned during parsing via `Parser.next_id`. Each AST node has a unique `id: i64` field:
 
 ```rust
 // Current
@@ -124,21 +124,15 @@ pub struct Spanned<T> {
 
 This enables the `type_map` and `reference_map` in `CheckedExpr` to reference our AST nodes directly.
 
-#### 1.2 Macro Expansion
+#### 1.2 Macro Expansion ✅
 
-CEL macros (`all`, `exists`, `exists_one`, `map`, `filter`) are syntactic sugar that expands to `Comprehension` nodes in the proto format. We need to decide:
+CEL macros (`all`, `exists`, `exists_one`, `map`, `filter`) are now expanded during parsing via a configurable `MacroRegistry`:
 
-**Option A:** Expand macros during parsing (like cel-go)
-- Parser recognizes macro calls and produces `Comprehension` AST nodes
-- Simpler downstream processing
-- Matches cel-spec proto structure
-
-**Option B:** Keep macros as `Call` nodes, expand during checking
-- Parser stays simpler
-- More flexibility for LSP features (show original syntax)
-- Requires expansion before evaluation
-
-**Recommendation:** Option A - expand during parsing to match cel-go behavior.
+- **Option A was implemented:** Macros expand to `Comprehension` nodes at parse time
+- `MacroRegistry` keys macros by `name:arg_count:is_receiver` (matching cel-go)
+- 16 standard macros: `has`, `all`, `exists`, `exists_one`, `map`, `filter`, `transformList`, `transformMap`
+- `ParseOptions` and `parse_with_options()` enable custom macro configuration
+- `macro_calls` map preserved for IDE features (hover shows original syntax)
 
 #### 1.3 Optional Syntax Support
 
@@ -395,7 +389,7 @@ Alternatively, `cel-core-types`, `cel-core-checker`, and `cel-core-eval` could b
 - [ ] Pass: string and collection conformance tests
 
 ### Milestone 3: Type Checking
-- [ ] Node IDs in parser
+- [x] Node IDs in parser
 - [ ] Parameterized types
 - [ ] Type inference through expressions
 - [ ] Function overload resolution
@@ -403,10 +397,10 @@ Alternatively, `cel-core-types`, `cel-core-checker`, and `cel-core-eval` could b
 - [ ] Integration with LSP
 
 ### Milestone 4: Macros and Comprehensions
-- [ ] Macro expansion in parser
+- [x] Macro expansion in parser
 - [ ] Comprehension evaluation
-- [ ] `all`, `exists`, `exists_one`, `map`, `filter`
-- [ ] Pass: comprehension conformance tests
+- [x] `all`, `exists`, `exists_one`, `map`, `filter`
+- [x] Pass: comprehension conformance tests
 
 ### Milestone 5: Full Conformance
 - [ ] Timestamp and duration support

@@ -59,6 +59,19 @@ fn find_node_containing_offset<'a>(ast: &'a SpannedExpr, offset: usize) -> Optio
             .or_else(|| args.iter().find_map(|arg| find_node_containing_offset(arg, offset))),
         Expr::Struct { type_name, fields } => find_node_containing_offset(type_name, offset)
             .or_else(|| fields.iter().find_map(|(_, v)| find_node_containing_offset(v, offset))),
+        Expr::Comprehension {
+            iter_range,
+            accu_init,
+            loop_condition,
+            loop_step,
+            result,
+            ..
+        } => find_node_containing_offset(iter_range, offset)
+            .or_else(|| find_node_containing_offset(accu_init, offset))
+            .or_else(|| find_node_containing_offset(loop_condition, offset))
+            .or_else(|| find_node_containing_offset(loop_step, offset))
+            .or_else(|| find_node_containing_offset(result, offset)),
+        Expr::MemberTestOnly { expr, .. } => find_node_containing_offset(expr, offset),
         Expr::Error => None,
     };
 

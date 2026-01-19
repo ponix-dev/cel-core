@@ -39,7 +39,7 @@ pub use source_info::{build_source_info, compute_line_offsets, get_position};
 // Re-export proto types for convenience
 pub use gen::cel::expr::{CheckedExpr, Constant, Expr, ParsedExpr, SourceInfo, Type, Value};
 
-use cel_core_parser::SpannedExpr;
+use cel_core_parser::{MacroCalls, SpannedExpr};
 
 /// Convert a cel-parser AST to a proto ParsedExpr.
 ///
@@ -58,6 +58,41 @@ pub fn to_parsed_expr(ast: &SpannedExpr, source: &str) -> ParsedExpr {
     let mut converter = AstConverter::new(source);
     let expr = converter.ast_to_expr(ast);
     converter.into_parsed_expr(expr)
+}
+
+/// Convert a cel-parser AST to a proto ParsedExpr, including macro call information.
+///
+/// This is similar to `to_parsed_expr`, but also includes the `macro_calls` map
+/// in the `SourceInfo` which records the original call expressions before macro expansion.
+/// This is useful for IDE features that need to show the original source form.
+///
+/// # Arguments
+///
+/// * `ast` - The expanded AST (after macro expansion)
+/// * `source` - The original source text
+/// * `macro_calls` - Map of comprehension IDs to original call expressions
+///
+/// # Returns
+///
+/// A `ParsedExpr` containing the converted expression and source info with macro_calls.
+pub fn to_parsed_expr_with_macros(
+    ast: &SpannedExpr,
+    source: &str,
+    macro_calls: &MacroCalls,
+) -> ParsedExpr {
+    let mut converter = AstConverter::new(source);
+    let expr = converter.ast_to_expr(ast);
+
+    // Convert macro_calls from parser AST format to proto format
+    let proto_macro_calls: std::collections::HashMap<i64, gen::cel::expr::Expr> = macro_calls
+        .iter()
+        .map(|(id, call_expr)| {
+            let mut call_converter = AstConverter::new(source);
+            (*id, call_converter.ast_to_expr(call_expr))
+        })
+        .collect();
+
+    converter.into_parsed_expr_with_macros(expr, proto_macro_calls)
 }
 
 /// Convert a proto ParsedExpr back to a cel-parser AST.

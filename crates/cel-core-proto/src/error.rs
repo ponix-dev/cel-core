@@ -20,8 +20,4 @@ pub enum ConversionError {
     /// A constant value is invalid or malformed.
     #[error("expr {expr_id}: invalid constant: {message}")]
     InvalidConstant { expr_id: i64, message: String },
-
-    /// Comprehension expressions are not yet supported.
-    #[error("expr {expr_id}: comprehension expressions are not supported")]
-    UnsupportedComprehension { expr_id: i64 },
 }
