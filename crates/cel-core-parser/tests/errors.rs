@@ -91,7 +91,7 @@ fn error_recovery_produces_partial_ast() {
         // If we got an AST, check it's a list
         if let Expr::List(items) = ast.node {
             // One of the items should be Expr::Error due to recovery
-            let has_error = items.iter().any(|item| matches!(item.node, Expr::Error));
+            let has_error = items.iter().any(|item| matches!(item.expr.node, Expr::Error));
             assert!(has_error || items.len() < 3, "should have error node or fewer items due to recovery");
         }
     }

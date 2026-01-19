@@ -5,7 +5,7 @@ mod lexer;
 pub mod macros;
 mod parser;
 
-pub use ast::{BinaryOp, Expr, Span, Spanned, SpannedExpr, UnaryOp};
+pub use ast::{BinaryOp, Expr, ListElement, MapEntry, Span, Spanned, SpannedExpr, StructField, UnaryOp};
 pub use macros::{ArgCount, Macro, MacroExpander, MacroExpansion, MacroRegistry, MacroStyle, MacroContext};
 pub use parser::MacroCalls;
 

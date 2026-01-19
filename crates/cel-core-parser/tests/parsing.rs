@@ -122,9 +122,12 @@ fn parse_empty_list() {
 fn parse_list_literals() {
     if let Expr::List(items) = common::assert_parses("[1, 2, 3]").node {
         assert_eq!(items.len(), 3);
-        assert_eq!(items[0].node, Expr::Int(1));
-        assert_eq!(items[1].node, Expr::Int(2));
-        assert_eq!(items[2].node, Expr::Int(3));
+        assert_eq!(items[0].expr.node, Expr::Int(1));
+        assert_eq!(items[1].expr.node, Expr::Int(2));
+        assert_eq!(items[2].expr.node, Expr::Int(3));
+        assert!(!items[0].optional);
+        assert!(!items[1].optional);
+        assert!(!items[2].optional);
     } else {
         panic!("expected list");
     }
@@ -152,10 +155,12 @@ fn parse_empty_map() {
 fn parse_map_literals() {
     if let Expr::Map(entries) = common::assert_parses(r#"{"a": 1, "b": 2}"#).node {
         assert_eq!(entries.len(), 2);
-        assert_eq!(entries[0].0.node, Expr::String("a".to_string()));
-        assert_eq!(entries[0].1.node, Expr::Int(1));
-        assert_eq!(entries[1].0.node, Expr::String("b".to_string()));
-        assert_eq!(entries[1].1.node, Expr::Int(2));
+        assert_eq!(entries[0].key.node, Expr::String("a".to_string()));
+        assert_eq!(entries[0].value.node, Expr::Int(1));
+        assert!(!entries[0].optional);
+        assert_eq!(entries[1].key.node, Expr::String("b".to_string()));
+        assert_eq!(entries[1].value.node, Expr::Int(2));
+        assert!(!entries[1].optional);
     } else {
         panic!("expected map");
     }
@@ -581,8 +586,9 @@ fn parse_struct_literal_simple() {
     if let Expr::Struct { type_name, fields } = common::assert_parses("Foo{a: 1}").node {
         assert_eq!(type_name.node, Expr::Ident("Foo".to_string()));
         assert_eq!(fields.len(), 1);
-        assert_eq!(fields[0].0, "a");
-        assert_eq!(fields[0].1.node, Expr::Int(1));
+        assert_eq!(fields[0].name, "a");
+        assert_eq!(fields[0].value.node, Expr::Int(1));
+        assert!(!fields[0].optional);
     } else {
         panic!("expected struct literal");
     }
@@ -594,8 +600,10 @@ fn parse_struct_literal_multiple_fields() {
     if let Expr::Struct { type_name, fields } = common::assert_parses("Point{x: 1, y: 2}").node {
         assert_eq!(type_name.node, Expr::Ident("Point".to_string()));
         assert_eq!(fields.len(), 2);
-        assert_eq!(fields[0].0, "x");
-        assert_eq!(fields[1].0, "y");
+        assert_eq!(fields[0].name, "x");
+        assert_eq!(fields[1].name, "y");
+        assert!(!fields[0].optional);
+        assert!(!fields[1].optional);
     } else {
         panic!("expected struct literal");
     }
@@ -612,7 +620,8 @@ fn parse_struct_literal_qualified_type() {
             panic!("expected member access for type name");
         }
         assert_eq!(fields.len(), 1);
-        assert_eq!(fields[0].0, "field");
+        assert_eq!(fields[0].name, "field");
+        assert!(!fields[0].optional);
     } else {
         panic!("expected struct literal");
     }
@@ -637,5 +646,84 @@ fn parse_struct_literal_trailing_comma() {
         assert_eq!(fields.len(), 1);
     } else {
         panic!("expected struct literal");
+    }
+}
+
+// ============================================================================
+// Optional syntax tests
+// ============================================================================
+
+#[test]
+fn parse_list_with_optional_element() {
+    // [1, ?x, 3]
+    if let Expr::List(items) = common::assert_parses("[1, ?x, 3]").node {
+        assert_eq!(items.len(), 3);
+        assert_eq!(items[0].expr.node, Expr::Int(1));
+        assert!(!items[0].optional);
+        assert_eq!(items[1].expr.node, Expr::Ident("x".to_string()));
+        assert!(items[1].optional);
+        assert_eq!(items[2].expr.node, Expr::Int(3));
+        assert!(!items[2].optional);
+    } else {
+        panic!("expected list");
+    }
+}
+
+#[test]
+fn parse_list_with_multiple_optional_elements() {
+    // [?a, ?b]
+    if let Expr::List(items) = common::assert_parses("[?a, ?b]").node {
+        assert_eq!(items.len(), 2);
+        assert!(items[0].optional);
+        assert!(items[1].optional);
+    } else {
+        panic!("expected list");
+    }
+}
+
+#[test]
+fn parse_map_with_optional_entry() {
+    // {"a": 1, ?"b": x}
+    if let Expr::Map(entries) = common::assert_parses(r#"{"a": 1, ?"b": x}"#).node {
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].key.node, Expr::String("a".to_string()));
+        assert!(!entries[0].optional);
+        assert_eq!(entries[1].key.node, Expr::String("b".to_string()));
+        assert!(entries[1].optional);
+    } else {
+        panic!("expected map");
+    }
+}
+
+#[test]
+fn parse_struct_with_optional_field() {
+    // Foo{a: 1, ?b: x}
+    if let Expr::Struct { type_name, fields } = common::assert_parses("Foo{a: 1, ?b: x}").node {
+        assert_eq!(type_name.node, Expr::Ident("Foo".to_string()));
+        assert_eq!(fields.len(), 2);
+        assert_eq!(fields[0].name, "a");
+        assert!(!fields[0].optional);
+        assert_eq!(fields[1].name, "b");
+        assert!(fields[1].optional);
+    } else {
+        panic!("expected struct literal");
+    }
+}
+
+#[test]
+fn parse_nested_optional() {
+    // [?[?x]]
+    if let Expr::List(outer) = common::assert_parses("[?[?x]]").node {
+        assert_eq!(outer.len(), 1);
+        assert!(outer[0].optional);
+        if let Expr::List(inner) = &outer[0].expr.node {
+            assert_eq!(inner.len(), 1);
+            assert!(inner[0].optional);
+            assert_eq!(inner[0].expr.node, Expr::Ident("x".to_string()));
+        } else {
+            panic!("expected inner list");
+        }
+    } else {
+        panic!("expected outer list");
     }
 }

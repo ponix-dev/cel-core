@@ -18,7 +18,7 @@
 
 use std::collections::HashMap;
 
-use crate::ast::{BinaryOp, Expr, Span, Spanned, SpannedExpr, UnaryOp};
+use crate::ast::{BinaryOp, Expr, ListElement, MapEntry, Span, Spanned, SpannedExpr, UnaryOp};
 
 /// Indicates whether a macro is called as a global function or as a method on a receiver.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -857,7 +857,7 @@ fn expand_map_impl(
     let accu_init = synthetic(ctx, Expr::List(vec![]), span.clone());
     let loop_condition = synthetic(ctx, Expr::Bool(true), span.clone());
 
-    let transformed_list = synthetic(ctx, Expr::List(vec![transform]), span.clone());
+    let transformed_list = synthetic(ctx, Expr::List(vec![ListElement { expr: transform, optional: false }]), span.clone());
     let accu_ref_step = synthetic(ctx, Expr::Ident(accu_var.clone()), span.clone());
     let append_step = synthetic(
         ctx,
@@ -929,7 +929,7 @@ fn expand_filter(
     let loop_condition = synthetic(ctx, Expr::Bool(true), span.clone());
 
     let iter_ref = synthetic(ctx, Expr::Ident(iter_var.clone()), span.clone());
-    let element_list = synthetic(ctx, Expr::List(vec![iter_ref]), span.clone());
+    let element_list = synthetic(ctx, Expr::List(vec![ListElement { expr: iter_ref, optional: false }]), span.clone());
 
     let accu_ref_then = synthetic(ctx, Expr::Ident(accu_var.clone()), span.clone());
     let append_step = synthetic(
@@ -1039,7 +1039,7 @@ fn expand_transform_list_impl(
     let accu_init = synthetic(ctx, Expr::List(vec![]), span.clone());
     let loop_condition = synthetic(ctx, Expr::Bool(true), span.clone());
 
-    let transformed_list = synthetic(ctx, Expr::List(vec![transform]), span.clone());
+    let transformed_list = synthetic(ctx, Expr::List(vec![ListElement { expr: transform, optional: false }]), span.clone());
     let accu_ref_step = synthetic(ctx, Expr::Ident(accu_var.clone()), span.clone());
     let append_step = synthetic(
         ctx,
@@ -1153,7 +1153,7 @@ fn expand_transform_map_impl(
     let loop_condition = synthetic(ctx, Expr::Bool(true), span.clone());
 
     let key_ref = synthetic(ctx, Expr::Ident(iter_var.clone()), span.clone());
-    let transformed_map = synthetic(ctx, Expr::Map(vec![(key_ref, transform)]), span.clone());
+    let transformed_map = synthetic(ctx, Expr::Map(vec![MapEntry { key: key_ref, value: transform, optional: false }]), span.clone());
     let accu_ref_step = synthetic(ctx, Expr::Ident(accu_var.clone()), span.clone());
     let append_step = synthetic(
         ctx,

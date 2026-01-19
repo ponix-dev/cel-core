@@ -117,13 +117,13 @@ impl<'a> TokenCollector<'a> {
                 self.push_punctuation(expr.span.start, 1);
 
                 for item in items {
-                    self.visit_expr(item);
+                    self.visit_expr(&item.expr);
                 }
 
                 // Commas between items
                 for window in items.windows(2) {
-                    let gap_start = window[0].span.end;
-                    let gap_end = window[1].span.start;
+                    let gap_start = window[0].expr.span.end;
+                    let gap_end = window[1].expr.span.start;
                     if let Some(pos) = self.find_char(gap_start, gap_end, ',') {
                         self.push_punctuation(pos, 1);
                     }
@@ -136,23 +136,23 @@ impl<'a> TokenCollector<'a> {
                 // Opening brace
                 self.push_punctuation(expr.span.start, 1);
 
-                for (key, value) in entries {
-                    self.visit_expr(key);
+                for entry in entries {
+                    self.visit_expr(&entry.key);
 
                     // Colon between key and value
-                    let gap_start = key.span.end;
-                    let gap_end = value.span.start;
+                    let gap_start = entry.key.span.end;
+                    let gap_end = entry.value.span.start;
                     if let Some(pos) = self.find_char(gap_start, gap_end, ':') {
                         self.push_punctuation(pos, 1);
                     }
 
-                    self.visit_expr(value);
+                    self.visit_expr(&entry.value);
                 }
 
                 // Commas between entries
                 for window in entries.windows(2) {
-                    let gap_start = window[0].1.span.end;
-                    let gap_end = window[1].0.span.start;
+                    let gap_start = window[0].value.span.end;
+                    let gap_end = window[1].key.span.start;
                     if let Some(pos) = self.find_char(gap_start, gap_end, ',') {
                         self.push_punctuation(pos, 1);
                     }
@@ -307,14 +307,14 @@ impl<'a> TokenCollector<'a> {
                     self.push_punctuation(pos, 1);
                 }
 
-                for (field_name, value) in fields {
+                for field in fields {
                     // Field name - find it before the colon
                     // We need to locate the field name in the source
-                    let field_end = value.span.start;
+                    let field_end = field.value.span.start;
                     if let Some(colon_pos) = self.find_char(type_name.span.end, field_end, ':') {
                         // Field name is just before the colon (with possible whitespace)
                         let field_name_end = colon_pos;
-                        let field_name_start = field_name_end.saturating_sub(field_name.len());
+                        let field_name_start = field_name_end.saturating_sub(field.name.len());
                         self.push(
                             field_name_start,
                             field_name_end,
@@ -325,13 +325,13 @@ impl<'a> TokenCollector<'a> {
                         self.push_punctuation(colon_pos, 1);
                     }
 
-                    self.visit_expr(value);
+                    self.visit_expr(&field.value);
                 }
 
                 // Commas between fields
                 for window in fields.windows(2) {
-                    let gap_start = window[0].1.span.end;
-                    let gap_end = window[1].1.span.start;
+                    let gap_start = window[0].value.span.end;
+                    let gap_end = window[1].value.span.start;
                     if let Some(pos) = self.find_char(gap_start, gap_end, ',') {
                         self.push_punctuation(pos, 1);
                     }

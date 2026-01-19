@@ -134,15 +134,23 @@ CEL macros (`all`, `exists`, `exists_one`, `map`, `filter`) are now expanded dur
 - `ParseOptions` and `parse_with_options()` enable custom macro configuration
 - `macro_calls` map preserved for IDE features (hover shows original syntax)
 
-#### 1.3 Optional Syntax Support
+#### 1.3 Optional Syntax Support ✅
 
-CEL has optional entry syntax for lists and maps:
+CEL has optional entry syntax for lists, maps, and structs:
 ```cel
 [1, ?maybe_value, 3]        // Optional list element
 {"a": 1, ?"b": maybe_val}   // Optional map entry
+Type{field: val, ?opt: x}   // Optional struct field
 ```
 
-Our parser and AST need to track the `optional` flag on list elements and map entries.
+Our AST now tracks the `optional` flag via dedicated wrapper types:
+- `ListElement { expr, optional }` for list elements
+- `MapEntry { key, value, optional }` for map entries
+- `StructField { name, value, optional }` for struct fields
+
+The proto converter correctly handles `optional_indices` for lists and `optional_entry` for map/struct entries.
+
+**Note:** This is distinct from optional chaining (`x.?y`, `x[?key]`), which is not yet implemented.
 
 ---
 
