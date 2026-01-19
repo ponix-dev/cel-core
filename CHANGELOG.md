@@ -2,6 +2,12 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## v0.1.2 - 2026-01-19
+#### Refactoring
+- proto generation - (7b19b8c) - Simon Rall
+
+- - -
+
 ## v0.1.1 - 2026-01-19
 #### Bug Fixes
 - cog - (6a62a5e) - Simon Rall
