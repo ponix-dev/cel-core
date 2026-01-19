@@ -1,6 +1,9 @@
 # Skip untracked files check (for submodules)
 skip_untracked = true
 
+# Tag prefix (matches our v0.1.0 style tags)
+tag_prefix = "v"
+
 # Update workspace version in Cargo.toml before creating bump commit
 pre_bump_hooks = [
     "mise exec -- cargo set-version {{version}}",
@@ -8,11 +11,6 @@ pre_bump_hooks = [
 
 [changelog]
 path = "CHANGELOG.md"
-
-# Define the workspace root as a package
-[packages.cel-core]
-path = "."
-public_api = false
 
 # Configure commit types that trigger version bumps
 [commit_types]
