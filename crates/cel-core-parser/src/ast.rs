@@ -22,6 +22,29 @@ impl<T> Spanned<T> {
 /// A spanned expression.
 pub type SpannedExpr = Spanned<Expr>;
 
+/// A list element that may be optional.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ListElement {
+    pub expr: SpannedExpr,
+    pub optional: bool,
+}
+
+/// A map entry that may be optional.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MapEntry {
+    pub key: SpannedExpr,
+    pub value: SpannedExpr,
+    pub optional: bool,
+}
+
+/// A struct field that may be optional.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StructField {
+    pub name: String,
+    pub value: SpannedExpr,
+    pub optional: bool,
+}
+
 /// CEL expression.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
@@ -40,8 +63,8 @@ pub enum Expr {
     RootIdent(String),
 
     // Collections
-    List(Vec<SpannedExpr>),
-    Map(Vec<(SpannedExpr, SpannedExpr)>),
+    List(Vec<ListElement>),
+    Map(Vec<MapEntry>),
 
     // Operations
     Unary {
@@ -76,7 +99,7 @@ pub enum Expr {
     /// The type_name is the expression preceding the braces (Ident, RootIdent, or Member chain)
     Struct {
         type_name: Box<SpannedExpr>,
-        fields: Vec<(String, SpannedExpr)>,
+        fields: Vec<StructField>,
     },
 
     /// Comprehension expression (result of macro expansion).

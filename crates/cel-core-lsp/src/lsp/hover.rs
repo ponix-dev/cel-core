@@ -38,9 +38,9 @@ fn find_node_containing_offset<'a>(ast: &'a SpannedExpr, offset: usize) -> Optio
         Expr::String(_) | Expr::Bytes(_) | Expr::Ident(_) | Expr::RootIdent(_) => None,
         Expr::List(items) => items
             .iter()
-            .find_map(|item| find_node_containing_offset(item, offset)),
-        Expr::Map(entries) => entries.iter().find_map(|(k, v)| {
-            find_node_containing_offset(k, offset).or_else(|| find_node_containing_offset(v, offset))
+            .find_map(|item| find_node_containing_offset(&item.expr, offset)),
+        Expr::Map(entries) => entries.iter().find_map(|entry| {
+            find_node_containing_offset(&entry.key, offset).or_else(|| find_node_containing_offset(&entry.value, offset))
         }),
         Expr::Unary { expr, .. } => find_node_containing_offset(expr, offset),
         Expr::Binary { left, right, .. } => find_node_containing_offset(left, offset)
@@ -58,7 +58,7 @@ fn find_node_containing_offset<'a>(ast: &'a SpannedExpr, offset: usize) -> Optio
         Expr::Call { expr, args } => find_node_containing_offset(expr, offset)
             .or_else(|| args.iter().find_map(|arg| find_node_containing_offset(arg, offset))),
         Expr::Struct { type_name, fields } => find_node_containing_offset(type_name, offset)
-            .or_else(|| fields.iter().find_map(|(_, v)| find_node_containing_offset(v, offset))),
+            .or_else(|| fields.iter().find_map(|field| find_node_containing_offset(&field.value, offset))),
         Expr::Comprehension {
             iter_range,
             accu_init,

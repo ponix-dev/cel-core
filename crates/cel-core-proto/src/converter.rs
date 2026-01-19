@@ -14,7 +14,7 @@ use crate::operators::{
     is_ternary_function, unary_op_to_function, INDEX_FUNCTION, TERNARY_FUNCTION,
 };
 use crate::source_info::{build_source_info, compute_line_offsets, get_position};
-use cel_core_parser::{Expr, Spanned, SpannedExpr};
+use cel_core_parser::{Expr, ListElement, MapEntry, Spanned, SpannedExpr, StructField};
 use std::collections::HashMap;
 
 /// Bidirectional converter between cel-parser AST and proto Expr.
@@ -71,24 +71,30 @@ impl AstConverter {
                 })))
             }
             Expr::List(elements) => {
-                let converted: Vec<_> = elements.iter().map(|e| self.ast_to_expr(e)).collect();
+                let converted: Vec<_> = elements.iter().map(|e| self.ast_to_expr(&e.expr)).collect();
+                let optional_indices: Vec<i32> = elements
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, e)| e.optional)
+                    .map(|(i, _)| i as i32)
+                    .collect();
                 Some(ExprKind::ListExpr(CreateList {
                     elements: converted,
-                    optional_indices: vec![],
+                    optional_indices,
                 }))
             }
             Expr::Map(entries) => {
                 let converted: Vec<Entry> = entries
                     .iter()
-                    .map(|(k, v)| {
+                    .map(|entry| {
                         // Use key's ID for entry ID
-                        let entry_id = k.id;
-                        self.positions.insert(entry_id, k.span.start as i32);
+                        let entry_id = entry.key.id;
+                        self.positions.insert(entry_id, entry.key.span.start as i32);
                         Entry {
                             id: entry_id,
-                            key_kind: Some(KeyKind::MapKey(self.ast_to_expr(k))),
-                            value: Some(self.ast_to_expr(v)),
-                            optional_entry: false,
+                            key_kind: Some(KeyKind::MapKey(self.ast_to_expr(&entry.key))),
+                            value: Some(self.ast_to_expr(&entry.value)),
+                            optional_entry: entry.optional,
                         }
                     })
                     .collect();
@@ -160,15 +166,15 @@ impl AstConverter {
                 let message_name = extract_type_name(type_name);
                 let converted: Vec<Entry> = fields
                     .iter()
-                    .map(|(name, value)| {
+                    .map(|field| {
                         // Use value's ID for entry ID
-                        let entry_id = value.id;
-                        self.positions.insert(entry_id, value.span.start as i32);
+                        let entry_id = field.value.id;
+                        self.positions.insert(entry_id, field.value.span.start as i32);
                         Entry {
                             id: entry_id,
-                            key_kind: Some(KeyKind::FieldKey(name.clone())),
-                            value: Some(self.ast_to_expr(value)),
-                            optional_entry: false,
+                            key_kind: Some(KeyKind::FieldKey(field.name.clone())),
+                            value: Some(self.ast_to_expr(&field.value)),
+                            optional_entry: field.optional,
                         }
                     })
                     .collect();
@@ -278,7 +284,12 @@ impl AstConverter {
                     let elements: Result<Vec<_>, _> = list
                         .elements
                         .iter()
-                        .map(|e| self.expr_to_ast(e, source_info))
+                        .enumerate()
+                        .map(|(i, e)| {
+                            let expr = self.expr_to_ast(e, source_info)?;
+                            let optional = list.optional_indices.contains(&(i as i32));
+                            Ok(ListElement { expr, optional })
+                        })
                         .collect();
                     Expr::List(elements?)
                 }
@@ -441,7 +452,11 @@ impl AstConverter {
                         expr_id: entry.id,
                         field: "value",
                     })?;
-                    Ok((key, self.expr_to_ast(value, source_info)?))
+                    Ok(MapEntry {
+                        key,
+                        value: self.expr_to_ast(value, source_info)?,
+                        optional: entry.optional_entry,
+                    })
                 })
                 .collect();
             Ok(Expr::Map(entries?))
@@ -454,7 +469,7 @@ impl AstConverter {
                 .entries
                 .iter()
                 .map(|entry| {
-                    let field_name = match &entry.key_kind {
+                    let name = match &entry.key_kind {
                         Some(KeyKind::FieldKey(name)) => name.clone(),
                         _ => {
                             return Err(ConversionError::MissingField {
@@ -467,7 +482,11 @@ impl AstConverter {
                         expr_id: entry.id,
                         field: "value",
                     })?;
-                    Ok((field_name, self.expr_to_ast(value, source_info)?))
+                    Ok(StructField {
+                        name,
+                        value: self.expr_to_ast(value, source_info)?,
+                        optional: entry.optional_entry,
+                    })
                 })
                 .collect();
 
@@ -628,14 +647,16 @@ mod tests {
             (Expr::List(a), Expr::List(b)) => {
                 assert_eq!(a.len(), b.len());
                 for (x, y) in a.iter().zip(b.iter()) {
-                    assert_node_eq(&x.node, &y.node);
+                    assert_eq!(x.optional, y.optional);
+                    assert_node_eq(&x.expr.node, &y.expr.node);
                 }
             }
             (Expr::Map(a), Expr::Map(b)) => {
                 assert_eq!(a.len(), b.len());
-                for ((k1, v1), (k2, v2)) in a.iter().zip(b.iter()) {
-                    assert_node_eq(&k1.node, &k2.node);
-                    assert_node_eq(&v1.node, &v2.node);
+                for (e1, e2) in a.iter().zip(b.iter()) {
+                    assert_eq!(e1.optional, e2.optional);
+                    assert_node_eq(&e1.key.node, &e2.key.node);
+                    assert_node_eq(&e1.value.node, &e2.value.node);
                 }
             }
             (
@@ -713,9 +734,10 @@ mod tests {
             ) => {
                 assert_node_eq(&t1.node, &t2.node);
                 assert_eq!(f1.len(), f2.len());
-                for ((n1, v1), (n2, v2)) in f1.iter().zip(f2.iter()) {
-                    assert_eq!(n1, n2);
-                    assert_node_eq(&v1.node, &v2.node);
+                for (field1, field2) in f1.iter().zip(f2.iter()) {
+                    assert_eq!(field1.name, field2.name);
+                    assert_eq!(field1.optional, field2.optional);
+                    assert_node_eq(&field1.value.node, &field2.value.node);
                 }
             }
             (Expr::Error, Expr::Error) => {}
@@ -789,8 +811,8 @@ mod tests {
     #[test]
     fn test_roundtrip_list() {
         let ast = make_ast(Expr::List(vec![
-            make_ast(Expr::Int(1)),
-            make_ast(Expr::Int(2)),
+            ListElement { expr: make_ast(Expr::Int(1)), optional: false },
+            ListElement { expr: make_ast(Expr::Int(2)), optional: false },
         ]));
         let result = roundtrip(&ast);
         assert_node_eq(&ast.node, &result.node);
@@ -798,10 +820,11 @@ mod tests {
 
     #[test]
     fn test_roundtrip_map() {
-        let ast = make_ast(Expr::Map(vec![(
-            make_ast(Expr::String("key".to_string())),
-            make_ast(Expr::Int(42)),
-        )]));
+        let ast = make_ast(Expr::Map(vec![MapEntry {
+            key: make_ast(Expr::String("key".to_string())),
+            value: make_ast(Expr::Int(42)),
+            optional: false,
+        }]));
         let result = roundtrip(&ast);
         assert_node_eq(&ast.node, &result.node);
     }
@@ -924,7 +947,61 @@ mod tests {
     fn test_roundtrip_struct() {
         let ast = make_ast(Expr::Struct {
             type_name: Box::new(make_ast(Expr::Ident("MyType".to_string()))),
-            fields: vec![("field".to_string(), make_ast(Expr::Int(42)))],
+            fields: vec![StructField {
+                name: "field".to_string(),
+                value: make_ast(Expr::Int(42)),
+                optional: false,
+            }],
+        });
+        let result = roundtrip(&ast);
+        assert_node_eq(&ast.node, &result.node);
+    }
+
+    #[test]
+    fn test_roundtrip_list_with_optional() {
+        let ast = make_ast(Expr::List(vec![
+            ListElement { expr: make_ast(Expr::Int(1)), optional: false },
+            ListElement { expr: make_ast(Expr::Int(2)), optional: true },
+            ListElement { expr: make_ast(Expr::Int(3)), optional: false },
+        ]));
+        let result = roundtrip(&ast);
+        assert_node_eq(&ast.node, &result.node);
+    }
+
+    #[test]
+    fn test_roundtrip_map_with_optional() {
+        let ast = make_ast(Expr::Map(vec![
+            MapEntry {
+                key: make_ast(Expr::String("a".to_string())),
+                value: make_ast(Expr::Int(1)),
+                optional: false,
+            },
+            MapEntry {
+                key: make_ast(Expr::String("b".to_string())),
+                value: make_ast(Expr::Int(2)),
+                optional: true,
+            },
+        ]));
+        let result = roundtrip(&ast);
+        assert_node_eq(&ast.node, &result.node);
+    }
+
+    #[test]
+    fn test_roundtrip_struct_with_optional() {
+        let ast = make_ast(Expr::Struct {
+            type_name: Box::new(make_ast(Expr::Ident("MyType".to_string()))),
+            fields: vec![
+                StructField {
+                    name: "field1".to_string(),
+                    value: make_ast(Expr::Int(1)),
+                    optional: false,
+                },
+                StructField {
+                    name: "field2".to_string(),
+                    value: make_ast(Expr::Int(2)),
+                    optional: true,
+                },
+            ],
         });
         let result = roundtrip(&ast);
         assert_node_eq(&ast.node, &result.node);

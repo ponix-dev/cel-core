@@ -368,14 +368,14 @@ fn validate_expr<R: VariableResolver>(
         // Recursively validate other expressions
         Expr::List(items) => {
             for item in items {
-                validate_expr(item, resolver, errors, false);
+                validate_expr(&item.expr, resolver, errors, false);
             }
         }
 
         Expr::Map(entries) => {
-            for (key, value) in entries {
-                validate_expr(key, resolver, errors, false);
-                validate_expr(value, resolver, errors, false);
+            for entry in entries {
+                validate_expr(&entry.key, resolver, errors, false);
+                validate_expr(&entry.value, resolver, errors, false);
             }
         }
 
@@ -406,8 +406,8 @@ fn validate_expr<R: VariableResolver>(
         Expr::Struct { type_name, fields } => {
             // Type name could be an identifier or member chain - validate it
             validate_expr(type_name, resolver, errors, false);
-            for (_, value) in fields {
-                validate_expr(value, resolver, errors, false);
+            for field in fields {
+                validate_expr(&field.value, resolver, errors, false);
             }
         }
 
@@ -543,13 +543,13 @@ fn validate_expr_with_comp_resolver<R: VariableResolver>(
         // Recursively validate sub-expressions, keeping comprehension context
         Expr::List(items) => {
             for item in items {
-                validate_expr_with_comp_resolver(item, comp_resolver, errors, false);
+                validate_expr_with_comp_resolver(&item.expr, comp_resolver, errors, false);
             }
         }
         Expr::Map(entries) => {
-            for (key, value) in entries {
-                validate_expr_with_comp_resolver(key, comp_resolver, errors, false);
-                validate_expr_with_comp_resolver(value, comp_resolver, errors, false);
+            for entry in entries {
+                validate_expr_with_comp_resolver(&entry.key, comp_resolver, errors, false);
+                validate_expr_with_comp_resolver(&entry.value, comp_resolver, errors, false);
             }
         }
         Expr::Unary { expr: inner, .. } => {
@@ -583,8 +583,8 @@ fn validate_expr_with_comp_resolver<R: VariableResolver>(
         }
         Expr::Struct { type_name, fields } => {
             validate_expr_with_comp_resolver(type_name, comp_resolver, errors, false);
-            for (_, value) in fields {
-                validate_expr_with_comp_resolver(value, comp_resolver, errors, false);
+            for field in fields {
+                validate_expr_with_comp_resolver(&field.value, comp_resolver, errors, false);
             }
         }
 

@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use crate::ast::{Expr, Spanned, SpannedExpr};
+use crate::ast::{Expr, ListElement, MapEntry, Spanned, SpannedExpr, StructField};
 use crate::lexer::{Span, SpannedToken, Token};
 use crate::macros::{MacroContext, MacroExpansion, MacroRegistry};
 
@@ -587,8 +587,10 @@ impl<'a> Parser<'a> {
         ))
     }
 
-    /// Parse a struct field: name: value
-    fn parse_struct_field(&mut self) -> Result<(String, SpannedExpr), ParseError> {
+    /// Parse a struct field: [?]name: value
+    fn parse_struct_field(&mut self) -> Result<StructField, ParseError> {
+        let optional = self.match_token(&Token::Question);
+
         let name = match self.advance() {
             Some((Token::Ident(name), _)) => name.clone(),
             other => {
@@ -602,7 +604,7 @@ impl<'a> Parser<'a> {
         self.expect(&Token::Colon)?;
         let value = self.parse_expr()?;
 
-        Ok((name, value))
+        Ok(StructField { name, value, optional })
     }
 
     /// Parse an atom: literal, identifier, parenthesized expression, list, or map.
@@ -708,19 +710,26 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Parse a list literal: [expr, expr, ...]
+    /// Parse a list element: [?]expr
+    fn parse_list_element(&mut self) -> Result<ListElement, ParseError> {
+        let optional = self.match_token(&Token::Question);
+        let expr = self.parse_expr()?;
+        Ok(ListElement { expr, optional })
+    }
+
+    /// Parse a list literal: [[?]expr, [?]expr, ...]
     fn parse_list(&mut self) -> Result<SpannedExpr, ParseError> {
         let start = self.peek_span().start;
         self.expect(&Token::LBracket)?;
 
         let mut items = Vec::new();
         if !self.check(&Token::RBracket) {
-            items.push(self.parse_expr()?);
+            items.push(self.parse_list_element()?);
             while self.match_token(&Token::Comma) {
                 if self.check(&Token::RBracket) {
                     break; // trailing comma
                 }
-                items.push(self.parse_expr()?);
+                items.push(self.parse_list_element()?);
             }
         }
 
@@ -729,26 +738,29 @@ impl<'a> Parser<'a> {
         Ok(Spanned::new(self.next_id(), Expr::List(items), start..end_span.end))
     }
 
-    /// Parse a map literal: {expr: expr, expr: expr, ...}
+    /// Parse a map entry: [?]expr: expr
+    fn parse_map_entry(&mut self) -> Result<MapEntry, ParseError> {
+        let optional = self.match_token(&Token::Question);
+        let key = self.parse_expr()?;
+        self.expect(&Token::Colon)?;
+        let value = self.parse_expr()?;
+        Ok(MapEntry { key, value, optional })
+    }
+
+    /// Parse a map literal: {[?]expr: expr, [?]expr: expr, ...}
     fn parse_map(&mut self) -> Result<SpannedExpr, ParseError> {
         let start = self.peek_span().start;
         self.expect(&Token::LBrace)?;
 
         let mut entries = Vec::new();
         if !self.check(&Token::RBrace) {
-            let key = self.parse_expr()?;
-            self.expect(&Token::Colon)?;
-            let value = self.parse_expr()?;
-            entries.push((key, value));
+            entries.push(self.parse_map_entry()?);
 
             while self.match_token(&Token::Comma) {
                 if self.check(&Token::RBrace) {
                     break; // trailing comma
                 }
-                let key = self.parse_expr()?;
-                self.expect(&Token::Colon)?;
-                let value = self.parse_expr()?;
-                entries.push((key, value));
+                entries.push(self.parse_map_entry()?);
             }
         }
 
@@ -885,9 +897,12 @@ mod tests {
     fn parse_list() {
         if let Expr::List(items) = parse_expr_node("[1, 2, 3]") {
             assert_eq!(items.len(), 3);
-            assert_eq!(items[0].node, Expr::Int(1));
-            assert_eq!(items[1].node, Expr::Int(2));
-            assert_eq!(items[2].node, Expr::Int(3));
+            assert_eq!(items[0].expr.node, Expr::Int(1));
+            assert_eq!(items[1].expr.node, Expr::Int(2));
+            assert_eq!(items[2].expr.node, Expr::Int(3));
+            assert!(!items[0].optional);
+            assert!(!items[1].optional);
+            assert!(!items[2].optional);
         } else {
             panic!("expected list");
         }
@@ -897,8 +912,9 @@ mod tests {
     fn parse_map() {
         if let Expr::Map(entries) = parse_expr_node(r#"{"a": 1, "b": 2}"#) {
             assert_eq!(entries.len(), 2);
-            assert_eq!(entries[0].0.node, Expr::String("a".to_string()));
-            assert_eq!(entries[0].1.node, Expr::Int(1));
+            assert_eq!(entries[0].key.node, Expr::String("a".to_string()));
+            assert_eq!(entries[0].value.node, Expr::Int(1));
+            assert!(!entries[0].optional);
         } else {
             panic!("expected map");
         }
@@ -1063,7 +1079,7 @@ mod tests {
                 }
                 Expr::List(elements) => {
                     for e in elements {
-                        collect_ids(e, ids);
+                        collect_ids(&e.expr, ids);
                     }
                 }
                 _ => {}
