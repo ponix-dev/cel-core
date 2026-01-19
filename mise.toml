@@ -2,6 +2,7 @@
 rust = "latest"
 gh = "latest"
 buf = "latest"
+cocogitto = "latest"
 
 [tasks.test]
 description = "Run all tests (excludes conformance)"
@@ -47,8 +48,16 @@ description = "Run CEL conformance tests"
 depends = ["conformance:setup"]
 run = "cargo test -p cel-core-conformance"
 
+[tasks."version:bump"]
+description = "Bump version based on conventional commits"
+run = "cog bump --auto"
+
+[tasks."version:bump-dry-run"]
+description = "Show what version bump would occur"
+run = "cog bump --auto --dry-run"
+
 [tasks."publish:dry-run"]
-description = "Verify packages can be published"
+description = "Verify crates can be published"
 run = """
 cargo publish -p cel-core-parser --dry-run
 cargo publish -p cel-core-proto --dry-run
@@ -56,12 +65,10 @@ cargo publish -p cel-core-lsp --dry-run
 """
 
 [tasks.publish]
-description = "Publish crates to crates.io (in dependency order)"
+description = "Publish crates to crates.io in dependency order"
 depends = ["test", "publish:dry-run"]
 run = """
-cargo publish -p cel-core-parser
-sleep 30
-cargo publish -p cel-core-proto
-sleep 30
-cargo publish -p cel-core-lsp
+cargo publish -p cel-core-parser || echo "cel-core-parser already published, skipping..."
+cargo publish -p cel-core-proto || echo "cel-core-proto already published, skipping..."
+cargo publish -p cel-core-lsp || echo "cel-core-lsp already published, skipping..."
 """

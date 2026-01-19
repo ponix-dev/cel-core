@@ -1,0 +1,18 @@
+[git_hooks]
+pre-push = []
+
+# Packages in the workspace (for version bumping)
+[packages.cel-core-parser]
+path = "crates/cel-core-parser"
+
+[packages.cel-core-proto]
+path = "crates/cel-core-proto"
+
+[packages.cel-core-lsp]
+path = "crates/cel-core-lsp"
+
+# Bump profiles - all packages share the same version
+[bump_profiles]
+
+[changelog]
+path = "CHANGELOG.md"
