@@ -1,22 +1,28 @@
 [tools]
 rust = "latest"
 gh = "latest"
+buf = "latest"
 
 [tasks.test]
 description = "Run all tests (excludes conformance)"
-run = "cargo test --workspace --exclude cel-conformance"
+run = "cargo test --workspace --exclude cel-core-conformance"
 
 [tasks."test:unit"]
 description = "Run unit tests only (excludes conformance)"
-run = "cargo test --workspace --exclude cel-conformance --lib"
+run = "cargo test --workspace --exclude cel-core-conformance --lib"
 
 [tasks."test:integration"]
 description = "Run integration tests only (excludes conformance)"
-run = "cargo test --workspace --exclude cel-conformance --test '*'"
+run = "cargo test --workspace --exclude cel-core-conformance --test '*'"
 
 [tasks.install]
-description = "Build and install cel-lsp binary to PATH"
-run = "cargo install --path crates/cel-lsp"
+description = "Build and install cel-core-lsp binary to PATH"
+run = "cargo install --path crates/cel-core-lsp"
+
+[tasks."proto:generate"]
+description = "Generate Rust code from protobuf definitions"
+depends = ["conformance:setup"]
+run = "buf generate"
 
 [tasks."conformance:setup"]
 description = "Initialize cel-spec submodule with sparse checkout"
@@ -24,7 +30,7 @@ run = """
 git submodule update --init crates/cel-core-conformance/cel-spec
 cd crates/cel-core-conformance/cel-spec
 git sparse-checkout init --no-cone
-git sparse-checkout set /tests/simple/testdata/
+git sparse-checkout set /tests/simple/testdata/ /proto/
 git read-tree -mu HEAD
 """
 
@@ -37,6 +43,25 @@ git checkout origin/master
 """
 
 [tasks."conformance:test"]
-description = "Run CEL conformance tests (requires BSR authentication)"
+description = "Run CEL conformance tests"
 depends = ["conformance:setup"]
-run = "cargo test -p cel-conformance"
+run = "cargo test -p cel-core-conformance"
+
+[tasks."publish:dry-run"]
+description = "Verify packages can be published"
+run = """
+cargo publish -p cel-core-parser --dry-run
+cargo publish -p cel-core-proto --dry-run
+cargo publish -p cel-core-lsp --dry-run
+"""
+
+[tasks.publish]
+description = "Publish crates to crates.io (in dependency order)"
+depends = ["test", "publish:dry-run"]
+run = """
+cargo publish -p cel-core-parser
+sleep 30
+cargo publish -p cel-core-proto
+sleep 30
+cargo publish -p cel-core-lsp
+"""

@@ -1,13 +1,7 @@
 //! Bidirectional converter between cel-parser AST and proto Expr.
 
 use crate::error::ConversionError;
-use crate::operators::{
-    binary_op_to_function, function_to_binary_op, function_to_unary_op, is_index_function,
-    is_ternary_function, unary_op_to_function, INDEX_FUNCTION, TERNARY_FUNCTION,
-};
-use crate::source_info::{build_source_info, compute_line_offsets, get_position};
-use cel_parser::{Expr, Spanned, SpannedExpr};
-use google_cel_spec_community_neoeinstein_prost::cel::expr::{
+use crate::gen::cel::expr::{
     constant::ConstantKind,
     expr::{
         create_struct::{entry::KeyKind, Entry},
@@ -15,6 +9,12 @@ use google_cel_spec_community_neoeinstein_prost::cel::expr::{
     },
     Constant, ParsedExpr, SourceInfo,
 };
+use crate::operators::{
+    binary_op_to_function, function_to_binary_op, function_to_unary_op, is_index_function,
+    is_ternary_function, unary_op_to_function, INDEX_FUNCTION, TERNARY_FUNCTION,
+};
+use crate::source_info::{build_source_info, compute_line_offsets, get_position};
+use cel_core_parser::{Expr, Spanned, SpannedExpr};
 use std::collections::HashMap;
 
 /// Bidirectional converter between cel-parser AST and proto Expr.
@@ -34,10 +34,7 @@ impl AstConverter {
     }
 
     /// Convert a cel-parser AST to a proto Expr.
-    pub fn ast_to_expr(
-        &mut self,
-        spanned: &SpannedExpr,
-    ) -> google_cel_spec_community_neoeinstein_prost::cel::expr::Expr {
+    pub fn ast_to_expr(&mut self, spanned: &SpannedExpr) -> crate::gen::cel::expr::Expr {
         let id = spanned.id;
         // Record position as byte offset from start
         self.positions.insert(id, spanned.span.start as i32);
@@ -183,14 +180,11 @@ impl AstConverter {
             Expr::Error => None,
         };
 
-        google_cel_spec_community_neoeinstein_prost::cel::expr::Expr { id, expr_kind }
+        crate::gen::cel::expr::Expr { id, expr_kind }
     }
 
     /// Consume the converter and build a ParsedExpr with source info.
-    pub fn into_parsed_expr(
-        self,
-        expr: google_cel_spec_community_neoeinstein_prost::cel::expr::Expr,
-    ) -> ParsedExpr {
+    pub fn into_parsed_expr(self, expr: crate::gen::cel::expr::Expr) -> ParsedExpr {
         ParsedExpr {
             expr: Some(expr),
             source_info: Some(build_source_info(self.positions, self.line_offsets)),
@@ -208,7 +202,7 @@ impl AstConverter {
     /// at the recorded position. IDs from the proto are preserved.
     pub fn expr_to_ast(
         &self,
-        expr: &google_cel_spec_community_neoeinstein_prost::cel::expr::Expr,
+        expr: &crate::gen::cel::expr::Expr,
         source_info: &SourceInfo,
     ) -> Result<SpannedExpr, ConversionError> {
         let pos = get_position(source_info, expr.id).unwrap_or(0);
@@ -504,7 +498,7 @@ fn build_type_name_expr(name: &str, pos: usize) -> SpannedExpr {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cel_parser::{BinaryOp, UnaryOp};
+    use cel_core_parser::{BinaryOp, UnaryOp};
 
     fn make_ast(node: Expr) -> SpannedExpr {
         // Use ID 0 for test nodes since exact ID doesn't matter for roundtrip tests

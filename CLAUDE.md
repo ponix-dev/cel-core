@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-CEL-LSP is a Language Server Protocol implementation for the Common Expression Language (CEL). It provides IDE support including syntax highlighting, error diagnostics, hover information, and semantic tokens for CEL expressions.
+CEL-Core is a Language Server Protocol implementation for the Common Expression Language (CEL). It provides IDE support including syntax highlighting, error diagnostics, hover information, and semantic tokens for CEL expressions.
 
 ## Development Commands
 
@@ -17,7 +17,7 @@ cargo build
 cargo build --release
 
 # Build specific crate
-cargo build -p cel-parser
+cargo build -p cel-core-parser
 ```
 
 ### Testing
@@ -40,13 +40,19 @@ mise run conformance:setup
 # Pull latest cel-spec test data
 mise run conformance:update
 
-# Run CEL conformance tests (requires BSR authentication)
+# Run CEL conformance tests
 mise run conformance:test
+```
+
+### Protobuf Code Generation
+```bash
+# Generate Rust code from cel-spec protobuf definitions
+mise run proto:generate
 ```
 
 ### Installing
 ```bash
-# Install cel-lsp binary to PATH
+# Install cel-core-lsp binary to PATH
 mise run install
 ```
 
@@ -66,13 +72,18 @@ This fetches the google/cel-spec repository required for running official confor
 
 This is a multi-crate Cargo workspace:
 
-- **`cel-parser`**: Core CEL expression parser
+- **`cel-core-parser`**: Core CEL expression parser
   - Lexer using `logos` crate
   - Hand-written recursive descent parser
   - AST types with span tracking for diagnostics
   - Error recovery with partial AST construction
 
-- **`cel-lsp`**: Language Server Protocol implementation
+- **`cel-core-proto`**: Protobuf types and conversion
+  - Generated protobuf types from cel-spec
+  - Bidirectional conversion between parser AST and proto format
+  - Wire compatibility with other CEL implementations
+
+- **`cel-core-lsp`**: Language Server Protocol implementation
   - Uses `tower-lsp` for LSP protocol
   - Internal module structure:
     - `document/` - Document state management and text utilities
@@ -91,65 +102,41 @@ This is a multi-crate Cargo workspace:
       - `proto_parser.rs` - Extract CEL from .proto files
       - `resolver.rs` - Variable resolver for protovalidate context
 
-- **`cel-conformance`**: CEL conformance testing
+- **`cel-core-conformance`**: CEL conformance testing (not published)
   - In-process `ConformanceService` trait (not gRPC)
   - Tests parser against official CEL spec test suite (.textproto files)
-  - Uses Buf Schema Registry for proto types
-  - cel-spec git submodule for test data files
+  - cel-spec git submodule for test data and proto files
   - Internal module structure:
     - `loader.rs` - Load .textproto test files using prost-reflect
     - `service.rs` - `CelConformanceService` implementation
 
-## Buf Schema Registry (BSR) Setup
+## Protobuf Code Generation
 
-The `cel-conformance` crate uses pre-generated protobuf types from the Buf Schema Registry.
+The project uses buf to generate Rust code from the cel-spec protobuf definitions.
 
-### Registry Configuration
+### Configuration Files
 
-The `.cargo/config.toml` configures the buf registry:
+- `buf.yaml` - Defines the protobuf module location
+- `buf.gen.yaml` - Configures the neoeinstein-prost plugin for code generation
 
-```toml
-[registries.buf]
-index = "sparse+https://buf.build/gen/cargo/"
-credential-provider = "cargo:token"
+### Regenerating Code
+
+To regenerate the protobuf types after updating cel-spec:
+
+```bash
+mise run proto:generate
 ```
 
-### Authentication
-
-**One-time setup required per machine:**
-
-1. Get a BSR token from https://buf.build/settings/user
-2. Login to the buf registry:
-   ```bash
-   cargo login --registry buf "Bearer $BSR_TOKEN"
-   ```
-
-This stores credentials in `~/.cargo/credentials.toml`.
-
-### BSR Packages Used
-
-The project uses these pre-generated SDK packages from BSR:
-
-- `google_cel-spec_community_neoeinstein-prost` - Prost message types for CEL spec
-
-Package naming convention: `{owner}_{module}_community_{plugin}`
-
-### Updating Proto Dependencies
-
-To update to a newer version of the CEL spec protos:
-
-1. Check available versions at https://buf.build/google/cel-spec/sdks
-2. Update version in `crates/cel-conformance/Cargo.toml`
-3. Run `cargo update -p google_cel-spec_community_neoeinstein-prost`
+This generates code into `crates/cel-core-proto/src/gen/`.
 
 ## Parser API
 
 The parser provides a simple API:
 
 ```rust
-use cel_parser::{parse, ParseResult, Expr, SpannedExpr};
+use cel_core_parser::{parse, ParseResult, Expr, SpannedExpr};
 
-let result: ParseResult = cel_parser::parse("x + y > 10");
+let result: ParseResult = cel_core_parser::parse("x + y > 10");
 
 // Check for errors
 if result.is_err() {
@@ -173,6 +160,6 @@ if let Some(ast) = result.ast {
 - Errors include span information for diagnostic display
 
 ### Testing
-- Parser tests in `crates/cel-parser/tests/`
+- Parser tests in `crates/cel-core-parser/tests/`
 - Use `assert_parses()` helper for successful parse tests
 - Use `assert_parse_error()` helper for error case tests

@@ -64,22 +64,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b35204fbdc0b3f4446b89fc1ac2cf84a8a68971995d0bf2e925ec7cd960f9cb3"
 
 [[package]]
-name = "cel-conformance"
+name = "cel-core-conformance"
 version = "0.1.0"
 dependencies = [
- "cel-parser",
- "cel-proto",
- "google_cel-spec_community_neoeinstein-prost",
+ "cel-core-parser",
+ "cel-core-proto",
  "prost",
  "prost-reflect",
- "protoc-wkt",
 ]
 
 [[package]]
-name = "cel-lsp"
+name = "cel-core-lsp"
 version = "0.1.0"
 dependencies = [
- "cel-parser",
+ "cel-core-parser",
  "dashmap",
  "regex",
  "tokio",
@@ -87,18 +85,19 @@ dependencies = [
 ]
 
 [[package]]
-name = "cel-parser"
+name = "cel-core-parser"
 version = "0.1.0"
 dependencies = [
  "logos 0.14.4",
 ]
 
 [[package]]
-name = "cel-proto"
+name = "cel-core-proto"
 version = "0.1.0"
 dependencies = [
- "cel-parser",
- "google_cel-spec_community_neoeinstein-prost",
+ "cel-core-parser",
+ "prost",
+ "prost-types",
  "thiserror",
 ]
 
@@ -238,16 +237,6 @@ dependencies = [
  "pin-project-lite",
  "pin-utils",
  "slab",
-]
-
-[[package]]
-name = "google_cel-spec_community_neoeinstein-prost"
-version = "0.5.0-20251103204847-96eff7bcf453.2"
-source = "sparse+https://buf.build/gen/cargo/"
-checksum = "db16ad9de9e7043ab882ebdb1720fa8714d5be4fb57433ef405af2dee8c73d21"
-dependencies = [
- "prost",
- "prost-types",
 ]
 
 [[package]]
@@ -630,12 +619,6 @@ checksum = "8991c4cbdb8bc5b11f0b074ffe286c30e523de90fee5ba8132f1399f23cb3dd7"
 dependencies = [
  "prost",
 ]
-
-[[package]]
-name = "protoc-wkt"
-version = "1.0.0+3.20.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ae1d0fdc23ea945d58449259496ba12d3b520da1a45ce5011f631c990add9029"
 
 [[package]]
 name = "quote"

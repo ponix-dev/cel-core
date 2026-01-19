@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use cel_parser::{ParseError, SpannedExpr};
+use cel_core_parser::{ParseError, SpannedExpr};
 use dashmap::DashMap;
 use tower_lsp::lsp_types::Url;
 
@@ -30,7 +30,7 @@ pub struct DocumentState {
 impl DocumentState {
     /// Create a new document state by parsing and validating the source.
     pub fn new(source: String, version: i32) -> Self {
-        let result = cel_parser::parse(&source);
+        let result = cel_core_parser::parse(&source);
         let line_index = LineIndex::new(source);
 
         // Run validation if we have an AST

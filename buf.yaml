@@ -1,0 +1,4 @@
+version: v2
+modules:
+  - path: crates/cel-core-conformance/cel-spec/proto
+    name: buf.build/google/cel-spec

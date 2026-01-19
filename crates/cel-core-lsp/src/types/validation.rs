@@ -4,7 +4,7 @@
 //! argument arity, and argument types.
 //! It uses a `VariableResolver` trait to allow custom variable definitions.
 
-use cel_parser::{Expr, Span, SpannedExpr};
+use cel_core_parser::{Expr, Span, SpannedExpr};
 
 use crate::protovalidate::{
     check_protovalidate_method_arity, get_protovalidate_receiver_types,
@@ -431,7 +431,7 @@ mod tests {
     #[test]
     fn detects_undefined_variable() {
         let source = "x + 1";
-        let result = cel_parser::parse(source);
+        let result = cel_core_parser::parse(source);
         let errors = validate(result.ast.as_ref().unwrap(), &EmptyResolver);
 
         assert_eq!(errors.len(), 1);
@@ -443,7 +443,7 @@ mod tests {
     #[test]
     fn allows_builtin_function_calls() {
         let source = "size([1, 2, 3])";
-        let result = cel_parser::parse(source);
+        let result = cel_core_parser::parse(source);
         let errors = validate(result.ast.as_ref().unwrap(), &EmptyResolver);
 
         assert!(errors.is_empty(), "Expected no errors, got: {:?}", errors);
@@ -452,7 +452,7 @@ mod tests {
     #[test]
     fn allows_builtin_method_calls() {
         let source = "\"hello\".startsWith(\"h\")";
-        let result = cel_parser::parse(source);
+        let result = cel_core_parser::parse(source);
         let errors = validate(result.ast.as_ref().unwrap(), &EmptyResolver);
 
         assert!(errors.is_empty(), "Expected no errors, got: {:?}", errors);
@@ -461,7 +461,7 @@ mod tests {
     #[test]
     fn detects_undefined_method() {
         let source = "\"hello\".unknownMethod()";
-        let result = cel_parser::parse(source);
+        let result = cel_core_parser::parse(source);
         let errors = validate(result.ast.as_ref().unwrap(), &EmptyResolver);
 
         assert_eq!(errors.len(), 1);
@@ -474,7 +474,7 @@ mod tests {
     fn detects_undefined_variable_with_field_access() {
         // foo.bar - foo is undefined, bar is field access (not validated)
         let source = "foo.bar";
-        let result = cel_parser::parse(source);
+        let result = cel_core_parser::parse(source);
         let errors = validate(result.ast.as_ref().unwrap(), &EmptyResolver);
 
         assert_eq!(errors.len(), 1);
@@ -486,7 +486,7 @@ mod tests {
     fn detects_multiple_errors() {
         // foo.unknownMethod() - both foo is undefined and unknownMethod is undefined
         let source = "foo.unknownMethod()";
-        let result = cel_parser::parse(source);
+        let result = cel_core_parser::parse(source);
         let errors = validate(result.ast.as_ref().unwrap(), &EmptyResolver);
 
         assert_eq!(errors.len(), 2);
@@ -511,7 +511,7 @@ mod tests {
         }
 
         let source = "myVar + 1";
-        let result = cel_parser::parse(source);
+        let result = cel_core_parser::parse(source);
         let errors = validate(result.ast.as_ref().unwrap(), &TestResolver);
 
         assert!(errors.is_empty(), "Expected no errors, got: {:?}", errors);
@@ -520,7 +520,7 @@ mod tests {
     #[test]
     fn validates_nested_expressions() {
         let source = "[x, y, z].size()";
-        let result = cel_parser::parse(source);
+        let result = cel_core_parser::parse(source);
         let errors = validate(result.ast.as_ref().unwrap(), &EmptyResolver);
 
         // x, y, z are all undefined
@@ -533,7 +533,7 @@ mod tests {
     #[test]
     fn validates_ternary() {
         let source = "cond ? then_val : else_val";
-        let result = cel_parser::parse(source);
+        let result = cel_core_parser::parse(source);
         let errors = validate(result.ast.as_ref().unwrap(), &EmptyResolver);
 
         assert_eq!(errors.len(), 3);
@@ -542,7 +542,7 @@ mod tests {
     #[test]
     fn allows_literals() {
         let source = "1 + 2 + 3.14 + \"hello\"";
-        let result = cel_parser::parse(source);
+        let result = cel_core_parser::parse(source);
         let errors = validate(result.ast.as_ref().unwrap(), &EmptyResolver);
 
         assert!(errors.is_empty());
@@ -551,7 +551,7 @@ mod tests {
     #[test]
     fn detects_undefined_function() {
         let source = "unknownFunc(1, 2)";
-        let result = cel_parser::parse(source);
+        let result = cel_core_parser::parse(source);
         let errors = validate(result.ast.as_ref().unwrap(), &EmptyResolver);
 
         assert_eq!(errors.len(), 1);
@@ -564,7 +564,7 @@ mod tests {
     fn standalone_called_as_method_error() {
         // int() is a standalone function, should not be called as a method
         let source = "\"42\".int()";
-        let result = cel_parser::parse(source);
+        let result = cel_core_parser::parse(source);
         let errors = validate(result.ast.as_ref().unwrap(), &EmptyResolver);
 
         assert_eq!(errors.len(), 1);
@@ -577,7 +577,7 @@ mod tests {
     fn standalone_bool_called_as_method_error() {
         // bool() is a standalone function
         let source = "1.bool()";
-        let result = cel_parser::parse(source);
+        let result = cel_core_parser::parse(source);
         let errors = validate(result.ast.as_ref().unwrap(), &EmptyResolver);
 
         assert_eq!(errors.len(), 1);
@@ -589,7 +589,7 @@ mod tests {
     fn method_called_as_standalone_error() {
         // endsWith() is a method-only function
         let source = "endsWith(\"hello\", \"o\")";
-        let result = cel_parser::parse(source);
+        let result = cel_core_parser::parse(source);
         let errors = validate(result.ast.as_ref().unwrap(), &EmptyResolver);
 
         assert_eq!(errors.len(), 1);
@@ -602,7 +602,7 @@ mod tests {
     fn method_startswith_called_as_standalone_error() {
         // startsWith() is a method-only function
         let source = "startsWith(\"hello\", \"h\")";
-        let result = cel_parser::parse(source);
+        let result = cel_core_parser::parse(source);
         let errors = validate(result.ast.as_ref().unwrap(), &EmptyResolver);
 
         assert_eq!(errors.len(), 1);
@@ -616,7 +616,7 @@ mod tests {
         // Note: `all([1,2,3], x, x > 0)` also generates errors for `x` since
         // the validator doesn't understand comprehension semantics
         let source = "all([1,2,3], x, x > 0)";
-        let result = cel_parser::parse(source);
+        let result = cel_core_parser::parse(source);
         let errors = validate(result.ast.as_ref().unwrap(), &EmptyResolver);
 
         // Check that one of the errors is the method-as-standalone error
@@ -637,11 +637,11 @@ mod tests {
         let standalone = "size([1,2,3])";
         let method = "[1,2,3].size()";
 
-        let result1 = cel_parser::parse(standalone);
+        let result1 = cel_core_parser::parse(standalone);
         let errors1 = validate(result1.ast.as_ref().unwrap(), &EmptyResolver);
         assert!(errors1.is_empty(), "size() should work as standalone: {:?}", errors1);
 
-        let result2 = cel_parser::parse(method);
+        let result2 = cel_core_parser::parse(method);
         let errors2 = validate(result2.ast.as_ref().unwrap(), &EmptyResolver);
         assert!(errors2.is_empty(), "size() should work as method: {:?}", errors2);
     }
@@ -651,7 +651,7 @@ mod tests {
     #[test]
     fn too_few_args_standalone_size() {
         let source = "size()";
-        let result = cel_parser::parse(source);
+        let result = cel_core_parser::parse(source);
         let errors = validate(result.ast.as_ref().unwrap(), &EmptyResolver);
 
         assert_eq!(errors.len(), 1);
@@ -663,7 +663,7 @@ mod tests {
     #[test]
     fn too_many_args_standalone_size() {
         let source = "size([1], [2])";
-        let result = cel_parser::parse(source);
+        let result = cel_core_parser::parse(source);
         let errors = validate(result.ast.as_ref().unwrap(), &EmptyResolver);
 
         assert_eq!(errors.len(), 1);
@@ -675,7 +675,7 @@ mod tests {
     #[test]
     fn too_many_args_method_size() {
         let source = "[1,2,3].size(1)";
-        let result = cel_parser::parse(source);
+        let result = cel_core_parser::parse(source);
         let errors = validate(result.ast.as_ref().unwrap(), &EmptyResolver);
 
         assert_eq!(errors.len(), 1);
@@ -686,7 +686,7 @@ mod tests {
     #[test]
     fn too_few_args_method_ends_with() {
         let source = "\"hello\".endsWith()";
-        let result = cel_parser::parse(source);
+        let result = cel_core_parser::parse(source);
         let errors = validate(result.ast.as_ref().unwrap(), &EmptyResolver);
 
         assert_eq!(errors.len(), 1);
@@ -697,7 +697,7 @@ mod tests {
     #[test]
     fn too_many_args_method_ends_with() {
         let source = "\"hello\".endsWith(\"o\", \"extra\")";
-        let result = cel_parser::parse(source);
+        let result = cel_core_parser::parse(source);
         let errors = validate(result.ast.as_ref().unwrap(), &EmptyResolver);
 
         assert_eq!(errors.len(), 1);
@@ -717,7 +717,7 @@ mod tests {
         ];
 
         for source in sources {
-            let result = cel_parser::parse(source);
+            let result = cel_core_parser::parse(source);
             let errors: Vec<_> = validate(result.ast.as_ref().unwrap(), &EmptyResolver)
                 .into_iter()
                 .filter(|e| {
@@ -735,7 +735,7 @@ mod tests {
     fn map_macro_accepts_2_or_3_args() {
         // 2 args - valid
         let source1 = "[1,2,3].map(x, x * 2)";
-        let result1 = cel_parser::parse(source1);
+        let result1 = cel_core_parser::parse(source1);
         let arity_errors1: Vec<_> = validate(result1.ast.as_ref().unwrap(), &EmptyResolver)
             .into_iter()
             .filter(|e| {
@@ -749,7 +749,7 @@ mod tests {
 
         // 3 args - valid (with filter)
         let source2 = "[1,2,3].map(x, x > 1, x * 2)";
-        let result2 = cel_parser::parse(source2);
+        let result2 = cel_core_parser::parse(source2);
         let arity_errors2: Vec<_> = validate(result2.ast.as_ref().unwrap(), &EmptyResolver)
             .into_iter()
             .filter(|e| {
@@ -763,7 +763,7 @@ mod tests {
 
         // 4 args - invalid
         let source3 = "[1,2,3].map(x, x > 1, x * 2, \"extra\")";
-        let result3 = cel_parser::parse(source3);
+        let result3 = cel_core_parser::parse(source3);
         let arity_errors3: Vec<_> = validate(result3.ast.as_ref().unwrap(), &EmptyResolver)
             .into_iter()
             .filter(|e| e.kind == ValidationErrorKind::TooManyArguments)
@@ -784,7 +784,7 @@ mod tests {
 
         // 0 args - valid
         let source1 = "ts.getHours()";
-        let result1 = cel_parser::parse(source1);
+        let result1 = cel_core_parser::parse(source1);
         let arity_errors1: Vec<_> = validate(result1.ast.as_ref().unwrap(), &TimestampResolver)
             .into_iter()
             .filter(|e| {
@@ -798,7 +798,7 @@ mod tests {
 
         // 1 arg - valid (timezone)
         let source2 = "ts.getHours(\"America/New_York\")";
-        let result2 = cel_parser::parse(source2);
+        let result2 = cel_core_parser::parse(source2);
         let arity_errors2: Vec<_> = validate(result2.ast.as_ref().unwrap(), &TimestampResolver)
             .into_iter()
             .filter(|e| {
@@ -812,7 +812,7 @@ mod tests {
 
         // 2 args - invalid
         let source3 = "ts.getHours(\"tz1\", \"tz2\")";
-        let result3 = cel_parser::parse(source3);
+        let result3 = cel_core_parser::parse(source3);
         let arity_errors3: Vec<_> = validate(result3.ast.as_ref().unwrap(), &TimestampResolver)
             .into_iter()
             .filter(|e| e.kind == ValidationErrorKind::TooManyArguments)
@@ -825,7 +825,7 @@ mod tests {
     #[test]
     fn invalid_type_for_size_standalone() {
         let source = "size(123)";
-        let result = cel_parser::parse(source);
+        let result = cel_core_parser::parse(source);
         let errors = validate(result.ast.as_ref().unwrap(), &EmptyResolver);
 
         let type_error = errors
@@ -844,7 +844,7 @@ mod tests {
         ];
 
         for source in valid_sources {
-            let result = cel_parser::parse(source);
+            let result = cel_core_parser::parse(source);
             let type_errors: Vec<_> = validate(result.ast.as_ref().unwrap(), &EmptyResolver)
                 .into_iter()
                 .filter(|e| e.kind == ValidationErrorKind::InvalidArgumentType)
@@ -856,7 +856,7 @@ mod tests {
     #[test]
     fn invalid_receiver_type_for_method() {
         let source = "123.startsWith(\"1\")";
-        let result = cel_parser::parse(source);
+        let result = cel_core_parser::parse(source);
         let errors = validate(result.ast.as_ref().unwrap(), &EmptyResolver);
 
         let type_error = errors
@@ -869,7 +869,7 @@ mod tests {
     #[test]
     fn invalid_arg_type_for_string_method() {
         let source = "\"hello\".endsWith(123)";
-        let result = cel_parser::parse(source);
+        let result = cel_core_parser::parse(source);
         let errors = validate(result.ast.as_ref().unwrap(), &EmptyResolver);
 
         let type_error = errors
@@ -890,7 +890,7 @@ mod tests {
         }
 
         let source = "size(x)";
-        let result = cel_parser::parse(source);
+        let result = cel_core_parser::parse(source);
         let type_errors: Vec<_> = validate(result.ast.as_ref().unwrap(), &AllowX)
             .into_iter()
             .filter(|e| e.kind == ValidationErrorKind::InvalidArgumentType)
@@ -911,7 +911,7 @@ mod tests {
         ];
 
         for source in valid_sources {
-            let result = cel_parser::parse(source);
+            let result = cel_core_parser::parse(source);
             let type_errors: Vec<_> = validate(result.ast.as_ref().unwrap(), &EmptyResolver)
                 .into_iter()
                 .filter(|e| e.kind == ValidationErrorKind::InvalidArgumentType)
@@ -937,7 +937,7 @@ mod tests {
         ];
 
         for source in valid_sources {
-            let result = cel_parser::parse(source);
+            let result = cel_core_parser::parse(source);
             let errors: Vec<_> = validate(result.ast.as_ref().unwrap(), &ProtovalidateResolver)
                 .into_iter()
                 .filter(|e| e.kind == ValidationErrorKind::UndefinedMethod)
@@ -950,7 +950,7 @@ mod tests {
     fn protovalidate_functions_invalid_in_cel_context() {
         // Protovalidate functions should be flagged as undefined in plain CEL context
         let source = "\"test\".isEmail()";
-        let result = cel_parser::parse(source);
+        let result = cel_core_parser::parse(source);
         let errors = validate(result.ast.as_ref().unwrap(), &EmptyResolver);
 
         let method_error = errors
@@ -967,7 +967,7 @@ mod tests {
     fn protovalidate_functions_are_method_only() {
         // Protovalidate functions should not be callable as standalone
         let source = "isEmail(this)";
-        let result = cel_parser::parse(source);
+        let result = cel_core_parser::parse(source);
         let errors = validate(result.ast.as_ref().unwrap(), &ProtovalidateResolver);
 
         let method_error = errors
@@ -983,7 +983,7 @@ mod tests {
     fn protovalidate_arity_checking() {
         // isEmail takes 0 arguments
         let source1 = "this.isEmail(\"extra\")";
-        let result1 = cel_parser::parse(source1);
+        let result1 = cel_core_parser::parse(source1);
         let arity_errors1: Vec<_> = validate(result1.ast.as_ref().unwrap(), &ProtovalidateResolver)
             .into_iter()
             .filter(|e| e.kind == ValidationErrorKind::TooManyArguments)
@@ -992,7 +992,7 @@ mod tests {
 
         // isIp takes 0-1 arguments
         let source2 = "this.isIp()";
-        let result2 = cel_parser::parse(source2);
+        let result2 = cel_core_parser::parse(source2);
         let arity_errors2: Vec<_> = validate(result2.ast.as_ref().unwrap(), &ProtovalidateResolver)
             .into_iter()
             .filter(|e| matches!(e.kind, ValidationErrorKind::TooFewArguments | ValidationErrorKind::TooManyArguments))
@@ -1000,7 +1000,7 @@ mod tests {
         assert!(arity_errors2.is_empty(), "isIp() with 0 args should be valid");
 
         let source3 = "this.isIp(4)";
-        let result3 = cel_parser::parse(source3);
+        let result3 = cel_core_parser::parse(source3);
         let arity_errors3: Vec<_> = validate(result3.ast.as_ref().unwrap(), &ProtovalidateResolver)
             .into_iter()
             .filter(|e| matches!(e.kind, ValidationErrorKind::TooFewArguments | ValidationErrorKind::TooManyArguments))
@@ -1008,7 +1008,7 @@ mod tests {
         assert!(arity_errors3.is_empty(), "isIp(4) with 1 arg should be valid");
 
         let source4 = "this.isIp(4, 6)";
-        let result4 = cel_parser::parse(source4);
+        let result4 = cel_core_parser::parse(source4);
         let arity_errors4: Vec<_> = validate(result4.ast.as_ref().unwrap(), &ProtovalidateResolver)
             .into_iter()
             .filter(|e| e.kind == ValidationErrorKind::TooManyArguments)
@@ -1020,7 +1020,7 @@ mod tests {
     fn protovalidate_receiver_type_checking() {
         // isEmail requires string receiver
         let source = "123.isEmail()";
-        let result = cel_parser::parse(source);
+        let result = cel_core_parser::parse(source);
         let errors = validate(result.ast.as_ref().unwrap(), &ProtovalidateResolver);
 
         let type_error = errors

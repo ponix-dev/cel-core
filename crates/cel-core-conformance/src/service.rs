@@ -6,6 +6,7 @@
 use crate::{
     Binding, CheckResponse, ConformanceService, EvalResponse, Issue, ParseResponse, TypeDecl,
 };
+use cel_core_proto::gen::cel::expr::ParsedExpr;
 
 /// CEL conformance service implementation using cel-parser.
 ///
@@ -24,7 +25,7 @@ impl CelConformanceService {
 
 impl ConformanceService for CelConformanceService {
     fn parse(&self, source: &str) -> ParseResponse {
-        let result = cel_parser::parse(source);
+        let result = cel_core_parser::parse(source);
 
         // Convert parse errors to issues
         let issues: Vec<Issue> = result
@@ -39,27 +40,19 @@ impl ConformanceService for CelConformanceService {
         // Convert AST to ParsedExpr using cel-proto
         let parsed_expr = result
             .ast
-            .map(|ast| cel_proto::to_parsed_expr(&ast, source));
+            .map(|ast| cel_core_proto::to_parsed_expr(&ast, source));
 
         ParseResponse { parsed_expr, issues }
     }
 
-    fn check(
-        &self,
-        _parsed: &google_cel_spec_community_neoeinstein_prost::cel::expr::ParsedExpr,
-        _type_env: &[TypeDecl],
-    ) -> CheckResponse {
+    fn check(&self, _parsed: &ParsedExpr, _type_env: &[TypeDecl]) -> CheckResponse {
         CheckResponse {
             checked_expr: None,
             issues: vec![Issue::unimplemented("type checking")],
         }
     }
 
-    fn eval(
-        &self,
-        _expr: &google_cel_spec_community_neoeinstein_prost::cel::expr::ParsedExpr,
-        _bindings: &[Binding],
-    ) -> EvalResponse {
+    fn eval(&self, _expr: &ParsedExpr, _bindings: &[Binding]) -> EvalResponse {
         EvalResponse {
             result: None,
             issues: vec![Issue::unimplemented("evaluation")],

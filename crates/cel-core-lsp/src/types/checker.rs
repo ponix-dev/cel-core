@@ -1,6 +1,6 @@
 //! Type checking utilities for CEL expressions.
 
-use cel_parser::ast::Expr;
+use cel_core_parser::ast::Expr;
 
 use super::builtins::get_builtin;
 use super::cel_type::CelType;

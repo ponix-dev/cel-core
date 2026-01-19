@@ -3,15 +3,12 @@
 //! This module handles parsing the CEL conformance test data files
 //! from the cel-spec repository.
 
+use cel_core_proto::gen::cel::expr::{
+    conformance, conformance::test::SimpleTestFile, FILE_DESCRIPTOR_SET as EXPR_FILE_DESCRIPTOR_SET,
+};
 use prost::Message;
 use prost_reflect::{DescriptorPool, DynamicMessage};
 use std::path::Path;
-
-use google_cel_spec_community_neoeinstein_prost::cel::expr::{
-    conformance,
-    conformance::test::SimpleTestFile,
-    FILE_DESCRIPTOR_SET as EXPR_FILE_DESCRIPTOR_SET,
-};
 
 /// Load a SimpleTestFile from a .textproto file.
 pub fn load_test_file(path: &Path) -> Result<SimpleTestFile, LoadError> {
@@ -89,7 +86,10 @@ mod tests {
     #[test]
     fn test_list_messages() {
         let mut pool = DescriptorPool::global();
-        println!("Global pool messages before: {}", pool.all_messages().count());
+        println!(
+            "Global pool messages before: {}",
+            pool.all_messages().count()
+        );
 
         // Add descriptors in dependency order
         pool.decode_file_descriptor_set(EXPR_FILE_DESCRIPTOR_SET)
@@ -103,9 +103,15 @@ mod tests {
         pool.decode_file_descriptor_set(conformance::test::FILE_DESCRIPTOR_SET)
             .expect("Failed to decode test descriptors");
 
-        println!("Global pool messages after: {}", pool.all_messages().count());
+        println!(
+            "Global pool messages after: {}",
+            pool.all_messages().count()
+        );
 
-        let messages: Vec<_> = pool.all_messages().map(|m| m.full_name().to_string()).collect();
+        let messages: Vec<_> = pool
+            .all_messages()
+            .map(|m| m.full_name().to_string())
+            .collect();
         println!("Available messages ({}):", messages.len());
         for msg in &messages {
             if msg.contains("Simple") || msg.contains("Test") || msg.contains("cel") {
@@ -118,18 +124,29 @@ mod tests {
     fn test_load_basic_textproto() {
         let path = Path::new("cel-spec/tests/simple/testdata/basic.textproto");
         let result = load_test_file(path);
-        assert!(result.is_ok(), "Failed to load basic.textproto: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "Failed to load basic.textproto: {:?}",
+            result.err()
+        );
 
         let test_file = result.unwrap();
         assert_eq!(test_file.name, "basic");
-        assert!(!test_file.section.is_empty(), "Expected at least one section");
+        assert!(
+            !test_file.section.is_empty(),
+            "Expected at least one section"
+        );
     }
 
     #[test]
     fn test_load_parse_textproto() {
         let path = Path::new("cel-spec/tests/simple/testdata/parse.textproto");
         let result = load_test_file(path);
-        assert!(result.is_ok(), "Failed to load parse.textproto: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "Failed to load parse.textproto: {:?}",
+            result.err()
+        );
 
         let test_file = result.unwrap();
         assert_eq!(test_file.name, "parse");

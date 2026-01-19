@@ -1,12 +1,15 @@
 [package]
-name = "cel-conformance"
+name = "cel-core-conformance"
+description = "CEL conformance testing against official cel-spec"
+publish = false
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
 
 [dependencies]
-cel-parser = { path = "../cel-parser" }
-cel-proto = { path = "../cel-proto" }
-google_cel-spec_community_neoeinstein-prost = { version = "0.5.0-20251103204847-96eff7bcf453.2", registry = "buf" }
-prost = "0.14"
+cel-core-parser.workspace = true
+cel-core-proto.workspace = true
+prost.workspace = true
 prost-reflect = { version = "0.16", features = ["text-format"] }
-protoc-wkt = "1.0"

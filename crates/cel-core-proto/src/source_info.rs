@@ -1,6 +1,6 @@
 //! Source information utilities for position tracking.
 
-use google_cel_spec_community_neoeinstein_prost::cel::expr::SourceInfo;
+use crate::gen::cel::expr::SourceInfo;
 use std::collections::HashMap;
 
 /// Compute byte offsets of each line start.

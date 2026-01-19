@@ -1,6 +1,6 @@
 //! Diagnostics conversion from parser and validation errors to LSP diagnostics.
 
-use cel_parser::ParseError;
+use cel_core_parser::ParseError;
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString};
 
 use crate::document::{LineIndex, ProtoDocumentState};
@@ -136,7 +136,7 @@ mod tests {
     #[test]
     fn creates_diagnostic_from_parse_error() {
         let source = "1 + ";
-        let result = cel_parser::parse(source);
+        let result = cel_core_parser::parse(source);
         let line_index = LineIndex::new(source.to_string());
 
         assert!(!result.errors.is_empty());

@@ -1,6 +1,6 @@
 //! Common test utilities for cel-parser integration tests.
 
-use cel_parser::{parse, ParseError, SpannedExpr};
+use cel_core_parser::{parse, ParseError, SpannedExpr};
 
 /// Parse input and assert it succeeds, returning the AST.
 #[allow(dead_code)]

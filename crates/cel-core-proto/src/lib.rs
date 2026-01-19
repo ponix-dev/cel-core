@@ -7,11 +7,11 @@
 //! # Example
 //!
 //! ```
-//! use cel_parser::SpannedExpr;
-//! use cel_proto::{to_parsed_expr, from_parsed_expr};
+//! use cel_core_parser::SpannedExpr;
+//! use cel_core_proto::{to_parsed_expr, from_parsed_expr};
 //!
 //! // Parse a CEL expression
-//! let result = cel_parser::parse("x + 1");
+//! let result = cel_core_parser::parse("x + 1");
 //! let ast = result.ast.unwrap();
 //!
 //! // Convert to proto format
@@ -24,6 +24,7 @@
 
 mod converter;
 mod error;
+pub mod gen;
 mod operators;
 mod source_info;
 
@@ -36,11 +37,9 @@ pub use operators::{
 pub use source_info::{build_source_info, compute_line_offsets, get_position};
 
 // Re-export proto types for convenience
-pub use google_cel_spec_community_neoeinstein_prost::cel::expr::{
-    CheckedExpr, Constant, Expr, ParsedExpr, SourceInfo, Type, Value,
-};
+pub use gen::cel::expr::{CheckedExpr, Constant, Expr, ParsedExpr, SourceInfo, Type, Value};
 
-use cel_parser::SpannedExpr;
+use cel_core_parser::SpannedExpr;
 
 /// Convert a cel-parser AST to a proto ParsedExpr.
 ///
@@ -95,12 +94,12 @@ pub fn from_parsed_expr(parsed: &ParsedExpr) -> Result<SpannedExpr, ConversionEr
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cel_parser::Expr;
+    use cel_core_parser::Expr;
 
     #[test]
     fn test_to_parsed_expr() {
         let source = "x + 1";
-        let result = cel_parser::parse(source);
+        let result = cel_core_parser::parse(source);
         let ast = result.ast.unwrap();
 
         let parsed = to_parsed_expr(&ast, source);
@@ -112,7 +111,7 @@ mod tests {
     #[test]
     fn test_from_parsed_expr() {
         let source = "x + 1";
-        let result = cel_parser::parse(source);
+        let result = cel_core_parser::parse(source);
         let ast = result.ast.unwrap();
 
         let parsed = to_parsed_expr(&ast, source);
@@ -121,7 +120,7 @@ mod tests {
         // Check the structure matches
         match &roundtripped.node {
             Expr::Binary { op, left, right } => {
-                assert_eq!(*op, cel_parser::BinaryOp::Add);
+                assert_eq!(*op, cel_core_parser::BinaryOp::Add);
                 assert!(matches!(left.node, Expr::Ident(ref s) if s == "x"));
                 assert!(matches!(right.node, Expr::Int(1)));
             }
@@ -132,7 +131,7 @@ mod tests {
     #[test]
     fn test_roundtrip_complex() {
         let source = "a > 0 && b.contains('x') ? [1, 2, 3] : {'key': value}";
-        let result = cel_parser::parse(source);
+        let result = cel_core_parser::parse(source);
         let ast = result.ast.unwrap();
 
         let parsed = to_parsed_expr(&ast, source);
@@ -159,7 +158,7 @@ mod tests {
     #[test]
     fn test_from_parsed_expr_missing_source_info() {
         let parsed = ParsedExpr {
-            expr: Some(google_cel_spec_community_neoeinstein_prost::cel::expr::Expr::default()),
+            expr: Some(gen::cel::expr::Expr::default()),
             source_info: None,
         };
 

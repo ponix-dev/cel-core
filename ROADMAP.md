@@ -8,10 +8,10 @@ This document outlines the path to achieving full CEL (Common Expression Languag
 
 ```
 crates/
-  cel-parser/       # Lexer + parser, produces AST
-  cel-proto/        # Bidirectional AST <-> proto conversion
-  cel-lsp/          # Language Server Protocol implementation
-  cel-conformance/  # Conformance testing against cel-spec
+  cel-core-parser/       # Lexer + parser, produces AST
+  cel-core-proto/        # Bidirectional AST <-> proto conversion
+  cel-core-lsp/          # Language Server Protocol implementation
+  cel-core-conformance/  # Conformance testing against cel-spec
 ```
 
 ### What We Have
@@ -50,7 +50,7 @@ CEL follows a three-phase model, matching cel-go's architecture:
 
 The parser converts CEL source into an abstract syntax tree. Each node receives a unique ID that later phases use to attach metadata (types, references).
 
-**Current status:** Complete. Our parser produces a full AST with spans, and `cel-proto` converts it to `ParsedExpr`.
+**Current status:** Complete. Our parser produces a full AST with spans, and `cel-core-proto` converts it to `ParsedExpr`.
 
 **Gap:** Our internal AST doesn't preserve node IDs across conversions. The proto conversion assigns IDs during conversion, not during parsing.
 
@@ -66,7 +66,7 @@ The checker validates the expression against a type environment and produces a `
 - **`expr`**: The original parsed expression
 - **`source_info`**: Source location data
 
-**Current status:** Not implemented. We have partial validation in `cel-lsp` for LSP diagnostics, but it:
+**Current status:** Not implemented. We have partial validation in `cel-core-lsp` for LSP diagnostics, but it:
 - Only infers types for literals (not expressions)
 - Doesn't produce `CheckedExpr`
 - Doesn't handle generics (`List<T>`, `Map<K,V>`)
@@ -181,7 +181,7 @@ pub enum CelType {
 
 #### 2.2 Type Checker Implementation
 
-Create a new `cel-checker` crate (or module in `cel-lsp`) that:
+Create a new `cel-core-checker` crate (or module in `cel-core-lsp`) that:
 
 1. **Walks the AST** assigning types to each node
 2. **Resolves identifiers** against the type environment
@@ -324,7 +324,7 @@ The evaluator handles:
 
 **Goal:** Pass the official cel-spec conformance test suite.
 
-The `cel-conformance` crate already has the infrastructure:
+The `cel-core-conformance` crate already has the infrastructure:
 
 ```rust
 pub trait ConformanceService {
@@ -364,16 +364,16 @@ Track conformance by category, starting with:
 
 ```
 crates/
-  cel-parser/       # Lexer, parser, AST (with node IDs)
-  cel-types/        # Type system, CelType, CelValue (new)
-  cel-checker/      # Type checking, produces CheckedExpr (new)
-  cel-eval/         # Program compilation and evaluation (new)
-  cel-proto/        # Proto conversion (enhanced)
-  cel-lsp/          # LSP implementation (uses above)
-  cel-conformance/  # Conformance testing
+  cel-core-parser/       # Lexer, parser, AST (with node IDs)
+  cel-core-types/        # Type system, CelType, CelValue (new)
+  cel-core-checker/      # Type checking, produces CheckedExpr (new)
+  cel-core-eval/         # Program compilation and evaluation (new)
+  cel-core-proto/        # Proto conversion (enhanced)
+  cel-core-lsp/          # LSP implementation (uses above)
+  cel-core-conformance/  # Conformance testing
 ```
 
-Alternatively, `cel-types`, `cel-checker`, and `cel-eval` could be a single `cel-runtime` crate.
+Alternatively, `cel-core-types`, `cel-core-checker`, and `cel-core-eval` could be a single `cel-core-runtime` crate.
 
 ---
 

@@ -8,12 +8,10 @@ pub mod service;
 
 pub use service::CelConformanceService;
 
-use google_cel_spec_community_neoeinstein_prost::cel::expr::{
-    CheckedExpr, ExprValue, ParsedExpr,
-};
+use cel_core_proto::gen::cel::expr::{CheckedExpr, ExprValue, ParsedExpr};
 
 // Re-export commonly used types
-pub use google_cel_spec_community_neoeinstein_prost::cel::expr::conformance::test::{
+pub use cel_core_proto::gen::cel::expr::conformance::test::{
     SimpleTest, SimpleTestFile, SimpleTestSection,
 };
 pub use loader::{load_test_file, LoadError};
@@ -168,7 +166,7 @@ pub struct TypeDecl {
     /// The variable name.
     pub name: String,
     /// The CEL type (using proto Type message).
-    pub cel_type: google_cel_spec_community_neoeinstein_prost::cel::expr::Type,
+    pub cel_type: cel_core_proto::gen::cel::expr::Type,
 }
 
 /// A variable binding for evaluation.
@@ -177,5 +175,5 @@ pub struct Binding {
     /// The variable name.
     pub name: String,
     /// The bound value.
-    pub value: google_cel_spec_community_neoeinstein_prost::cel::expr::Value,
+    pub value: cel_core_proto::gen::cel::expr::Value,
 }

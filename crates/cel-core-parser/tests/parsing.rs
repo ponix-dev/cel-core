@@ -2,7 +2,7 @@
 
 mod common;
 
-use cel_parser::{BinaryOp, Expr, UnaryOp};
+use cel_core_parser::{BinaryOp, Expr, UnaryOp};
 
 // ============================================================================
 // Literal parsing tests

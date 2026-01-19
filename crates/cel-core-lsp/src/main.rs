@@ -1,4 +1,4 @@
-use cel_lsp::create_service;
+use cel_core_lsp::create_service;
 use tower_lsp::Server;
 
 #[tokio::main]

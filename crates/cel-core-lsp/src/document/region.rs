@@ -6,7 +6,7 @@
 
 use std::ops::Range;
 
-use cel_parser::{ParseError, SpannedExpr};
+use cel_core_parser::{ParseError, SpannedExpr};
 
 use crate::types::ValidationError;
 
@@ -117,7 +117,7 @@ pub struct CelRegionState {
 impl CelRegionState {
     /// Create a new CEL region state by parsing and validating the source.
     pub fn new(region: CelRegion, mapper: OffsetMapper) -> Self {
-        let result = cel_parser::parse(&region.source);
+        let result = cel_core_parser::parse(&region.source);
 
         // Run validation if we have an AST
         let validation_errors = result

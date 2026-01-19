@@ -4,7 +4,7 @@
 //! from the cel-spec repository. Each test expression that fails to parse
 //! will cause a test failure.
 
-use cel_conformance::{load_test_file, CelConformanceService, ConformanceService};
+use cel_core_conformance::{load_test_file, CelConformanceService, ConformanceService};
 use std::path::Path;
 
 const TESTDATA_PATH: &str = "cel-spec/tests/simple/testdata";

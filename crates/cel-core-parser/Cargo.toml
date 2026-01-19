@@ -1,7 +1,13 @@
 [package]
-name = "cel-parser"
+name = "cel-core-parser"
+description = "A CEL (Common Expression Language) parser with error recovery"
+keywords = ["cel", "parser", "expression-language"]
+categories = ["parsing", "development-tools"]
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
 
 [dependencies]
 logos.workspace = true

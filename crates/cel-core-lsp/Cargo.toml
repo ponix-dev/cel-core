@@ -1,10 +1,16 @@
 [package]
-name = "cel-lsp"
+name = "cel-core-lsp"
+description = "Language Server Protocol implementation for CEL"
+keywords = ["cel", "lsp", "language-server", "ide"]
+categories = ["development-tools", "text-editors"]
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
 
 [dependencies]
-cel-parser = { path = "../cel-parser" }
+cel-core-parser.workspace = true
 dashmap = "5.5"
 tower-lsp = "0.20"
 tokio = { version = "1", features = ["full"] }

@@ -1,4 +1,4 @@
-use cel_lsp::create_service;
+use cel_core_lsp::create_service;
 
 #[test]
 fn service_can_be_created() {

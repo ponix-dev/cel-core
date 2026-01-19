@@ -1,9 +1,19 @@
 [package]
-name = "cel-proto"
+name = "cel-core-proto"
+description = "Protobuf types for CEL AST (cel-spec compatibility)"
+keywords = ["cel", "protobuf", "ast"]
+categories = ["encoding", "parsing"]
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lib]
+doctest = false
 
 [dependencies]
-cel-parser = { path = "../cel-parser" }
-google_cel-spec_community_neoeinstein-prost = { version = "0.5.0-20251103204847-96eff7bcf453.2", registry = "buf" }
+cel-core-parser.workspace = true
+prost.workspace = true
+prost-types = "0.14"
 thiserror = "2"
