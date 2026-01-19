@@ -102,12 +102,14 @@ pub fn infer_literal_type(expr: &Expr) -> Option<CelType> {
         // Cannot determine type statically for these
         Expr::Ident(_) | Expr::RootIdent(_) => None,
         Expr::Member { .. } => None,
+        Expr::MemberTestOnly { .. } => Some(CelType::Bool), // has() always returns bool
         Expr::Index { .. } => None,
         Expr::Call { .. } => None,
         Expr::Unary { .. } => None,
         Expr::Binary { .. } => None,
         Expr::Ternary { .. } => None,
         Expr::Struct { .. } => None,
+        Expr::Comprehension { .. } => None, // Result type depends on the macro
         Expr::Error => None,
     }
 }

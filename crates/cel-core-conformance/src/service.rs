@@ -37,10 +37,10 @@ impl ConformanceService for CelConformanceService {
             })
             .collect();
 
-        // Convert AST to ParsedExpr using cel-proto
-        let parsed_expr = result
-            .ast
-            .map(|ast| cel_core_proto::to_parsed_expr(&ast, source));
+        // Convert AST to ParsedExpr using cel-proto (with macro_calls for IDE features)
+        let parsed_expr = result.ast.map(|ast| {
+            cel_core_proto::to_parsed_expr_with_macros(&ast, source, &result.macro_calls)
+        });
 
         ParseResponse { parsed_expr, issues }
     }

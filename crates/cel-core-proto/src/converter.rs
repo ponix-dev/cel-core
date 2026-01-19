@@ -5,7 +5,7 @@ use crate::gen::cel::expr::{
     constant::ConstantKind,
     expr::{
         create_struct::{entry::KeyKind, Entry},
-        Call, CreateList, CreateStruct, ExprKind, Ident, Select,
+        Call, Comprehension, CreateList, CreateStruct, ExprKind, Ident, Select,
     },
     Constant, ParsedExpr, SourceInfo,
 };
@@ -177,6 +177,30 @@ impl AstConverter {
                     entries: converted,
                 }))
             }
+            Expr::Comprehension {
+                iter_var,
+                iter_var2,
+                iter_range,
+                accu_var,
+                accu_init,
+                loop_condition,
+                loop_step,
+                result,
+            } => Some(ExprKind::ComprehensionExpr(Box::new(Comprehension {
+                iter_var: iter_var.clone(),
+                iter_var2: iter_var2.clone(),
+                iter_range: Some(Box::new(self.ast_to_expr(iter_range))),
+                accu_var: accu_var.clone(),
+                accu_init: Some(Box::new(self.ast_to_expr(accu_init))),
+                loop_condition: Some(Box::new(self.ast_to_expr(loop_condition))),
+                loop_step: Some(Box::new(self.ast_to_expr(loop_step))),
+                result: Some(Box::new(self.ast_to_expr(result))),
+            }))),
+            Expr::MemberTestOnly { expr, field } => Some(ExprKind::SelectExpr(Box::new(Select {
+                operand: Some(Box::new(self.ast_to_expr(expr))),
+                field: field.clone(),
+                test_only: true,
+            }))),
             Expr::Error => None,
         };
 
@@ -188,6 +212,22 @@ impl AstConverter {
         ParsedExpr {
             expr: Some(expr),
             source_info: Some(build_source_info(self.positions, self.line_offsets)),
+        }
+    }
+
+    /// Consume the converter and build a ParsedExpr with source info and macro_calls.
+    pub fn into_parsed_expr_with_macros(
+        self,
+        expr: crate::gen::cel::expr::Expr,
+        macro_calls: HashMap<i64, crate::gen::cel::expr::Expr>,
+    ) -> ParsedExpr {
+        ParsedExpr {
+            expr: Some(expr),
+            source_info: Some(crate::source_info::build_source_info_with_macros(
+                self.positions,
+                self.line_offsets,
+                macro_calls,
+            )),
         }
     }
 
@@ -216,9 +256,17 @@ impl AstConverter {
                 ExprKind::IdentExpr(ident) => Expr::Ident(ident.name.clone()),
                 ExprKind::SelectExpr(select) => {
                     if let Some(operand) = &select.operand {
-                        Expr::Member {
-                            expr: Box::new(self.expr_to_ast(operand, source_info)?),
-                            field: select.field.clone(),
+                        if select.test_only {
+                            // test_only Select becomes MemberTestOnly
+                            Expr::MemberTestOnly {
+                                expr: Box::new(self.expr_to_ast(operand, source_info)?),
+                                field: select.field.clone(),
+                            }
+                        } else {
+                            Expr::Member {
+                                expr: Box::new(self.expr_to_ast(operand, source_info)?),
+                                field: select.field.clone(),
+                            }
                         }
                     } else {
                         // Select without operand is a root ident
@@ -235,8 +283,8 @@ impl AstConverter {
                     Expr::List(elements?)
                 }
                 ExprKind::StructExpr(s) => self.struct_to_ast(expr.id, s, source_info)?,
-                ExprKind::ComprehensionExpr(_) => {
-                    return Err(ConversionError::UnsupportedComprehension { expr_id: expr.id });
+                ExprKind::ComprehensionExpr(comp) => {
+                    self.comprehension_to_ast(expr.id, comp, source_info)?
                 }
             },
         };
@@ -428,6 +476,57 @@ impl AstConverter {
                 fields: fields?,
             })
         }
+    }
+
+    fn comprehension_to_ast(
+        &self,
+        expr_id: i64,
+        comp: &Comprehension,
+        source_info: &SourceInfo,
+    ) -> Result<Expr, ConversionError> {
+        let iter_range = comp
+            .iter_range
+            .as_ref()
+            .ok_or(ConversionError::MissingField {
+                expr_id,
+                field: "iter_range",
+            })?;
+        let accu_init = comp
+            .accu_init
+            .as_ref()
+            .ok_or(ConversionError::MissingField {
+                expr_id,
+                field: "accu_init",
+            })?;
+        let loop_condition =
+            comp.loop_condition
+                .as_ref()
+                .ok_or(ConversionError::MissingField {
+                    expr_id,
+                    field: "loop_condition",
+                })?;
+        let loop_step = comp
+            .loop_step
+            .as_ref()
+            .ok_or(ConversionError::MissingField {
+                expr_id,
+                field: "loop_step",
+            })?;
+        let result = comp.result.as_ref().ok_or(ConversionError::MissingField {
+            expr_id,
+            field: "result",
+        })?;
+
+        Ok(Expr::Comprehension {
+            iter_var: comp.iter_var.clone(),
+            iter_var2: comp.iter_var2.clone(),
+            iter_range: Box::new(self.expr_to_ast(iter_range, source_info)?),
+            accu_var: comp.accu_var.clone(),
+            accu_init: Box::new(self.expr_to_ast(accu_init, source_info)?),
+            loop_condition: Box::new(self.expr_to_ast(loop_condition, source_info)?),
+            loop_step: Box::new(self.expr_to_ast(loop_step, source_info)?),
+            result: Box::new(self.expr_to_ast(result, source_info)?),
+        })
     }
 }
 

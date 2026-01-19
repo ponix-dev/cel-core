@@ -79,6 +79,48 @@ pub enum Expr {
         fields: Vec<(String, SpannedExpr)>,
     },
 
+    /// Comprehension expression (result of macro expansion).
+    ///
+    /// Represents the expansion of macros like `all`, `exists`, `exists_one`, `map`, `filter`.
+    /// These are created during macro expansion, not directly from parsing.
+    ///
+    /// Semantics:
+    /// ```text
+    /// let accu_var = accu_init
+    /// for (let iter_var, iter_var2 in iter_range) {
+    ///    if (!loop_condition) { break }
+    ///    accu_var = loop_step
+    /// }
+    /// return result
+    /// ```
+    Comprehension {
+        /// The name of the first iteration variable.
+        iter_var: String,
+        /// The name of the second iteration variable (for V2 macros), empty if not set.
+        iter_var2: String,
+        /// The range over which the comprehension iterates.
+        iter_range: Box<SpannedExpr>,
+        /// The name of the accumulator variable.
+        accu_var: String,
+        /// The initial value of the accumulator.
+        accu_init: Box<SpannedExpr>,
+        /// Returns false when the result has been computed (short-circuit condition).
+        loop_condition: Box<SpannedExpr>,
+        /// Computes the next value of the accumulator.
+        loop_step: Box<SpannedExpr>,
+        /// Computes the final result from the accumulator.
+        result: Box<SpannedExpr>,
+    },
+
+    /// Member test expression (result of `has(m.x)` macro expansion).
+    ///
+    /// Tests for presence of a field without accessing its value.
+    /// Corresponds to `Select` with `test_only=true` in the proto format.
+    MemberTestOnly {
+        expr: Box<SpannedExpr>,
+        field: String,
+    },
+
     /// Placeholder for parse errors (enables partial AST).
     /// Used during error recovery to represent unparseable sections.
     Error,

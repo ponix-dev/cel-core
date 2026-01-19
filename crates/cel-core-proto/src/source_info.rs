@@ -29,6 +29,22 @@ pub fn build_source_info(positions: HashMap<i64, i32>, line_offsets: Vec<i32>) -
     }
 }
 
+/// Build a SourceInfo with macro_calls from collected position data.
+pub fn build_source_info_with_macros(
+    positions: HashMap<i64, i32>,
+    line_offsets: Vec<i32>,
+    macro_calls: HashMap<i64, crate::gen::cel::expr::Expr>,
+) -> SourceInfo {
+    SourceInfo {
+        syntax_version: String::new(),
+        location: String::new(),
+        line_offsets,
+        positions,
+        macro_calls,
+        extensions: vec![],
+    }
+}
+
 /// Get the byte offset position for an expression ID from source info.
 pub fn get_position(source_info: &SourceInfo, expr_id: i64) -> Option<usize> {
     source_info.positions.get(&expr_id).map(|&pos| pos as usize)
