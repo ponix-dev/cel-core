@@ -7,6 +7,10 @@ cocogitto = "latest"
 "cargo:protoc-gen-prost-crate" = "latest"
 "cargo:protoc-gen-prost" = "latest"
 
+[tasks."proto:generate"]
+description = "Generate cel protobuf definitions"
+run = "buf generate buf.build/google/cel-spec"
+
 [tasks.test]
 description = "Run all tests (excludes conformance)"
 run = "cargo test --workspace --exclude cel-core-conformance"
@@ -19,13 +23,10 @@ run = "cargo test --workspace --exclude cel-core-conformance --lib"
 description = "Run integration tests only (excludes conformance)"
 run = "cargo test --workspace --exclude cel-core-conformance --test '*'"
 
-[tasks.install]
+[tasks.install-lsp]
 description = "Build and install cel-core-lsp binary to PATH"
 run = "cargo install --path crates/cel-core-lsp"
 
-[tasks."proto:generate"]
-description = "Generate Rust code from protobuf definitions"
-run = "buf generate buf.build/google/cel-spec"
 
 [tasks."conformance:setup"]
 description = "Initialize cel-spec submodule with sparse checkout (tests only)"
@@ -58,11 +59,7 @@ run = "cog bump --auto"
 description = "Show what version bump would occur"
 run = "cog bump --auto --dry-run"
 
-[tasks.release]
-description = "Bump version and publish to crates.io"
-depends = ["version:bump", "publish"]
-
-[tasks.publish]
+[tasks."cargo:publish"]
 description = "Publish crates to crates.io in dependency order"
 depends = ["test"]
 run = """
@@ -78,3 +75,7 @@ cargo publish -p cel-core-proto || echo "cel-core-proto already published, skipp
 echo "Publishing cel-core-lsp..."
 cargo publish -p cel-core-lsp || echo "cel-core-lsp already published, skipping..."
 """
+
+[tasks.release]
+description = "Bump version and publish to crates.io"
+depends = ["version:bump", "cargo:publish"]
