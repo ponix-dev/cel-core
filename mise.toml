@@ -21,8 +21,8 @@ run = "cargo install --path crates/cel-lsp"
 [tasks."conformance:setup"]
 description = "Initialize cel-spec submodule with sparse checkout"
 run = """
-git submodule update --init crates/cel-conformance/cel-spec
-cd crates/cel-conformance/cel-spec
+git submodule update --init crates/cel-core-conformance/cel-spec
+cd crates/cel-core-conformance/cel-spec
 git sparse-checkout init --no-cone
 git sparse-checkout set /tests/simple/testdata/
 git read-tree -mu HEAD
@@ -31,7 +31,7 @@ git read-tree -mu HEAD
 [tasks."conformance:update"]
 description = "Pull latest cel-spec test data"
 run = """
-cd crates/cel-conformance/cel-spec
+cd crates/cel-core-conformance/cel-spec
 git fetch origin
 git checkout origin/master
 """
