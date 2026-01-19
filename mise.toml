@@ -23,16 +23,15 @@ run = "cargo install --path crates/cel-core-lsp"
 
 [tasks."proto:generate"]
 description = "Generate Rust code from protobuf definitions"
-depends = ["conformance:setup"]
-run = "buf generate"
+run = "buf generate buf.build/google/cel-spec"
 
 [tasks."conformance:setup"]
-description = "Initialize cel-spec submodule with sparse checkout"
+description = "Initialize cel-spec submodule with sparse checkout (tests only)"
 run = """
 git submodule update --init crates/cel-core-conformance/cel-spec
 cd crates/cel-core-conformance/cel-spec
 git sparse-checkout init --no-cone
-git sparse-checkout set /tests/simple/testdata/ /proto/
+git sparse-checkout set /tests/simple/testdata/
 git read-tree -mu HEAD
 """
 
@@ -57,19 +56,23 @@ run = "cog bump --auto"
 description = "Show what version bump would occur"
 run = "cog bump --auto --dry-run"
 
-[tasks."publish:dry-run"]
-description = "Verify crates can be published"
-run = """
-cargo publish -p cel-core-parser --dry-run
-cargo publish -p cel-core-proto --dry-run
-cargo publish -p cel-core-lsp --dry-run
-"""
+[tasks.release]
+description = "Bump version and publish to crates.io"
+depends = ["version:bump", "publish"]
 
 [tasks.publish]
 description = "Publish crates to crates.io in dependency order"
-depends = ["test", "publish:dry-run"]
+depends = ["test"]
 run = """
+echo "Publishing cel-core-parser..."
 cargo publish -p cel-core-parser || echo "cel-core-parser already published, skipping..."
+
+echo "Waiting for crates.io to index..."
+sleep 10
+
+echo "Publishing cel-core-proto..."
 cargo publish -p cel-core-proto || echo "cel-core-proto already published, skipping..."
+
+echo "Publishing cel-core-lsp..."
 cargo publish -p cel-core-lsp || echo "cel-core-lsp already published, skipping..."
 """
