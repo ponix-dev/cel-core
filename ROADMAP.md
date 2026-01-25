@@ -8,10 +8,11 @@ This document outlines the path to achieving full CEL (Common Expression Languag
 
 ```
 crates/
+  cel-core-common/       # Shared types: CelType, CelValue, AST
   cel-core-parser/       # Lexer + parser, produces AST
-  cel-core-types/        # CelType enum with parameterized types
   cel-core-checker/      # Type checker, produces CheckedExpr
   cel-core-proto/        # Bidirectional AST <-> proto conversion
+  cel-core/              # Unified Env API (cel-go pattern)
   cel-core-lsp/          # Language Server Protocol implementation
   cel-core-conformance/  # Conformance testing against cel-spec
 ```
@@ -26,7 +27,7 @@ crates/
 | **Proto Conversion** | Complete | AST to/from `ParsedExpr` and `CheckedExpr` |
 | **Type Checker** | Partial | `cel-core-checker` crate, standard library, 15/30 conformance files pass |
 | **LSP** | Partial | Diagnostics, hover, semantic tokens |
-| **Unified Env** | Not started | No cel-go style `Env` coordinator |
+| **Unified Env** | Complete | `cel-core` crate with `Env` struct (cel-go pattern) |
 | **Program** | Not started | No compiled/cacheable representation |
 | **Evaluation** | Not started | No runtime execution |
 
@@ -135,9 +136,10 @@ cel-go uses a central `Env` struct that coordinates all phases. This is the reco
 
 | cel-go | Ours | Status |
 |--------|------|--------|
-| `Env` (unified coordinator) | `TypeEnv` (checking only) | Partial |
-| `env.Parse()` | `cel_core_parser::parse()` | ✅ Different API |
-| `env.Check()` | `check(&ast, &env)` | ✅ Different API |
+| `Env` (unified coordinator) | `cel_core::Env` | ✅ Complete |
+| `env.Parse()` | `env.parse()` | ✅ Complete |
+| `env.Check()` | `env.check()` | ✅ Complete |
+| `env.Compile()` | `env.compile()` | ✅ Complete |
 | `env.Program()` | None | ❌ Missing |
 | `program.Eval()` | None | ❌ Missing |
 | Extension libraries | None | ❌ Missing |
@@ -276,7 +278,7 @@ The proto converter correctly handles `optional_indices` for lists and `optional
 
 #### 2.1 Enhanced Type Representation ✅
 
-Implemented parameterized types in `cel-core-types` crate:
+Implemented parameterized types in `cel-core-common` crate:
 
 ```rust
 pub enum CelType {
@@ -558,11 +560,11 @@ Track conformance by category, starting with:
 
 ```
 crates/
-  cel-core-parser/       # Lexer, parser, AST (with node IDs)         ✅ Complete
-  cel-core-types/        # CelType enum with parameterized types      ✅ Complete
-  cel-core-checker/      # Type checking, TypeEnv, standard library   ✅ Partial
+  cel-core-common/       # Shared types: CelType, CelValue, AST       ✅ Complete
+  cel-core-parser/       # Lexer, parser (depends on common)          ✅ Complete
+  cel-core-checker/      # Type checking, standard library            ✅ Partial
   cel-core-proto/        # Bidirectional proto conversion             ✅ Complete
-  cel-core/              # Unified Env, Program, evaluation           ❌ Not started
+  cel-core/              # Unified Env API (cel-go pattern)           ✅ Complete
   cel-core-lsp/          # LSP implementation                         ✅ Partial
   cel-core-conformance/  # Conformance testing                        ✅ Complete
 ```
@@ -600,7 +602,7 @@ let result = program.eval(&[("name", Value::String("test123".into()))])?;
 - [x] Conformance tests: 15/30 files passing
 
 ### Milestone 3: Unified Env + Extensions
-- [ ] Create `cel-core` crate with unified `Env`
+- [x] Create `cel-core` crate with unified `Env`
 - [ ] Extension library infrastructure
 - [ ] `string_ext` - `charAt`, `indexOf`, `substring`, `format`
 - [ ] `math_ext` - `math.greatest`, `math.least`
