@@ -4,7 +4,10 @@
 //! supporting parameterized types like `List<T>`, `Map<K, V>`, and `type(T)`.
 
 use std::fmt;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+
+static TYPE_VAR_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// CEL types that can be inferred from expressions.
 ///
@@ -51,6 +54,12 @@ pub enum CelType {
     Message(Arc<str>),
     /// Protobuf enum type with fully qualified name
     Enum(Arc<str>),
+    /// Abstract, application-defined type with optional type parameters.
+    /// Used for custom container types or domain-specific types.
+    Abstract {
+        name: Arc<str>,
+        params: Arc<[CelType]>,
+    },
 
     // ==================== Type Checking Types ====================
     /// Function type with parameter types and return type
@@ -60,6 +69,9 @@ pub enum CelType {
     },
     /// Type parameter for generic type checking (e.g., `T` in `list<T>`)
     TypeParam(Arc<str>),
+    /// Type variable for inference - can be unified with concrete types.
+    /// Used for empty collections where element type comes from context.
+    TypeVar(u64),
     /// Wrapper type for proto wrapper types (e.g., `google.protobuf.Int64Value`)
     Wrapper(Arc<CelType>),
     /// Error type - used when type inference fails
@@ -122,6 +134,14 @@ impl CelType {
         CelType::Enum(Arc::from(name))
     }
 
+    /// Create an abstract type with the given name and parameter types.
+    pub fn abstract_type(name: &str, params: &[CelType]) -> Self {
+        CelType::Abstract {
+            name: Arc::from(name),
+            params: Arc::from(params),
+        }
+    }
+
     /// Create a function type with the given parameter and result types.
     ///
     /// # Example
@@ -142,8 +162,18 @@ impl CelType {
         CelType::TypeParam(Arc::from(name))
     }
 
+    /// Create a fresh type variable for inference.
+    pub fn fresh_type_var() -> Self {
+        CelType::TypeVar(TYPE_VAR_COUNTER.fetch_add(1, Ordering::Relaxed))
+    }
+
     /// Create a wrapper type.
     pub fn wrapper(inner: CelType) -> Self {
+        CelType::Wrapper(Arc::new(inner))
+    }
+
+    /// Create an optional (wrapper) type - syntactic sugar for `wrapper`.
+    pub fn optional(inner: CelType) -> Self {
         CelType::Wrapper(Arc::new(inner))
     }
 }
@@ -201,8 +231,8 @@ impl CelType {
             return true;
         }
 
-        // Type parameter matches anything
-        if matches!(self, CelType::TypeParam(_)) || matches!(other, CelType::TypeParam(_)) {
+        // Type variables unify with anything (they're placeholders)
+        if matches!(self, CelType::TypeVar(_)) || matches!(other, CelType::TypeVar(_)) {
             return true;
         }
 
@@ -219,6 +249,10 @@ impl CelType {
 
             // Null is assignable to wrapper types
             (CelType::Wrapper(_), CelType::Null) => true,
+            // Wrapper accepts its underlying type (boxing)
+            (CelType::Wrapper(inner), other) => inner.is_assignable_from(other),
+            // Underlying type accepts Wrapper (unboxing)
+            (other, CelType::Wrapper(inner)) => other.is_assignable_from(inner.as_ref()),
 
             // Type values need compatible inner types
             (CelType::Type(self_inner), CelType::Type(other_inner)) => {
@@ -226,6 +260,47 @@ impl CelType {
             }
 
             _ => false,
+        }
+    }
+
+    /// Attempt to unify this type with another, collecting type parameter bindings.
+    ///
+    /// Unlike `is_assignable_from`, this method properly handles type parameters
+    /// by binding them to concrete types during unification.
+    ///
+    /// Returns `true` if unification succeeds, `false` if there's a conflict.
+    pub fn unify_with_substitution(
+        &self,
+        other: &CelType,
+        substitutions: &mut std::collections::HashMap<Arc<str>, CelType>,
+    ) -> bool {
+        match (self, other) {
+            // Bind type parameter to concrete type
+            (CelType::TypeParam(name), concrete) => {
+                if let Some(bound) = substitutions.get(name) {
+                    bound.is_assignable_from(concrete)
+                } else {
+                    substitutions.insert(name.clone(), concrete.clone());
+                    true
+                }
+            }
+            // Bind type parameter from the other side
+            (concrete, CelType::TypeParam(name)) => {
+                if let Some(bound) = substitutions.get(name) {
+                    concrete.is_assignable_from(bound)
+                } else {
+                    substitutions.insert(name.clone(), concrete.clone());
+                    true
+                }
+            }
+            // Recurse into parameterized types
+            (CelType::List(a), CelType::List(b)) => a.unify_with_substitution(b, substitutions),
+            (CelType::Map(ak, av), CelType::Map(bk, bv)) => {
+                ak.unify_with_substitution(bk, substitutions)
+                    && av.unify_with_substitution(bv, substitutions)
+            }
+            // Fall back to regular assignability for other cases
+            _ => self.is_assignable_from(other),
         }
     }
 
@@ -288,11 +363,20 @@ impl CelType {
             CelType::Type(inner) => format!("type({})", inner.display_name()),
             CelType::Message(name) => name.to_string(),
             CelType::Enum(name) => name.to_string(),
+            CelType::Abstract { name, params } => {
+                if params.is_empty() {
+                    name.to_string()
+                } else {
+                    let params_str: Vec<_> = params.iter().map(|p| p.display_name()).collect();
+                    format!("{}<{}>", name, params_str.join(", "))
+                }
+            }
             CelType::Function { params, result } => {
                 let params_str: Vec<_> = params.iter().map(|p| p.display_name()).collect();
                 format!("({}) -> {}", params_str.join(", "), result.display_name())
             }
             CelType::TypeParam(name) => name.to_string(),
+            CelType::TypeVar(id) => format!("?T{}", id),
             CelType::Wrapper(inner) => format!("wrapper<{}>", inner.display_name()),
             CelType::Error => "error".to_string(),
         }
@@ -302,6 +386,9 @@ impl CelType {
     ///
     /// This is useful for backwards compatibility where only the base
     /// type name is needed (e.g., "list" instead of "list<int>").
+    ///
+    /// Note: For `Message` and `Enum` types, this returns "message" and "enum"
+    /// respectively, NOT the actual type names. Use `display_name()` for that.
     pub fn as_str(&self) -> &'static str {
         match self {
             CelType::Bool => "bool",
@@ -319,25 +406,54 @@ impl CelType {
             CelType::Type(_) => "type",
             CelType::Message(_) => "message",
             CelType::Enum(_) => "enum",
+            CelType::Abstract { .. } => "abstract",
             CelType::Function { .. } => "function",
             CelType::TypeParam(_) => "type_param",
+            CelType::TypeVar(_) => "type_var",
             CelType::Wrapper(_) => "wrapper",
             CelType::Error => "error",
         }
-    }
-
-    /// Check if this type matches a simple type name (for compatibility).
-    ///
-    /// This allows `CelType::List(Int)` to match when checking against `CelType::List(Dyn)`.
-    pub fn matches_base(&self, other: &CelType) -> bool {
-        std::mem::discriminant(self) == std::mem::discriminant(other)
-            || self.is_assignable_from(other)
     }
 }
 
 impl fmt::Display for CelType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.display_name())
+    }
+}
+
+// ==================== Unification ====================
+
+/// Context for tracking type variable bindings during unification.
+#[derive(Default)]
+pub struct UnificationContext {
+    bindings: std::collections::HashMap<u64, CelType>,
+}
+
+impl UnificationContext {
+    /// Create a new unification context.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Get the resolved type for a type variable, if bound.
+    pub fn resolve(&self, var_id: u64) -> Option<&CelType> {
+        self.bindings.get(&var_id)
+    }
+
+    /// Bind a type variable to a concrete type.
+    pub fn bind(&mut self, var_id: u64, ty: CelType) {
+        self.bindings.insert(var_id, ty);
+    }
+
+    /// Fully resolve a type, substituting all bound type variables.
+    pub fn fully_resolve(&self, ty: &CelType) -> CelType {
+        match ty {
+            CelType::TypeVar(id) => self.bindings.get(id).cloned().unwrap_or_else(|| ty.clone()),
+            CelType::List(elem) => CelType::list(self.fully_resolve(elem)),
+            CelType::Map(k, v) => CelType::map(self.fully_resolve(k), self.fully_resolve(v)),
+            _ => ty.clone(),
+        }
     }
 }
 
@@ -496,5 +612,119 @@ mod tests {
         set.insert(CelType::list(CelType::Int));
 
         assert_eq!(set.len(), 1);
+    }
+
+    #[test]
+    fn type_param_does_not_match_arbitrary_types() {
+        let param = CelType::type_param("T");
+        // TypeParam should NOT be assignable from/to concrete types
+        assert!(!param.is_assignable_from(&CelType::Int));
+        assert!(!CelType::Int.is_assignable_from(&param));
+    }
+
+    #[test]
+    fn type_param_unification_works() {
+        use std::collections::HashMap;
+        let mut subs = HashMap::new();
+        let param = CelType::type_param("T");
+
+        // First binding succeeds
+        assert!(param.unify_with_substitution(&CelType::Int, &mut subs));
+        assert_eq!(subs.get(&Arc::from("T")), Some(&CelType::Int));
+
+        // Same type unifies again
+        assert!(param.unify_with_substitution(&CelType::Int, &mut subs));
+
+        // Different type fails
+        assert!(!param.unify_with_substitution(&CelType::String, &mut subs));
+    }
+
+    #[test]
+    fn type_param_unification_in_list() {
+        use std::collections::HashMap;
+        let mut subs = HashMap::new();
+        let list_param = CelType::list(CelType::type_param("T"));
+        let list_int = CelType::list(CelType::Int);
+
+        assert!(list_param.unify_with_substitution(&list_int, &mut subs));
+        assert_eq!(subs.get(&Arc::from("T")), Some(&CelType::Int));
+    }
+
+    #[test]
+    fn wrapper_bidirectional_assignability() {
+        let wrapper_int = CelType::wrapper(CelType::Int);
+
+        // Null -> Wrapper (existing)
+        assert!(wrapper_int.is_assignable_from(&CelType::Null));
+        // Int -> Wrapper<Int> (boxing)
+        assert!(wrapper_int.is_assignable_from(&CelType::Int));
+        // Wrapper<Int> -> Int (unboxing)
+        assert!(CelType::Int.is_assignable_from(&wrapper_int));
+        // Wrapper<Int> should NOT be assignable from String
+        assert!(!wrapper_int.is_assignable_from(&CelType::String));
+    }
+
+    #[test]
+    fn type_var_assignable_from_anything() {
+        let tv = CelType::fresh_type_var();
+        // TypeVar should be assignable from/to any type
+        assert!(tv.is_assignable_from(&CelType::Int));
+        assert!(tv.is_assignable_from(&CelType::String));
+        assert!(CelType::Int.is_assignable_from(&tv));
+        assert!(CelType::list(CelType::Int).is_assignable_from(&tv));
+    }
+
+    #[test]
+    fn type_var_display() {
+        let tv1 = CelType::fresh_type_var();
+        let tv2 = CelType::fresh_type_var();
+        // Each TypeVar should have a unique display name
+        assert!(tv1.display_name().starts_with("?T"));
+        assert!(tv2.display_name().starts_with("?T"));
+        assert_ne!(tv1.display_name(), tv2.display_name());
+    }
+
+    #[test]
+    fn unification_context_binds_and_resolves() {
+        use super::UnificationContext;
+
+        let mut ctx = UnificationContext::new();
+        let tv = CelType::fresh_type_var();
+        let CelType::TypeVar(var_id) = tv else { panic!("expected TypeVar") };
+
+        // Initially unbound
+        assert!(ctx.resolve(var_id).is_none());
+
+        // Bind it
+        ctx.bind(var_id, CelType::Int);
+        assert_eq!(ctx.resolve(var_id), Some(&CelType::Int));
+
+        // fully_resolve substitutes the binding
+        let resolved = ctx.fully_resolve(&tv);
+        assert_eq!(resolved, CelType::Int);
+    }
+
+    #[test]
+    fn unification_context_resolves_nested() {
+        use super::UnificationContext;
+
+        let mut ctx = UnificationContext::new();
+        let tv = CelType::fresh_type_var();
+        let CelType::TypeVar(var_id) = tv.clone() else { panic!("expected TypeVar") };
+
+        ctx.bind(var_id, CelType::String);
+
+        let list_tv = CelType::list(tv);
+        let resolved = ctx.fully_resolve(&list_tv);
+        assert_eq!(resolved, CelType::list(CelType::String));
+    }
+
+    #[test]
+    fn abstract_type_display() {
+        let abs = CelType::abstract_type("custom.Container", &[CelType::Int, CelType::String]);
+        assert_eq!(abs.display_name(), "custom.Container<int, string>");
+
+        let abs_no_params = CelType::abstract_type("custom.Type", &[]);
+        assert_eq!(abs_no_params.display_name(), "custom.Type");
     }
 }

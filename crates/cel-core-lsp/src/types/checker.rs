@@ -6,6 +6,27 @@ use cel_core_types::CelType;
 use super::builtins::get_builtin;
 use super::function::{Arity, FunctionKind};
 
+/// Configuration for type checking behavior.
+///
+/// This mirrors cel-go's `CheckerOption` configuration, particularly
+/// the `dynAggregateLiteralElementTypesEnabled` flag.
+///
+/// See: <https://github.com/google/cel-go/blob/master/checker/options.go>
+///
+/// Note: This is scaffolding for Phase 2.3 in ROADMAP.md. Currently unused
+/// but will be integrated when the full type checker is implemented.
+#[allow(dead_code)]
+#[derive(Default, Clone)]
+pub struct TypeCheckConfig {
+    /// When true, heterogeneous collections produce `dyn` element type.
+    /// When false (default, matches cel-go), heterogeneous collections produce Error type.
+    ///
+    /// Example: `[1, "hello"]`
+    /// - `true`: infers `list<dyn>`
+    /// - `false`: type error (mixed int and string)
+    pub allow_heterogeneous_collections: bool,
+}
+
 /// Result of arity validation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ArityCheck {
@@ -122,7 +143,8 @@ pub fn infer_literal_type(expr: &Expr) -> Option<CelType> {
 /// Infer the element type of a list literal.
 fn infer_list_type(items: &[ListElement]) -> CelType {
     if items.is_empty() {
-        return CelType::list(CelType::Dyn);
+        // Use TypeVar for empty collections - can be unified from context
+        return CelType::list(CelType::fresh_type_var());
     }
 
     // Try to infer a common type from all elements
@@ -144,7 +166,8 @@ fn infer_list_type(items: &[ListElement]) -> CelType {
 /// Infer the key and value types of a map literal.
 fn infer_map_type(entries: &[MapEntry]) -> CelType {
     if entries.is_empty() {
-        return CelType::map(CelType::Dyn, CelType::Dyn);
+        // Use TypeVar for empty collections - can be unified from context
+        return CelType::map(CelType::fresh_type_var(), CelType::fresh_type_var());
     }
 
     // Try to infer common types for keys and values
@@ -264,7 +287,8 @@ mod tests {
     #[test]
     fn infer_empty_list_type() {
         let list_type = infer_literal_type(&Expr::List(vec![])).unwrap();
-        assert_eq!(list_type.display_name(), "list<dyn>");
+        // Empty lists use TypeVar for element type (can be unified from context)
+        assert!(list_type.display_name().starts_with("list<?T"));
     }
 
     #[test]
@@ -310,7 +334,8 @@ mod tests {
     #[test]
     fn infer_empty_map_type() {
         let map_type = infer_literal_type(&Expr::Map(vec![])).unwrap();
-        assert_eq!(map_type.display_name(), "map<dyn, dyn>");
+        // Empty maps use TypeVar for key and value types (can be unified from context)
+        assert!(map_type.display_name().starts_with("map<?T"));
     }
 
     #[test]

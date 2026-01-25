@@ -2,11 +2,21 @@
 //!
 //! This module provides bidirectional conversion between `cel_core_types::CelType`
 //! and the proto `Type` representation from cel-spec.
+//!
+//! ## Proto Round-Trip Limitations
+//!
+//! The cel-spec proto format does not distinguish between enum and message types.
+//! Both `CelType::Enum` and `CelType::Message` serialize to `ProtoTypeKind::MessageType`.
+//! When deserializing, all message types become `CelType::Message`.
+//!
+//! This means: `CelType::Enum("MyEnum")` -> proto -> `CelType::Message("MyEnum")`
+//!
+//! If preserving enum distinction is required, use the native `CelType` representation.
 
 use crate::gen::cel::expr::r#type::{
-    FunctionType as ProtoFunctionType, ListType as ProtoListType, MapType as ProtoMapType,
-    PrimitiveType as ProtoPrimitiveType, TypeKind as ProtoTypeKind,
-    WellKnownType as ProtoWellKnownType,
+    AbstractType as ProtoAbstractType, FunctionType as ProtoFunctionType,
+    ListType as ProtoListType, MapType as ProtoMapType, PrimitiveType as ProtoPrimitiveType,
+    TypeKind as ProtoTypeKind, WellKnownType as ProtoWellKnownType,
 };
 use crate::gen::cel::expr::Type as ProtoType;
 use cel_core_types::CelType;
@@ -84,8 +94,11 @@ pub fn cel_type_from_proto(proto: &ProtoType) -> CelType {
         Some(ProtoTypeKind::Dyn(_)) => CelType::Dyn,
         Some(ProtoTypeKind::Error(_)) => CelType::Error,
         Some(ProtoTypeKind::AbstractType(abs)) => {
-            // Handle abstract types (like google.protobuf.Any)
-            CelType::Message(Arc::from(abs.name.as_str()))
+            let params: Vec<_> = abs.parameter_types.iter().map(cel_type_from_proto).collect();
+            CelType::Abstract {
+                name: Arc::from(abs.name.as_str()),
+                params: Arc::from(params),
+            }
         }
         None => CelType::Dyn,
     }
@@ -113,7 +126,14 @@ pub fn cel_type_to_proto(cel_type: &CelType) -> ProtoType {
         CelType::Dyn => ProtoTypeKind::Dyn(()),
         CelType::Type(inner) => ProtoTypeKind::Type(Box::new(cel_type_to_proto(inner))),
         CelType::Message(name) => ProtoTypeKind::MessageType(name.to_string()),
+        // Note: Enum loses its distinction when serialized - see module docs
         CelType::Enum(name) => ProtoTypeKind::MessageType(name.to_string()),
+        CelType::Abstract { name, params } => {
+            ProtoTypeKind::AbstractType(ProtoAbstractType {
+                name: name.to_string(),
+                parameter_types: params.iter().map(cel_type_to_proto).collect(),
+            })
+        }
         CelType::Function { params, result } => {
             ProtoTypeKind::Function(Box::new(ProtoFunctionType {
                 arg_types: params.iter().map(cel_type_to_proto).collect(),
@@ -121,6 +141,8 @@ pub fn cel_type_to_proto(cel_type: &CelType) -> ProtoType {
             }))
         }
         CelType::TypeParam(name) => ProtoTypeKind::TypeParam(name.to_string()),
+        // TypeVar is internal for inference; serialize as Dyn
+        CelType::TypeVar(_) => ProtoTypeKind::Dyn(()),
         CelType::Wrapper(inner) => {
             let prim = match inner.as_ref() {
                 CelType::Bool => ProtoPrimitiveType::Bool as i32,
@@ -216,5 +238,23 @@ mod tests {
         let proto: ProtoType = (&cel_type).into();
         let back: CelType = (&proto).into();
         assert_eq!(cel_type, back);
+    }
+
+    #[test]
+    fn test_abstract_type_roundtrip() {
+        let cel_type = CelType::abstract_type("custom.Container", &[CelType::Int, CelType::String]);
+        let proto = cel_type_to_proto(&cel_type);
+        let roundtripped = cel_type_from_proto(&proto);
+        assert_eq!(cel_type, roundtripped);
+    }
+
+    #[test]
+    fn enum_roundtrip_is_lossy_by_design() {
+        let cel_enum = CelType::enum_type("my.package.MyEnum");
+        let proto = cel_type_to_proto(&cel_enum);
+        let roundtripped = cel_type_from_proto(&proto);
+
+        // Roundtrip produces Message, not Enum - this is expected
+        assert_eq!(roundtripped, CelType::message("my.package.MyEnum"));
     }
 }
