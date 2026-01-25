@@ -5,7 +5,7 @@
 //! - `FunctionKind` - distinguishes standalone functions from methods
 //! - `FunctionDef` - complete function definition with documentation
 
-use super::cel_type::CelType;
+use cel_core_types::CelType;
 
 /// Expected number of arguments for a function.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,9 +41,19 @@ pub enum FunctionKind {
     /// Only callable as a standalone function: `int(x)`, `bool(x)`
     Standalone,
     /// Only callable as a method on specific receiver types: `"foo".endsWith("o")`
-    Method(&'static [CelType]),
+    Method(Vec<CelType>),
     /// Callable both as standalone and as method: `size(x)` or `x.size()`
-    Both(&'static [CelType]),
+    Both(Vec<CelType>),
+}
+
+impl FunctionKind {
+    /// Get the allowed receiver types for this function kind.
+    pub fn receiver_types(&self) -> Option<&[CelType]> {
+        match self {
+            FunctionKind::Standalone => None,
+            FunctionKind::Method(types) | FunctionKind::Both(types) => Some(types),
+        }
+    }
 }
 
 /// Definition of a CEL function with documentation and type information.

@@ -78,6 +78,7 @@ name = "cel-core-lsp"
 version = "0.1.3"
 dependencies = [
  "cel-core-parser",
+ "cel-core-types",
  "dashmap",
  "regex",
  "tokio",
@@ -96,10 +97,15 @@ name = "cel-core-proto"
 version = "0.1.3"
 dependencies = [
  "cel-core-parser",
+ "cel-core-types",
  "prost",
  "prost-types",
  "thiserror",
 ]
+
+[[package]]
+name = "cel-core-types"
+version = "0.1.3"
 
 [[package]]
 name = "cfg-if"

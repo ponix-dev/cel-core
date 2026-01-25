@@ -158,9 +158,9 @@ The proto converter correctly handles `optional_indices` for lists and `optional
 
 **Goal:** Full type inference and `CheckedExpr` production.
 
-#### 2.1 Enhanced Type Representation
+#### 2.1 Enhanced Type Representation ✅
 
-Current `CelType` is flat. We need parameterized types:
+Implemented parameterized types in a new `cel-core-types` crate:
 
 ```rust
 // Current
@@ -189,9 +189,11 @@ Create a new `cel-core-checker` crate (or module in `cel-core-lsp`) that:
 2. **Resolves identifiers** against the type environment
 3. **Resolves function overloads** based on argument types
 4. **Produces `CheckedExpr`** with `type_map` and `reference_map`
+5. **Supports checker options** matching cel-go's `CheckerOption` configuration
 
 ```rust
 pub struct Checker {
+    config: TypeCheckConfig,
     type_env: HashMap<String, CelType>,
     type_map: HashMap<i64, CelType>,
     reference_map: HashMap<i64, Reference>,
@@ -202,7 +204,21 @@ impl Checker {
 }
 ```
 
-#### 2.3 Function Overload Resolution
+#### 2.3 Checker Options (cel-go parity)
+
+cel-go provides configurable checker behavior via `CheckerOption`. Key options to support:
+
+| cel-go Option | Description |
+|--------------|-------------|
+| `HomogeneousAggregateLiterals` | When enabled (default), heterogeneous collections like `[1, "hello"]` produce type errors instead of `list<dyn>` |
+| `CrossTypeNumericComparisons` | Allow comparisons between int, uint, and double |
+| `ValidatedDeclarations` | Pre-validated type declarations for performance |
+
+See: https://github.com/google/cel-go/blob/master/checker/options.go
+
+The `TypeCheckConfig` struct (scaffolded in `cel-core-lsp/src/types/checker.rs`) will expand to support these options.
+
+#### 2.4 Function Overload Resolution
 
 Many CEL functions are overloaded:
 - `+`: `int + int`, `double + double`, `string + string`, `list + list`, `duration + timestamp`, etc.
@@ -210,7 +226,7 @@ Many CEL functions are overloaded:
 
 The checker must select the correct overload based on argument types and record it in `reference_map`.
 
-#### 2.4 Integration with LSP
+#### 2.5 Integration with LSP
 
 The existing LSP validation should use the new checker for:
 - More accurate error messages
@@ -398,7 +414,7 @@ Alternatively, `cel-core-types`, `cel-core-checker`, and `cel-core-eval` could b
 
 ### Milestone 3: Type Checking
 - [x] Node IDs in parser
-- [ ] Parameterized types
+- [x] Parameterized types
 - [ ] Type inference through expressions
 - [ ] Function overload resolution
 - [ ] `CheckedExpr` production

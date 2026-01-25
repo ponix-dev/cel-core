@@ -1,10 +1,31 @@
 //! Type checking utilities for CEL expressions.
 
-use cel_core_parser::ast::Expr;
+use cel_core_parser::ast::{Expr, ListElement, MapEntry};
+use cel_core_types::CelType;
 
 use super::builtins::get_builtin;
-use super::cel_type::CelType;
 use super::function::{Arity, FunctionKind};
+
+/// Configuration for type checking behavior.
+///
+/// This mirrors cel-go's `CheckerOption` configuration, particularly
+/// the `dynAggregateLiteralElementTypesEnabled` flag.
+///
+/// See: <https://github.com/google/cel-go/blob/master/checker/options.go>
+///
+/// Note: This is scaffolding for Phase 2.3 in ROADMAP.md. Currently unused
+/// but will be integrated when the full type checker is implemented.
+#[allow(dead_code)]
+#[derive(Default, Clone)]
+pub struct TypeCheckConfig {
+    /// When true, heterogeneous collections produce `dyn` element type.
+    /// When false (default, matches cel-go), heterogeneous collections produce Error type.
+    ///
+    /// Example: `[1, "hello"]`
+    /// - `true`: infers `list<dyn>`
+    /// - `false`: type error (mixed int and string)
+    pub allow_heterogeneous_collections: bool,
+}
 
 /// Result of arity validation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -83,11 +104,16 @@ fn check_arity(arity: Arity, count: usize) -> ArityCheck {
     }
 }
 
-/// Infer the type of a literal expression.
+/// Infer the type of a literal expression with parameterized types.
 ///
 /// Returns `Some(CelType)` for literal expressions (strings, ints, lists, etc.)
 /// and `None` for expressions whose type cannot be determined statically
 /// (variables, function calls, etc.).
+///
+/// This version infers parameterized types:
+/// - `[1, 2, 3]` returns `List<Int>` instead of just `List`
+/// - `{"a": 1}` returns `Map<String, Int>` instead of just `Map`
+/// - Empty collections return `List<Dyn>` / `Map<Dyn, Dyn>`
 pub fn infer_literal_type(expr: &Expr) -> Option<CelType> {
     match expr {
         Expr::Null => Some(CelType::Null),
@@ -97,8 +123,8 @@ pub fn infer_literal_type(expr: &Expr) -> Option<CelType> {
         Expr::Float(_) => Some(CelType::Double),
         Expr::String(_) => Some(CelType::String),
         Expr::Bytes(_) => Some(CelType::Bytes),
-        Expr::List(_) => Some(CelType::List),
-        Expr::Map(_) => Some(CelType::Map),
+        Expr::List(items) => Some(infer_list_type(items)),
+        Expr::Map(entries) => Some(infer_map_type(entries)),
         // Cannot determine type statically for these
         Expr::Ident(_) | Expr::RootIdent(_) => None,
         Expr::Member { .. } => None,
@@ -114,6 +140,79 @@ pub fn infer_literal_type(expr: &Expr) -> Option<CelType> {
     }
 }
 
+/// Infer the element type of a list literal.
+fn infer_list_type(items: &[ListElement]) -> CelType {
+    if items.is_empty() {
+        // Use TypeVar for empty collections - can be unified from context
+        return CelType::list(CelType::fresh_type_var());
+    }
+
+    // Try to infer a common type from all elements
+    let elem_types: Vec<_> = items
+        .iter()
+        .filter_map(|item| infer_literal_type(&item.expr.node))
+        .collect();
+
+    if elem_types.is_empty() {
+        // All elements have unknown types
+        return CelType::list(CelType::Dyn);
+    }
+
+    // Find the common type - if all same, use it; otherwise use Dyn
+    let common_type = unify_types(&elem_types);
+    CelType::list(common_type)
+}
+
+/// Infer the key and value types of a map literal.
+fn infer_map_type(entries: &[MapEntry]) -> CelType {
+    if entries.is_empty() {
+        // Use TypeVar for empty collections - can be unified from context
+        return CelType::map(CelType::fresh_type_var(), CelType::fresh_type_var());
+    }
+
+    // Try to infer common types for keys and values
+    let key_types: Vec<_> = entries
+        .iter()
+        .filter_map(|entry| infer_literal_type(&entry.key.node))
+        .collect();
+
+    let value_types: Vec<_> = entries
+        .iter()
+        .filter_map(|entry| infer_literal_type(&entry.value.node))
+        .collect();
+
+    let key_type = if key_types.is_empty() {
+        CelType::Dyn
+    } else {
+        unify_types(&key_types)
+    };
+
+    let value_type = if value_types.is_empty() {
+        CelType::Dyn
+    } else {
+        unify_types(&value_types)
+    };
+
+    CelType::map(key_type, value_type)
+}
+
+/// Unify a list of types into a common type.
+///
+/// If all types are the same, returns that type.
+/// Otherwise, returns `Dyn`.
+fn unify_types(types: &[CelType]) -> CelType {
+    if types.is_empty() {
+        return CelType::Dyn;
+    }
+
+    let first = &types[0];
+    if types.iter().all(|t| t == first) {
+        first.clone()
+    } else {
+        CelType::Dyn
+    }
+}
+
 /// Check if a method can be validly called on the given receiver type.
 ///
 /// Returns `true` if:
@@ -122,7 +221,7 @@ pub fn infer_literal_type(expr: &Expr) -> Option<CelType> {
 /// - The method is `Method` or `Both` and the receiver type is in the allowed list
 ///
 /// Returns `false` if the method exists and the receiver type is not allowed.
-pub fn is_valid_method_call(receiver_type: CelType, method: &str) -> bool {
+pub fn is_valid_method_call(receiver_type: &CelType, method: &str) -> bool {
     let Some(builtin) = get_builtin(method) else {
         // Unknown method - don't validate
         return true;
@@ -135,7 +234,10 @@ pub fn is_valid_method_call(receiver_type: CelType, method: &str) -> bool {
             true
         }
         FunctionKind::Method(allowed_types) | FunctionKind::Both(allowed_types) => {
-            allowed_types.contains(&receiver_type)
+            // Check if receiver type is compatible with any allowed type
+            allowed_types.iter().any(|allowed| {
+                receiver_type.is_assignable_from(allowed) || allowed.is_assignable_from(&receiver_type)
+            })
         }
     }
 }
@@ -158,10 +260,7 @@ pub fn is_method_only(name: &str) -> bool {
 ///
 /// Returns `None` if the function is standalone-only or unknown.
 pub fn get_allowed_receiver_types(name: &str) -> Option<&'static [CelType]> {
-    get_builtin(name).and_then(|b| match &b.kind {
-        FunctionKind::Standalone => None,
-        FunctionKind::Method(types) | FunctionKind::Both(types) => Some(*types),
-    })
+    get_builtin(name).and_then(|b| b.kind.receiver_types())
 }
 
 #[cfg(test)]
@@ -182,9 +281,81 @@ mod tests {
             infer_literal_type(&Expr::Bytes(vec![1, 2, 3])),
             Some(CelType::Bytes)
         );
-        assert_eq!(infer_literal_type(&Expr::List(vec![])), Some(CelType::List));
-        assert_eq!(infer_literal_type(&Expr::Map(vec![])), Some(CelType::Map));
         assert_eq!(infer_literal_type(&Expr::Null), Some(CelType::Null));
+    }
+
+    #[test]
+    fn infer_empty_list_type() {
+        let list_type = infer_literal_type(&Expr::List(vec![])).unwrap();
+        // Empty lists use TypeVar for element type (can be unified from context)
+        assert!(list_type.display_name().starts_with("list<?T"));
+    }
+
+    #[test]
+    fn infer_homogeneous_list_type() {
+        use cel_core_parser::SpannedExpr;
+
+        let items = vec![
+            ListElement {
+                expr: SpannedExpr { id: 1, node: Expr::Int(1), span: 0..1 },
+                optional: false,
+            },
+            ListElement {
+                expr: SpannedExpr { id: 2, node: Expr::Int(2), span: 0..1 },
+                optional: false,
+            },
+            ListElement {
+                expr: SpannedExpr { id: 3, node: Expr::Int(3), span: 0..1 },
+                optional: false,
+            },
+        ];
+        let list_type = infer_literal_type(&Expr::List(items)).unwrap();
+        assert_eq!(list_type.display_name(), "list<int>");
+    }
+
+    #[test]
+    fn infer_heterogeneous_list_type() {
+        use cel_core_parser::SpannedExpr;
+
+        let items = vec![
+            ListElement {
+                expr: SpannedExpr { id: 1, node: Expr::Int(1), span: 0..1 },
+                optional: false,
+            },
+            ListElement {
+                expr: SpannedExpr { id: 2, node: Expr::String("hello".to_string()), span: 0..1 },
+                optional: false,
+            },
+        ];
+        let list_type = infer_literal_type(&Expr::List(items)).unwrap();
+        assert_eq!(list_type.display_name(), "list<dyn>");
+    }
+
+    #[test]
+    fn infer_empty_map_type() {
+        let map_type = infer_literal_type(&Expr::Map(vec![])).unwrap();
+        // Empty maps use TypeVar for key and value types (can be unified from context)
+        assert!(map_type.display_name().starts_with("map<?T"));
+    }
+
+    #[test]
+    fn infer_homogeneous_map_type() {
+        use cel_core_parser::SpannedExpr;
+
+        let entries = vec![
+            MapEntry {
+                key: SpannedExpr { id: 1, node: Expr::String("a".to_string()), span: 0..1 },
+                value: SpannedExpr { id: 2, node: Expr::Int(1), span: 0..1 },
+                optional: false,
+            },
+            MapEntry {
+                key: SpannedExpr { id: 3, node: Expr::String("b".to_string()), span: 0..1 },
+                value: SpannedExpr { id: 4, node: Expr::Int(2), span: 0..1 },
+                optional: false,
+            },
+        ];
+        let map_type = infer_literal_type(&Expr::Map(entries)).unwrap();
+        assert_eq!(map_type.display_name(), "map<string, int>");
     }
 
     #[test]
@@ -198,29 +369,29 @@ mod tests {
     #[test]
     fn valid_method_calls() {
         // endsWith on string - valid
-        assert!(is_valid_method_call(CelType::String, "endsWith"));
+        assert!(is_valid_method_call(&CelType::String, "endsWith"));
         // size on string - valid
-        assert!(is_valid_method_call(CelType::String, "size"));
+        assert!(is_valid_method_call(&CelType::String, "size"));
         // size on list - valid
-        assert!(is_valid_method_call(CelType::List, "size"));
+        assert!(is_valid_method_call(&CelType::list(CelType::Int), "size"));
         // contains on string - valid
-        assert!(is_valid_method_call(CelType::String, "contains"));
+        assert!(is_valid_method_call(&CelType::String, "contains"));
     }
 
     #[test]
     fn invalid_method_calls() {
         // endsWith on list - invalid
-        assert!(!is_valid_method_call(CelType::List, "endsWith"));
+        assert!(!is_valid_method_call(&CelType::list(CelType::Int), "endsWith"));
         // endsWith on int - invalid
-        assert!(!is_valid_method_call(CelType::Int, "endsWith"));
+        assert!(!is_valid_method_call(&CelType::Int, "endsWith"));
         // startsWith on map - invalid
-        assert!(!is_valid_method_call(CelType::Map, "startsWith"));
+        assert!(!is_valid_method_call(&CelType::map(CelType::String, CelType::Int), "startsWith"));
     }
 
     #[test]
     fn unknown_methods_pass() {
         // Unknown method - we don't validate
-        assert!(is_valid_method_call(CelType::String, "unknownMethod"));
+        assert!(is_valid_method_call(&CelType::String, "unknownMethod"));
     }
 
     #[test]
@@ -249,12 +420,12 @@ mod tests {
         // Method functions have receiver types
         let ends_with_types = get_allowed_receiver_types("endsWith").unwrap();
         assert!(ends_with_types.contains(&CelType::String));
-        assert!(!ends_with_types.contains(&CelType::List));
+        assert!(!ends_with_types.iter().any(|t| matches!(t, CelType::List(_))));
 
         // Both functions also have receiver types
         let size_types = get_allowed_receiver_types("size").unwrap();
         assert!(size_types.contains(&CelType::String));
-        assert!(size_types.contains(&CelType::List));
+        assert!(size_types.iter().any(|t| matches!(t, CelType::List(_))));
     }
 
     #[test]
