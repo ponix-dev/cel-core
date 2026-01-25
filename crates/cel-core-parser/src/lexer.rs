@@ -35,6 +35,12 @@ pub enum Token {
     #[regex(r"[0-9]+", lex_decimal_int, priority = 1)]
     Int(i64),
 
+    // Integer overflow - specifically handle the i64::MIN absolute value case
+    // 9223372036854775808 = |i64::MIN| = i64::MAX + 1
+    // This allows "-9223372036854775808" to parse correctly
+    #[token("9223372036854775808", |_| "9223372036854775808".to_string(), priority = 2)]
+    IntOverflow(String),
+
     // Float with decimal point and optional exponent: 1.5, 1.5e10
     #[regex(r"[0-9]+\.[0-9]+([eE][+-]?[0-9]+)?", lex_float, priority = 5)]
     // Float with exponent only: 1e10, 1E-5
@@ -45,6 +51,9 @@ pub enum Token {
     // Triple-quoted strings (must come before single/double to match first)
     #[regex(r#"""""#, lex_triple_double_string)]
     #[regex(r"'''", lex_triple_single_string)]
+    // Raw triple-quoted strings (must come before raw single/double to match first)
+    #[regex(r#"[rR]""""#, lex_raw_triple_double_string)]
+    #[regex(r"[rR]'''", lex_raw_triple_single_string)]
     // Raw strings
     #[regex(r#"[rR]""#, lex_raw_double_string)]
     #[regex(r"[rR]'", lex_raw_single_string)]
@@ -90,6 +99,7 @@ pub enum Token {
 
     // === Identifier ===
     #[regex(r"[a-zA-Z_][a-zA-Z0-9_]*", |lex| lex.slice().to_string(), priority = 0)]
+    #[regex(r"`[^`]+`", lex_backtick_ident)]
     Ident(String),
 
     // === Operators (multi-char first) ===
@@ -150,6 +160,7 @@ impl std::fmt::Display for Token {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Token::Int(n) => write!(f, "{}", n),
+            Token::IntOverflow(s) => write!(f, "{}", s),
             Token::UInt(n) => write!(f, "{}u", n),
             Token::Float(n) => write!(f, "{}", n),
             Token::String(s) => write!(f, "\"{}\"", s),
@@ -211,6 +222,11 @@ fn lex_hex_uint(lex: &mut logos::Lexer<Token>) -> Option<u64> {
 
 fn lex_float(lex: &mut logos::Lexer<Token>) -> Option<f64> {
     lex.slice().parse().ok()
+}
+
+fn lex_backtick_ident(lex: &mut logos::Lexer<Token>) -> String {
+    let s = lex.slice();
+    s[1..s.len() - 1].to_string() // Strip backticks
 }
 
 // === Lexer Callbacks for Strings ===
@@ -348,6 +364,14 @@ fn lex_triple_string(lex: &mut logos::Lexer<Token>, end_quote: &str) -> Option<S
     } else {
         None // Unclosed triple-quoted string
     }
+}
+
+fn lex_raw_triple_double_string(lex: &mut logos::Lexer<Token>) -> Option<String> {
+    lex_triple_string(lex, "\"\"\"")
+}
+
+fn lex_raw_triple_single_string(lex: &mut logos::Lexer<Token>) -> Option<String> {
+    lex_triple_string(lex, "'''")
 }
 
 // === Lexer Callbacks for Bytes ===
@@ -646,6 +670,28 @@ line""""#
         assert_eq!(
             lex_tokens("namespace"),
             vec![Token::Reserved("namespace".to_string())]
+        );
+    }
+
+    #[test]
+    fn lex_integer_overflow() {
+        // i64::MAX = 9223372036854775807 (fits)
+        assert_eq!(
+            lex_tokens("9223372036854775807"),
+            vec![Token::Int(9223372036854775807)]
+        );
+
+        // i64::MAX + 1 = 9223372036854775808 (overflow - this is |i64::MIN|)
+        // This specific value is needed for "-9223372036854775808" to work
+        assert_eq!(
+            lex_tokens("9223372036854775808"),
+            vec![Token::IntOverflow("9223372036854775808".to_string())]
+        );
+
+        // Normal 19-digit number that fits
+        assert_eq!(
+            lex_tokens("1000000000000000000"),
+            vec![Token::Int(1000000000000000000)]
         );
     }
 }

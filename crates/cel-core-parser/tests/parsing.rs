@@ -24,6 +24,22 @@ fn parse_unsigned_integer_literals() {
 }
 
 #[test]
+fn parse_int64_min() {
+    // i64::MIN = -9223372036854775808
+    // The literal 9223372036854775808 overflows i64, but -9223372036854775808 is valid
+    assert_eq!(
+        common::assert_parses("-9223372036854775808").node,
+        Expr::Int(i64::MIN)
+    );
+
+    // i64::MAX should work normally
+    assert_eq!(
+        common::assert_parses("9223372036854775807").node,
+        Expr::Int(i64::MAX)
+    );
+}
+
+#[test]
 fn parse_float_literals() {
     assert_eq!(common::assert_parses("1.5").node, Expr::Float(1.5));
     assert_eq!(common::assert_parses("1e10").node, Expr::Float(1e10));
@@ -368,7 +384,7 @@ fn parse_double_negation() {
 
 #[test]
 fn parse_member_access() {
-    if let Expr::Member { expr, field } = common::assert_parses("a.b").node {
+    if let Expr::Member { expr, field, .. } = common::assert_parses("a.b").node {
         assert_eq!(expr.node, Expr::Ident("a".to_string()));
         assert_eq!(field, "b");
     } else {
@@ -379,11 +395,12 @@ fn parse_member_access() {
 #[test]
 fn parse_chained_member_access() {
     // a.b.c should parse as (a.b).c
-    if let Expr::Member { expr, field } = common::assert_parses("a.b.c").node {
+    if let Expr::Member { expr, field, .. } = common::assert_parses("a.b.c").node {
         assert_eq!(field, "c");
         if let Expr::Member {
             expr: inner_expr,
             field: inner_field,
+            ..
         } = &expr.node
         {
             assert_eq!(inner_expr.node, Expr::Ident("a".to_string()));
@@ -398,7 +415,7 @@ fn parse_chained_member_access() {
 
 #[test]
 fn parse_index_access() {
-    if let Expr::Index { expr, index } = common::assert_parses("a[0]").node {
+    if let Expr::Index { expr, index, .. } = common::assert_parses("a[0]").node {
         assert_eq!(expr.node, Expr::Ident("a".to_string()));
         assert_eq!(index.node, Expr::Int(0));
     } else {
@@ -408,7 +425,7 @@ fn parse_index_access() {
 
 #[test]
 fn parse_index_with_expression() {
-    if let Expr::Index { expr, index } = common::assert_parses("a[i + 1]").node {
+    if let Expr::Index { expr, index, .. } = common::assert_parses("a[i + 1]").node {
         assert_eq!(expr.node, Expr::Ident("a".to_string()));
         assert!(matches!(index.node, Expr::Binary { op: BinaryOp::Add, .. }));
     } else {
@@ -449,6 +466,7 @@ fn parse_method_call() {
         if let Expr::Member {
             expr: member_expr,
             field,
+            ..
         } = &expr.node
         {
             assert_eq!(member_expr.node, Expr::Ident("a".to_string()));
@@ -568,7 +586,7 @@ fn parse_root_identifier_in_expression() {
 #[test]
 fn parse_root_identifier_with_member_access() {
     // .x.y should parse as (.x).y
-    if let Expr::Member { expr, field } = common::assert_parses(".x.y").node {
+    if let Expr::Member { expr, field, .. } = common::assert_parses(".x.y").node {
         assert_eq!(expr.node, Expr::RootIdent("x".to_string()));
         assert_eq!(field, "y");
     } else {
@@ -613,7 +631,7 @@ fn parse_struct_literal_multiple_fields() {
 fn parse_struct_literal_qualified_type() {
     // pkg.Type{field: value}
     if let Expr::Struct { type_name, fields } = common::assert_parses("pkg.Type{field: 42}").node {
-        if let Expr::Member { expr, field } = &type_name.node {
+        if let Expr::Member { expr, field, .. } = &type_name.node {
             assert_eq!(expr.node, Expr::Ident("pkg".to_string()));
             assert_eq!(field, "Type");
         } else {
@@ -725,5 +743,105 @@ fn parse_nested_optional() {
         }
     } else {
         panic!("expected outer list");
+    }
+}
+
+// ============================================================================
+// Optional chaining tests
+// ============================================================================
+
+#[test]
+fn parse_optional_select() {
+    // x.?y - optional field select
+    if let Expr::Member { expr, field, optional } = common::assert_parses("x.?y").node {
+        assert_eq!(expr.node, Expr::Ident("x".to_string()));
+        assert_eq!(field, "y");
+        assert!(optional);
+    } else {
+        panic!("expected member access");
+    }
+}
+
+#[test]
+fn parse_regular_select_not_optional() {
+    // x.y - regular select is not optional
+    if let Expr::Member { expr, field, optional } = common::assert_parses("x.y").node {
+        assert_eq!(expr.node, Expr::Ident("x".to_string()));
+        assert_eq!(field, "y");
+        assert!(!optional);
+    } else {
+        panic!("expected member access");
+    }
+}
+
+#[test]
+fn parse_optional_index() {
+    // x[?0] - optional index
+    if let Expr::Index { expr, index, optional } = common::assert_parses("x[?0]").node {
+        assert_eq!(expr.node, Expr::Ident("x".to_string()));
+        assert_eq!(index.node, Expr::Int(0));
+        assert!(optional);
+    } else {
+        panic!("expected index access");
+    }
+}
+
+#[test]
+fn parse_regular_index_not_optional() {
+    // x[0] - regular index is not optional
+    if let Expr::Index { expr, index, optional } = common::assert_parses("x[0]").node {
+        assert_eq!(expr.node, Expr::Ident("x".to_string()));
+        assert_eq!(index.node, Expr::Int(0));
+        assert!(!optional);
+    } else {
+        panic!("expected index access");
+    }
+}
+
+#[test]
+fn parse_optional_index_with_key() {
+    // m[?"key"] - optional index with string key
+    if let Expr::Index { expr, index, optional } = common::assert_parses(r#"m[?"key"]"#).node {
+        assert_eq!(expr.node, Expr::Ident("m".to_string()));
+        assert_eq!(index.node, Expr::String("key".to_string()));
+        assert!(optional);
+    } else {
+        panic!("expected index access");
+    }
+}
+
+#[test]
+fn parse_chained_optional_select() {
+    // x.?y.?z - chained optional selects
+    if let Expr::Member { expr, field, optional } = common::assert_parses("x.?y.?z").node {
+        assert_eq!(field, "z");
+        assert!(optional);
+        if let Expr::Member { expr: inner, field: inner_field, optional: inner_opt } = &expr.node {
+            assert_eq!(inner.node, Expr::Ident("x".to_string()));
+            assert_eq!(inner_field, "y");
+            assert!(inner_opt);
+        } else {
+            panic!("expected inner member access");
+        }
+    } else {
+        panic!("expected outer member access");
+    }
+}
+
+#[test]
+fn parse_mixed_optional_and_regular() {
+    // x.y.?z - mix of regular and optional
+    if let Expr::Member { expr, field, optional } = common::assert_parses("x.y.?z").node {
+        assert_eq!(field, "z");
+        assert!(optional);
+        if let Expr::Member { expr: inner, field: inner_field, optional: inner_opt } = &expr.node {
+            assert_eq!(inner.node, Expr::Ident("x".to_string()));
+            assert_eq!(inner_field, "y");
+            assert!(!inner_opt); // regular select
+        } else {
+            panic!("expected inner member access");
+        }
+    } else {
+        panic!("expected outer member access");
     }
 }

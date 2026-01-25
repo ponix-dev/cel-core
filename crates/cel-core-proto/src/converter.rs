@@ -11,7 +11,9 @@ use crate::gen::cel::expr::{
 };
 use crate::operators::{
     binary_op_to_function, function_to_binary_op, function_to_unary_op, is_index_function,
-    is_ternary_function, unary_op_to_function, INDEX_FUNCTION, TERNARY_FUNCTION,
+    is_optional_index_function, is_optional_select_function, is_ternary_function,
+    unary_op_to_function, INDEX_FUNCTION, OPTIONAL_INDEX_FUNCTION, OPTIONAL_SELECT_FUNCTION,
+    TERNARY_FUNCTION,
 };
 use crate::source_info::{build_source_info, compute_line_offsets, get_position};
 use cel_core_parser::{Expr, ListElement, MapEntry, Spanned, SpannedExpr, StructField};
@@ -30,6 +32,36 @@ impl AstConverter {
         Self {
             positions: HashMap::new(),
             line_offsets,
+        }
+    }
+
+    /// Create a string constant expression (used for optional select field names).
+    fn make_string_const(&mut self, s: &str) -> crate::gen::cel::expr::Expr {
+        crate::gen::cel::expr::Expr {
+            id: 0, // Synthetic node
+            expr_kind: Some(ExprKind::ConstExpr(Constant {
+                constant_kind: Some(ConstantKind::StringValue(s.to_string())),
+            })),
+        }
+    }
+
+    /// Extract a string value from a constant expression.
+    fn extract_string_const(
+        &self,
+        expr: &crate::gen::cel::expr::Expr,
+    ) -> Result<String, ConversionError> {
+        match &expr.expr_kind {
+            Some(ExprKind::ConstExpr(c)) => match &c.constant_kind {
+                Some(ConstantKind::StringValue(s)) => Ok(s.clone()),
+                _ => Err(ConversionError::InvalidConstant {
+                    expr_id: expr.id,
+                    message: "expected string constant".to_string(),
+                }),
+            },
+            _ => Err(ConversionError::InvalidConstant {
+                expr_id: expr.id,
+                message: "expected constant expression".to_string(),
+            }),
         }
     }
 
@@ -132,16 +164,34 @@ impl AstConverter {
                     self.ast_to_expr(else_expr),
                 ],
             }))),
-            Expr::Member { expr, field } => Some(ExprKind::SelectExpr(Box::new(Select {
-                operand: Some(Box::new(self.ast_to_expr(expr))),
-                field: field.clone(),
-                test_only: false,
-            }))),
-            Expr::Index { expr, index } => Some(ExprKind::CallExpr(Box::new(Call {
-                target: Some(Box::new(self.ast_to_expr(expr))),
-                function: INDEX_FUNCTION.to_string(),
-                args: vec![self.ast_to_expr(index)],
-            }))),
+            Expr::Member { expr, field, optional } => {
+                if *optional {
+                    // Optional select: x.?y -> CallExpr with function "_?._"
+                    Some(ExprKind::CallExpr(Box::new(Call {
+                        target: Some(Box::new(self.ast_to_expr(expr))),
+                        function: OPTIONAL_SELECT_FUNCTION.to_string(),
+                        args: vec![self.make_string_const(field)],
+                    })))
+                } else {
+                    Some(ExprKind::SelectExpr(Box::new(Select {
+                        operand: Some(Box::new(self.ast_to_expr(expr))),
+                        field: field.clone(),
+                        test_only: false,
+                    })))
+                }
+            }
+            Expr::Index { expr, index, optional } => {
+                let function = if *optional {
+                    OPTIONAL_INDEX_FUNCTION
+                } else {
+                    INDEX_FUNCTION
+                };
+                Some(ExprKind::CallExpr(Box::new(Call {
+                    target: Some(Box::new(self.ast_to_expr(expr))),
+                    function: function.to_string(),
+                    args: vec![self.ast_to_expr(index)],
+                })))
+            }
             Expr::Call { expr, args } => {
                 // Determine if this is a function call or method call
                 let (target, function) = match &expr.node {
@@ -149,6 +199,7 @@ impl AstConverter {
                     Expr::Member {
                         expr: receiver,
                         field,
+                        ..
                     } => (Some(Box::new(self.ast_to_expr(receiver))), field.clone()),
                     _ => {
                         // Expression call - not typical CEL but handle it
@@ -272,6 +323,7 @@ impl AstConverter {
                             Expr::Member {
                                 expr: Box::new(self.expr_to_ast(operand, source_info)?),
                                 field: select.field.clone(),
+                                optional: false,
                             }
                         }
                     } else {
@@ -352,7 +404,7 @@ impl AstConverter {
             });
         }
 
-        if is_index_function(function) {
+        if is_index_function(function) || is_optional_index_function(function) {
             if call.args.len() != 1 {
                 return Err(ConversionError::InvalidConstant {
                     expr_id,
@@ -366,6 +418,27 @@ impl AstConverter {
             return Ok(Expr::Index {
                 expr: Box::new(self.expr_to_ast(target, source_info)?),
                 index: Box::new(self.expr_to_ast(&call.args[0], source_info)?),
+                optional: is_optional_index_function(function),
+            });
+        }
+
+        if is_optional_select_function(function) {
+            if call.args.len() != 1 {
+                return Err(ConversionError::InvalidConstant {
+                    expr_id,
+                    message: format!("optional select requires 1 arg, got {}", call.args.len()),
+                });
+            }
+            let target = call.target.as_ref().ok_or(ConversionError::MissingField {
+                expr_id,
+                field: "target",
+            })?;
+            // Extract field name from the string constant argument
+            let field = self.extract_string_const(&call.args[0])?;
+            return Ok(Expr::Member {
+                expr: Box::new(self.expr_to_ast(target, source_info)?),
+                field,
+                optional: true,
             });
         }
 
@@ -408,6 +481,7 @@ impl AstConverter {
                 Expr::Member {
                     expr: Box::new(receiver),
                     field: function.clone(),
+                    optional: false,
                 },
                 pos..pos,
             );
@@ -554,7 +628,7 @@ fn extract_type_name(expr: &SpannedExpr) -> String {
     match &expr.node {
         Expr::Ident(name) => name.clone(),
         Expr::RootIdent(name) => format!(".{}", name),
-        Expr::Member { expr, field } => {
+        Expr::Member { expr, field, .. } => {
             let prefix = extract_type_name(expr);
             if prefix.is_empty() {
                 field.clone()
@@ -585,6 +659,7 @@ fn build_type_name_expr(name: &str, pos: usize) -> SpannedExpr {
                     Expr::Member {
                         expr: Box::new(expr),
                         field: (*part).to_string(),
+                        optional: false,
                     },
                     span.clone(),
                 );
@@ -604,6 +679,7 @@ fn build_type_name_expr(name: &str, pos: usize) -> SpannedExpr {
                     Expr::Member {
                         expr: Box::new(expr),
                         field: (*part).to_string(),
+                        optional: false,
                     },
                     span.clone(),
                 );
@@ -699,16 +775,18 @@ mod tests {
                 assert_node_eq(&e1.node, &e2.node);
             }
             (
-                Expr::Member { expr: e1, field: f1 },
-                Expr::Member { expr: e2, field: f2 },
+                Expr::Member { expr: e1, field: f1, optional: o1 },
+                Expr::Member { expr: e2, field: f2, optional: o2 },
             ) => {
                 assert_eq!(f1, f2);
+                assert_eq!(o1, o2);
                 assert_node_eq(&e1.node, &e2.node);
             }
             (
-                Expr::Index { expr: e1, index: i1 },
-                Expr::Index { expr: e2, index: i2 },
+                Expr::Index { expr: e1, index: i1, optional: o1 },
+                Expr::Index { expr: e2, index: i2, optional: o2 },
             ) => {
+                assert_eq!(o1, o2);
                 assert_node_eq(&e1.node, &e2.node);
                 assert_node_eq(&i1.node, &i2.node);
             }
@@ -905,6 +983,7 @@ mod tests {
         let ast = make_ast(Expr::Member {
             expr: Box::new(make_ast(Expr::Ident("x".to_string()))),
             field: "y".to_string(),
+            optional: false,
         });
         let result = roundtrip(&ast);
         assert_node_eq(&ast.node, &result.node);
@@ -915,6 +994,7 @@ mod tests {
         let ast = make_ast(Expr::Index {
             expr: Box::new(make_ast(Expr::Ident("x".to_string()))),
             index: Box::new(make_ast(Expr::Int(0))),
+            optional: false,
         });
         let result = roundtrip(&ast);
         assert_node_eq(&ast.node, &result.node);
@@ -936,6 +1016,7 @@ mod tests {
             expr: Box::new(make_ast(Expr::Member {
                 expr: Box::new(make_ast(Expr::Ident("x".to_string()))),
                 field: "size".to_string(),
+                optional: false,
             })),
             args: vec![],
         });
@@ -1022,8 +1103,10 @@ mod tests {
             expr: Box::new(make_ast(Expr::Member {
                 expr: Box::new(make_ast(Expr::Ident("a".to_string()))),
                 field: "b".to_string(),
+                optional: false,
             })),
             field: "c".to_string(),
+            optional: false,
         });
         assert_eq!(extract_type_name(&expr), "a.b.c");
     }

@@ -253,7 +253,7 @@ fn validate_expr<R: VariableResolver>(
                 }
 
                 // Method call: x.method(args)
-                Expr::Member { expr: receiver, field } => {
+                Expr::Member { expr: receiver, field, .. } => {
                     // Validate the receiver (not in call position)
                     validate_expr(receiver, resolver, errors, false);
 
@@ -402,7 +402,7 @@ fn validate_expr<R: VariableResolver>(
             validate_expr(else_expr, resolver, errors, false);
         }
 
-        Expr::Index { expr: inner, index } => {
+        Expr::Index { expr: inner, index, .. } => {
             validate_expr(inner, resolver, errors, false);
             validate_expr(index, resolver, errors, false);
         }
@@ -575,7 +575,7 @@ fn validate_expr_with_comp_resolver<R: VariableResolver>(
         Expr::Member { expr: inner, .. } => {
             validate_expr_with_comp_resolver(inner, comp_resolver, errors, false);
         }
-        Expr::Index { expr: inner, index } => {
+        Expr::Index { expr: inner, index, .. } => {
             validate_expr_with_comp_resolver(inner, comp_resolver, errors, false);
             validate_expr_with_comp_resolver(index, comp_resolver, errors, false);
         }

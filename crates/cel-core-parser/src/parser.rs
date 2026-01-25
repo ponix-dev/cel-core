@@ -78,6 +78,11 @@ impl<'a> Parser<'a> {
         self.tokens.get(self.pos).map(|(t, _)| t)
     }
 
+    /// Peek at the current token with its span.
+    fn peek_with_span(&self) -> Option<(&Token, &Span)> {
+        self.tokens.get(self.pos).map(|(t, s)| (t, s))
+    }
+
     /// Get the span of the current token.
     fn peek_span(&self) -> Span {
         self.tokens
@@ -325,6 +330,15 @@ impl<'a> Parser<'a> {
         let start = self.peek_span().start;
 
         if self.match_token(&Token::Minus) {
+            // Special case: -9223372036854775808 is i64::MIN
+            // The literal 9223372036854775808 overflows i64, but -9223372036854775808 is valid
+            if let Some((Token::IntOverflow(s), span)) = self.peek_with_span() {
+                if s == "9223372036854775808" {
+                    let end = span.end;
+                    self.advance();
+                    return Ok(Spanned::new(self.next_id(), Expr::Int(i64::MIN), start..end));
+                }
+            }
             let expr = self.parse_unary()?;
             let span = start..expr.span.end;
             Ok(Spanned::new(
@@ -450,6 +464,7 @@ impl<'a> Parser<'a> {
                 Expr::Member {
                     expr: Box::new(receiver.clone()),
                     field: method_name.to_string(),
+                    optional: false,
                 },
                 span.clone(),
             );
@@ -501,7 +516,7 @@ impl<'a> Parser<'a> {
                 }
             }
             // Method call: receiver.name(args)
-            Expr::Member { expr, field } => {
+            Expr::Member { expr, field, .. } => {
                 // Check if this is a receiver macro
                 if self.macros.lookup(field, 0, true).is_some() ||
                    self.macros.lookup(field, 1, true).is_some() ||
@@ -517,10 +532,11 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Parse an index operation: expr[index]
+    /// Parse an index operation: expr[index] or expr[?index]
     fn parse_index(&mut self, base: SpannedExpr) -> Result<SpannedExpr, ParseError> {
         let start = base.span.start;
         self.expect(&Token::LBracket)?;
+        let optional = self.match_token(&Token::Question);
         let index = self.parse_expr()?;
         let end_span = self.expect(&Token::RBracket)?;
 
@@ -529,18 +545,21 @@ impl<'a> Parser<'a> {
             Expr::Index {
                 expr: Box::new(base),
                 index: Box::new(index),
+                optional,
             },
             start..end_span.end,
         ))
     }
 
-    /// Parse member access: expr.field
+    /// Parse member access: expr.field or expr.?field
     fn parse_member(&mut self, base: SpannedExpr) -> Result<SpannedExpr, ParseError> {
         let start = base.span.start;
         self.expect(&Token::Dot)?;
+        let optional = self.match_token(&Token::Question);
 
         let (field, end) = match self.advance() {
             Some((Token::Ident(name), span)) => (name.clone(), span.end),
+            Some((Token::Reserved(name), span)) => (name.clone(), span.end),
             other => {
                 return Err(ParseError {
                     message: format!("expected identifier after '.', found {:?}", other.map(|(t, _)| t)),
@@ -554,6 +573,7 @@ impl<'a> Parser<'a> {
             Expr::Member {
                 expr: Box::new(base),
                 field,
+                optional,
             },
             start..end,
         ))
@@ -593,6 +613,7 @@ impl<'a> Parser<'a> {
 
         let name = match self.advance() {
             Some((Token::Ident(name), _)) => name.clone(),
+            Some((Token::Reserved(name), _)) => name.clone(),
             other => {
                 return Err(ParseError {
                     message: format!("expected field name, found {:?}", other.map(|(t, _)| t)),
@@ -659,6 +680,14 @@ impl<'a> Parser<'a> {
             Some(Token::Reserved(word)) => {
                 Err(ParseError {
                     message: format!("'{}' is a reserved word and cannot be used as an identifier", word),
+                    span,
+                })
+            }
+
+            // Integer overflow - error (unless preceded by -, which is handled in parse_unary)
+            Some(Token::IntOverflow(s)) => {
+                Err(ParseError {
+                    message: format!("integer literal '{}' overflows i64", s),
                     span,
                 })
             }
@@ -989,9 +1018,10 @@ mod tests {
 
     #[test]
     fn parse_member_access() {
-        if let Expr::Member { expr, field } = parse_expr_node("a.b") {
+        if let Expr::Member { expr, field, optional } = parse_expr_node("a.b") {
             assert_eq!(expr.node, Expr::Ident("a".to_string()));
             assert_eq!(field, "b");
+            assert!(!optional);
         } else {
             panic!("expected member access");
         }
@@ -999,9 +1029,10 @@ mod tests {
 
     #[test]
     fn parse_index() {
-        if let Expr::Index { expr, index } = parse_expr_node("a[0]") {
+        if let Expr::Index { expr, index, optional } = parse_expr_node("a[0]") {
             assert_eq!(expr.node, Expr::Ident("a".to_string()));
             assert_eq!(index.node, Expr::Int(0));
+            assert!(!optional);
         } else {
             panic!("expected index");
         }
@@ -1037,11 +1068,12 @@ mod tests {
 
     #[test]
     fn parse_chained_member_access() {
-        if let Expr::Member { expr, field } = parse_expr_node("a.b.c") {
+        if let Expr::Member { expr, field, .. } = parse_expr_node("a.b.c") {
             assert_eq!(field, "c");
             if let Expr::Member {
                 expr: inner_expr,
                 field: inner_field,
+                ..
             } = &expr.node
             {
                 assert_eq!(inner_expr.node, Expr::Ident("a".to_string()));
@@ -1259,7 +1291,7 @@ mod tests {
         ) -> MacroExpansion {
             let arg = args.into_iter().next().unwrap();
             match arg.node {
-                Expr::Member { expr, field } => {
+                Expr::Member { expr, field, .. } => {
                     MacroExpansion::Expanded(Spanned::new(
                         ctx.next_id(),
                         Expr::MemberTestOnly { expr, field },

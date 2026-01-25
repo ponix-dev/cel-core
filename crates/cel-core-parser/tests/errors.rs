@@ -105,3 +105,14 @@ fn error_recovery_in_parentheses() {
     // Recovery might produce an Error node or empty result
     // The important thing is we don't panic
 }
+
+#[test]
+fn error_on_integer_overflow() {
+    // 9223372036854775808 overflows i64 when used standalone
+    let result = parse("9223372036854775808");
+    assert!(result.is_err(), "standalone overflow should produce an error");
+
+    // But -9223372036854775808 is valid (i64::MIN)
+    let result = parse("-9223372036854775808");
+    assert!(!result.is_err(), "-9223372036854775808 should be valid");
+}
