@@ -2,8 +2,8 @@
 //!
 //! This module provides structured error types for reporting type check failures.
 
-use cel_core_parser::Span;
-use cel_core_types::CelType;
+use cel_core_common::Span;
+use cel_core_common::CelType;
 use std::fmt;
 
 /// A type checking error.

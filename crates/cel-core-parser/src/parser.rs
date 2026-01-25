@@ -2,8 +2,8 @@
 
 use std::collections::HashMap;
 
-use crate::ast::{Expr, ListElement, MapEntry, Spanned, SpannedExpr, StructField};
-use crate::lexer::{Span, SpannedToken, Token};
+use cel_core_common::{Expr, ListElement, MapEntry, Span, Spanned, SpannedExpr, StructField};
+use crate::lexer::{SpannedToken, Token};
 use crate::macros::{MacroContext, MacroExpansion, MacroRegistry};
 
 /// Parse error with span information.
@@ -177,7 +177,7 @@ impl<'a> Parser<'a> {
 
     /// Parse logical OR: expr || expr
     fn parse_or(&mut self) -> Result<SpannedExpr, ParseError> {
-        use crate::ast::BinaryOp;
+        use cel_core_common::BinaryOp;
 
         let mut left = self.parse_and()?;
 
@@ -200,7 +200,7 @@ impl<'a> Parser<'a> {
 
     /// Parse logical AND: expr && expr
     fn parse_and(&mut self) -> Result<SpannedExpr, ParseError> {
-        use crate::ast::BinaryOp;
+        use cel_core_common::BinaryOp;
 
         let mut left = self.parse_relation()?;
 
@@ -244,8 +244,8 @@ impl<'a> Parser<'a> {
     }
 
     /// Check if the current token is a relational operator.
-    fn peek_relop(&self) -> Option<crate::ast::BinaryOp> {
-        use crate::ast::BinaryOp;
+    fn peek_relop(&self) -> Option<cel_core_common::BinaryOp> {
+        use cel_core_common::BinaryOp;
 
         match self.peek()? {
             Token::EqEq => Some(BinaryOp::Eq),
@@ -261,7 +261,7 @@ impl<'a> Parser<'a> {
 
     /// Parse additive operators: + -
     fn parse_addition(&mut self) -> Result<SpannedExpr, ParseError> {
-        use crate::ast::BinaryOp;
+        use cel_core_common::BinaryOp;
 
         let mut left = self.parse_mult()?;
 
@@ -292,7 +292,7 @@ impl<'a> Parser<'a> {
 
     /// Parse multiplicative operators: * / %
     fn parse_mult(&mut self) -> Result<SpannedExpr, ParseError> {
-        use crate::ast::BinaryOp;
+        use cel_core_common::BinaryOp;
 
         let mut left = self.parse_unary()?;
 
@@ -325,7 +325,7 @@ impl<'a> Parser<'a> {
 
     /// Parse unary operators: - !
     fn parse_unary(&mut self) -> Result<SpannedExpr, ParseError> {
-        use crate::ast::UnaryOp;
+        use cel_core_common::UnaryOp;
 
         let start = self.peek_span().start;
 
@@ -889,7 +889,7 @@ pub fn parse_tokens_with_macros(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{BinaryOp, UnaryOp};
+    use cel_core_common::{BinaryOp, UnaryOp};
     use crate::lexer::lex;
 
     fn parse_expr(input: &str) -> SpannedExpr {
@@ -1281,7 +1281,7 @@ mod tests {
     #[test]
     fn parse_with_custom_macros() {
         use crate::macros::{Macro, MacroStyle, ArgCount, MacroExpansion, MacroContext};
-        use crate::ast::Span;
+        use cel_core_common::Span;
 
         fn custom_has_expander(
             ctx: &mut MacroContext,

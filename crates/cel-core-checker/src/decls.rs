@@ -3,8 +3,7 @@
 //! These types mirror cel-go's `checker/decls.go` and define the type environment
 //! for CEL expressions.
 
-use cel_core_proto::Constant;
-use cel_core_types::CelType;
+use cel_core_common::{CelType, CelValue};
 
 /// Variable declaration (mirrors cel-go `decls.VariableDecl`).
 ///
@@ -16,7 +15,7 @@ pub struct VariableDecl {
     /// The CEL type of the variable.
     pub cel_type: CelType,
     /// For enum constants, the compile-time value.
-    pub const_value: Option<Constant>,
+    pub const_value: Option<CelValue>,
 }
 
 impl VariableDecl {
@@ -30,7 +29,7 @@ impl VariableDecl {
     }
 
     /// Create a constant declaration with a compile-time value.
-    pub fn constant(name: impl Into<String>, cel_type: CelType, value: Constant) -> Self {
+    pub fn constant(name: impl Into<String>, cel_type: CelType, value: CelValue) -> Self {
         Self {
             name: name.into(),
             cel_type,

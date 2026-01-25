@@ -12,7 +12,8 @@ authors = ["ponix-dev"]
 [workspace.dependencies]
 logos = "0.14"
 prost = "0.14"
+cel-core = { path = "crates/cel-core", version = "0.1.3" }
+cel-core-common = { path = "crates/cel-core-common", version = "0.1.3" }
 cel-core-parser = { path = "crates/cel-core-parser", version = "0.1.3" }
 cel-core-proto = { path = "crates/cel-core-proto", version = "0.1.3" }
-cel-core-types = { path = "crates/cel-core-types", version = "0.1.3" }
 cel-core-checker = { path = "crates/cel-core-checker", version = "0.1.3" }

@@ -1,7 +1,7 @@
 [package]
-name = "cel-core-types"
-description = "CEL type system with parameterized types"
-keywords = ["cel", "types"]
+name = "cel-core-common"
+description = "Common types for CEL: type system, values, and AST"
+keywords = ["cel", "types", "ast"]
 categories = ["development-tools"]
 version.workspace = true
 edition.workspace = true

@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use cel_core_types::CelType;
+use cel_core_common::CelType;
 
 use crate::decls::FunctionDecl;
 

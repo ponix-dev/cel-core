@@ -1,6 +1,6 @@
 //! Hover information for CEL expressions.
 
-use cel_core_parser::{Expr, SpannedExpr};
+use cel_core_common::{Expr, SpannedExpr};
 use tower_lsp::lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position};
 
 use crate::document::{LineIndex, ProtoDocumentState};

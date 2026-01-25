@@ -1,35 +1,50 @@
 //! CelConformanceService implementation.
 //!
 //! This module provides the concrete implementation of ConformanceService
-//! using the cel-parser and cel-checker crates.
+//! using the cel-core unified Env.
 
 use crate::{
     Binding, CheckResponse, ConformanceService, EvalResponse, Issue, ParseResponse, TypeDecl,
 };
-use cel_core_checker::{check, TypeEnv};
+use cel_core::Env;
 use cel_core_proto::gen::cel::expr::{CheckedExpr, ParsedExpr, Reference};
-use cel_core_proto::{cel_type_from_proto, cel_type_to_proto, from_parsed_expr};
-use cel_core_types::CelType;
+use cel_core_proto::{
+    cel_type_from_proto, cel_type_to_proto, cel_value_to_proto, from_parsed_expr,
+};
+use cel_core_common::CelType;
 use std::collections::HashMap;
 
-/// CEL conformance service implementation using cel-parser and cel-checker.
+/// CEL conformance service implementation using cel-core Env.
 ///
-/// Currently supports:
-/// - Parse: Full support via cel-parser
-/// - Check: Full support via cel-checker
+/// All operations go through the unified Env API:
+/// - Parse: Uses Env::parse()
+/// - Check: Uses Env::check()
 /// - Eval: Stub (returns unimplemented error)
-#[derive(Debug, Default)]
-pub struct CelConformanceService;
+#[derive(Debug)]
+pub struct CelConformanceService {
+    /// Base environment with standard library.
+    /// Extended per-request with type declarations.
+    env: Env,
+}
 
 impl CelConformanceService {
     pub fn new() -> Self {
-        Self
+        Self {
+            env: Env::with_standard_library(),
+        }
+    }
+}
+
+impl Default for CelConformanceService {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
 impl ConformanceService for CelConformanceService {
     fn parse(&self, source: &str) -> ParseResponse {
-        let result = cel_core_parser::parse(source);
+        // Use env's parser
+        let result = self.env.parse(source);
 
         // Convert parse errors to issues
         let issues: Vec<Issue> = result
@@ -61,16 +76,16 @@ impl ConformanceService for CelConformanceService {
             }
         };
 
-        // Build TypeEnv from type declarations
-        let mut env = TypeEnv::with_standard_library();
+        // Clone base env and add type declarations
+        let mut env = self.env.clone();
 
         for decl in type_env {
             let cel_type = cel_type_from_proto(&decl.cel_type);
             env.add_variable(&decl.name, cel_type);
         }
 
-        // Run the type checker
-        let check_result = check(&ast, &mut env);
+        // Run the type checker using env
+        let check_result = env.check(&ast);
 
         // Convert errors to issues
         let mut issues: Vec<Issue> = check_result
@@ -99,7 +114,7 @@ impl ConformanceService for CelConformanceService {
                         Reference {
                             name: info.name.clone(),
                             overload_id: info.overload_ids.clone(),
-                            value: info.value.clone(),
+                            value: info.value.as_ref().map(cel_value_to_proto),
                         },
                     )
                 })

@@ -1,6 +1,6 @@
 //! Bidirectional operator mapping between cel-parser types and proto function names.
 
-use cel_core_parser::{BinaryOp, UnaryOp};
+use cel_core_common::{BinaryOp, UnaryOp};
 
 /// Convert a unary operator to its proto function name.
 pub fn unary_op_to_function(op: UnaryOp) -> &'static str {

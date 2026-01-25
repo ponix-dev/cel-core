@@ -1,9 +1,7 @@
 //! CEL lexer using logos.
 
+pub use cel_core_common::Span;
 use logos::Logos;
-
-/// A span in the source input (byte offsets).
-pub type Span = std::ops::Range<usize>;
 
 /// A token with its source span.
 pub type SpannedToken = (Token, Span);

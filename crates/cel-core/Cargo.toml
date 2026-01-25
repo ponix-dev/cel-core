@@ -1,14 +1,13 @@
 [package]
-name = "cel-core-checker"
+name = "cel-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "Type checker for the Common Expression Language (CEL)"
+description = "High-level API for the Common Expression Language (CEL)"
 
 [dependencies]
-cel-core-common.workspace = true
-
-[dev-dependencies]
 cel-core-parser.workspace = true
+cel-core-common.workspace = true
+cel-core-checker.workspace = true

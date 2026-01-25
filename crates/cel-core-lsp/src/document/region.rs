@@ -6,7 +6,8 @@
 
 use std::ops::Range;
 
-use cel_core_parser::{ParseError, SpannedExpr};
+use cel_core_common::SpannedExpr;
+use cel_core_parser::ParseError;
 
 use crate::types::ValidationError;
 

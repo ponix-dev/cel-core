@@ -7,7 +7,7 @@
 //! # Example
 //!
 //! ```
-//! use cel_core_parser::SpannedExpr;
+//! use cel_core_common::SpannedExpr;
 //! use cel_core_proto::{to_parsed_expr, from_parsed_expr};
 //!
 //! // Parse a CEL expression
@@ -36,12 +36,15 @@ pub use operators::{
     is_ternary_function, unary_op_to_function, INDEX_FUNCTION, TERNARY_FUNCTION,
 };
 pub use source_info::{build_source_info, compute_line_offsets, get_position};
-pub use type_conversion::{cel_type_from_proto, cel_type_to_proto};
+pub use type_conversion::{
+    cel_type_from_proto, cel_type_to_proto, cel_value_from_proto, cel_value_to_proto,
+};
 
 // Re-export proto types for convenience
 pub use gen::cel::expr::{CheckedExpr, Constant, Expr, ParsedExpr, SourceInfo, Type, Value};
 
-use cel_core_parser::{MacroCalls, SpannedExpr};
+use cel_core_common::SpannedExpr;
+use cel_core_parser::MacroCalls;
 
 /// Convert a cel-parser AST to a proto ParsedExpr.
 ///
@@ -131,7 +134,7 @@ pub fn from_parsed_expr(parsed: &ParsedExpr) -> Result<SpannedExpr, ConversionEr
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cel_core_parser::Expr;
+    use cel_core_common::Expr;
 
     #[test]
     fn test_to_parsed_expr() {
@@ -157,7 +160,7 @@ mod tests {
         // Check the structure matches
         match &roundtripped.node {
             Expr::Binary { op, left, right } => {
-                assert_eq!(*op, cel_core_parser::BinaryOp::Add);
+                assert_eq!(*op, cel_core_common::BinaryOp::Add);
                 assert!(matches!(left.node, Expr::Ident(ref s) if s == "x"));
                 assert!(matches!(right.node, Expr::Int(1)));
             }

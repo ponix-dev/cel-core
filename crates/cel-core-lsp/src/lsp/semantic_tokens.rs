@@ -1,6 +1,6 @@
 //! Semantic tokens for CEL syntax highlighting.
 
-use cel_core_parser::{BinaryOp, Expr, SpannedExpr, UnaryOp};
+use cel_core_common::{BinaryOp, Expr, SpannedExpr, UnaryOp};
 use tower_lsp::lsp_types::{
     SemanticToken, SemanticTokenModifier, SemanticTokenType, SemanticTokensLegend,
 };

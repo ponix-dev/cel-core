@@ -4,7 +4,7 @@
 //! argument arity, and argument types.
 //! It uses a `VariableResolver` trait to allow custom variable definitions.
 
-use cel_core_parser::{Expr, Span, SpannedExpr};
+use cel_core_common::{Expr, Span, SpannedExpr};
 
 use crate::protovalidate::{
     check_protovalidate_method_arity, get_protovalidate_receiver_types,

@@ -2,18 +2,21 @@
 //!
 //! This module provides the main `Checker` struct and the `check` function
 //! for type-checking CEL expressions.
+//!
+//! The checker is independent and takes raw data (variables, functions, container)
+//! rather than a type environment struct. This allows it to be used as a building
+//! block for higher-level APIs.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use cel_core_parser::{BinaryOp, Expr, SpannedExpr, UnaryOp};
-use cel_core_proto::Constant;
-use cel_core_types::CelType;
+use cel_core_common::{BinaryOp, Expr, SpannedExpr, UnaryOp};
+use cel_core_common::{CelType, CelValue};
 
-use crate::decls::FunctionDecl;
-use crate::env::TypeEnv;
+use crate::decls::{FunctionDecl, VariableDecl};
 use crate::errors::CheckError;
 use crate::overload::{finalize_type, resolve_overload, substitute_type};
+use crate::scope::ScopeStack;
 
 /// Reference information for a resolved identifier or function.
 #[derive(Debug, Clone)]
@@ -23,7 +26,7 @@ pub struct ReferenceInfo {
     /// Matching overload IDs for function calls.
     pub overload_ids: Vec<String>,
     /// Constant value for enum constants.
-    pub value: Option<Constant>,
+    pub value: Option<CelValue>,
 }
 
 impl ReferenceInfo {
@@ -75,9 +78,16 @@ impl CheckResult {
 }
 
 /// Type checker for CEL expressions.
-pub struct Checker<'env> {
-    /// The type environment.
-    env: &'env mut TypeEnv,
+///
+/// The checker takes raw data (variables, functions, container) rather than
+/// a type environment struct, making it independent and reusable.
+pub struct Checker<'a> {
+    /// Scope stack for variable resolution (managed internally).
+    scopes: ScopeStack,
+    /// Function declarations indexed by name.
+    functions: &'a HashMap<String, FunctionDecl>,
+    /// Container namespace for qualified name resolution.
+    container: &'a str,
     /// Map from expression ID to inferred type.
     type_map: HashMap<i64, CelType>,
     /// Map from expression ID to resolved reference.
@@ -88,11 +98,29 @@ pub struct Checker<'env> {
     substitutions: HashMap<Arc<str>, CelType>,
 }
 
-impl<'env> Checker<'env> {
-    /// Create a new type checker with the given environment.
-    pub fn new(env: &'env mut TypeEnv) -> Self {
+impl<'a> Checker<'a> {
+    /// Create a new type checker with the given data.
+    ///
+    /// # Arguments
+    /// * `variables` - Variable declarations (name -> type)
+    /// * `functions` - Function declarations indexed by name
+    /// * `container` - Container namespace for qualified name resolution
+    pub fn new(
+        variables: &HashMap<String, CelType>,
+        functions: &'a HashMap<String, FunctionDecl>,
+        container: &'a str,
+    ) -> Self {
+        let mut scopes = ScopeStack::new();
+
+        // Add variables to the initial scope
+        for (name, cel_type) in variables {
+            scopes.add_variable(name, cel_type.clone());
+        }
+
         Self {
-            env,
+            scopes,
+            functions,
+            container,
             type_map: HashMap::new(),
             reference_map: HashMap::new(),
             errors: Vec::new(),
@@ -202,7 +230,7 @@ impl<'env> Checker<'env> {
 
     /// Check an identifier expression.
     fn check_ident(&mut self, name: &str, expr: &SpannedExpr) -> CelType {
-        if let Some(decl) = self.env.resolve_ident(name) {
+        if let Some(decl) = self.scopes.resolve(name) {
             let cel_type = decl.cel_type.clone();
             self.set_reference(expr.id, ReferenceInfo::ident(name));
             cel_type
@@ -213,7 +241,7 @@ impl<'env> Checker<'env> {
     }
 
     /// Check a list literal.
-    fn check_list(&mut self, elements: &[cel_core_parser::ListElement], _expr: &SpannedExpr) -> CelType {
+    fn check_list(&mut self, elements: &[cel_core_common::ListElement], _expr: &SpannedExpr) -> CelType {
         if elements.is_empty() {
             return CelType::list(CelType::fresh_type_var());
         }
@@ -229,7 +257,7 @@ impl<'env> Checker<'env> {
     }
 
     /// Check a map literal.
-    fn check_map(&mut self, entries: &[cel_core_parser::MapEntry], _expr: &SpannedExpr) -> CelType {
+    fn check_map(&mut self, entries: &[cel_core_common::MapEntry], _expr: &SpannedExpr) -> CelType {
         if entries.is_empty() {
             return CelType::map(CelType::fresh_type_var(), CelType::fresh_type_var());
         }
@@ -341,7 +369,7 @@ impl<'env> Checker<'env> {
     fn check_member(&mut self, obj: &SpannedExpr, field: &str, expr: &SpannedExpr) -> CelType {
         // First, try to resolve as qualified identifier (e.g., pkg.Type)
         if let Some(qualified_name) = self.try_qualified_name(obj, field) {
-            if let Some(decl) = self.env.resolve_qualified(&qualified_name) {
+            if let Some(decl) = self.resolve_qualified(&qualified_name) {
                 let cel_type = decl.cel_type.clone();
                 self.set_reference(expr.id, ReferenceInfo::ident(&qualified_name));
                 return cel_type;
@@ -387,6 +415,28 @@ impl<'env> Checker<'env> {
         }
     }
 
+    /// Try to resolve a qualified name (e.g., `pkg.Type`).
+    ///
+    /// This checks for the name in the following order:
+    /// 1. As-is
+    /// 2. Prepended with container
+    fn resolve_qualified(&self, name: &str) -> Option<&VariableDecl> {
+        // Try as-is first
+        if let Some(decl) = self.scopes.resolve(name) {
+            return Some(decl);
+        }
+
+        // Try with container prefix
+        if !self.container.is_empty() {
+            let qualified = format!("{}.{}", self.container, name);
+            if let Some(decl) = self.scopes.resolve(&qualified) {
+                return Some(decl);
+            }
+        }
+
+        None
+    }
+
     /// Check an index access expression.
     fn check_index(&mut self, obj: &SpannedExpr, index: &SpannedExpr, expr: &SpannedExpr) -> CelType {
         let obj_type = self.check_expr(obj);
@@ -429,7 +479,7 @@ impl<'env> Checker<'env> {
         args: &[CelType],
         expr: &SpannedExpr,
     ) -> CelType {
-        if let Some(func) = self.env.lookup_function(name) {
+        if let Some(func) = self.functions.get(name) {
             let func = func.clone(); // Clone to avoid borrow conflict
             self.resolve_with_function(&func, receiver, args, expr)
         } else {
@@ -474,7 +524,7 @@ impl<'env> Checker<'env> {
     fn check_struct(
         &mut self,
         type_name: &SpannedExpr,
-        fields: &[cel_core_parser::StructField],
+        fields: &[cel_core_common::StructField],
         expr: &SpannedExpr,
     ) -> CelType {
         // Get the type name
@@ -535,21 +585,21 @@ impl<'env> Checker<'env> {
         let accu_type = self.check_expr(accu_init);
 
         // Enter new scope for comprehension body
-        self.env.enter_scope();
+        self.scopes.enter_scope();
 
         // Bind iteration variable(s)
-        self.env.add_variable(iter_var, iter_type.clone());
+        self.scopes.add_variable(iter_var, iter_type.clone());
         if !iter_var2.is_empty() {
             // For two-variable iteration (maps), bind second var
             let iter_type2 = match &range_type {
                 CelType::Map(_, value) => (**value).clone(),
                 _ => CelType::Dyn,
             };
-            self.env.add_variable(iter_var2, iter_type2);
+            self.scopes.add_variable(iter_var2, iter_type2);
         }
 
         // Bind accumulator variable
-        self.env.add_variable(accu_var, accu_type.clone());
+        self.scopes.add_variable(accu_var, accu_type.clone());
 
         // Check loop_condition (must be bool)
         let cond_type = self.check_expr(loop_condition);
@@ -569,7 +619,7 @@ impl<'env> Checker<'env> {
         let result_type = self.check_expr(result);
 
         // Exit comprehension scope
-        self.env.exit_scope();
+        self.scopes.exit_scope();
 
         result_type
     }
@@ -585,8 +635,22 @@ impl<'env> Checker<'env> {
 }
 
 /// Check an expression and return the result.
-pub fn check(expr: &SpannedExpr, env: &mut TypeEnv) -> CheckResult {
-    let checker = Checker::new(env);
+///
+/// This is the main entry point for type checking. It takes raw data rather
+/// than a type environment struct, making it independent and reusable.
+///
+/// # Arguments
+/// * `expr` - The expression to type check
+/// * `variables` - Variable declarations (name -> type)
+/// * `functions` - Function declarations indexed by name
+/// * `container` - Container namespace for qualified name resolution
+pub fn check(
+    expr: &SpannedExpr,
+    variables: &HashMap<String, CelType>,
+    functions: &HashMap<String, FunctionDecl>,
+    container: &str,
+) -> CheckResult {
+    let checker = Checker::new(variables, functions, container);
     checker.check(expr)
 }
 
@@ -614,20 +678,48 @@ fn binary_op_to_function(op: BinaryOp) -> &'static str {
 mod tests {
     use super::*;
     use crate::errors::CheckErrorKind;
+    use crate::standard_library::STANDARD_LIBRARY;
+
+    /// Build the standard library functions map.
+    fn standard_functions() -> HashMap<String, FunctionDecl> {
+        STANDARD_LIBRARY
+            .iter()
+            .map(|f| (f.name.clone(), f.clone()))
+            .collect()
+    }
+
+    /// Build the standard type constants.
+    fn standard_variables() -> HashMap<String, CelType> {
+        let mut vars = HashMap::new();
+        vars.insert("bool".to_string(), CelType::type_of(CelType::Bool));
+        vars.insert("int".to_string(), CelType::type_of(CelType::Int));
+        vars.insert("uint".to_string(), CelType::type_of(CelType::UInt));
+        vars.insert("double".to_string(), CelType::type_of(CelType::Double));
+        vars.insert("string".to_string(), CelType::type_of(CelType::String));
+        vars.insert("bytes".to_string(), CelType::type_of(CelType::Bytes));
+        vars.insert("list".to_string(), CelType::type_of(CelType::list(CelType::Dyn)));
+        vars.insert("map".to_string(), CelType::type_of(CelType::map(CelType::Dyn, CelType::Dyn)));
+        vars.insert("null_type".to_string(), CelType::type_of(CelType::Null));
+        vars.insert("type".to_string(), CelType::type_of(CelType::type_of(CelType::Dyn)));
+        vars.insert("dyn".to_string(), CelType::type_of(CelType::Dyn));
+        vars
+    }
 
     fn check_expr(source: &str) -> CheckResult {
         let result = cel_core_parser::parse(source);
         let ast = result.ast.expect("parse should succeed");
-        let mut env = TypeEnv::with_standard_library();
-        check(&ast, &mut env)
+        let variables = standard_variables();
+        let functions = standard_functions();
+        check(&ast, &variables, &functions, "")
     }
 
     fn check_expr_with_var(source: &str, var: &str, cel_type: CelType) -> CheckResult {
         let result = cel_core_parser::parse(source);
         let ast = result.ast.expect("parse should succeed");
-        let mut env = TypeEnv::with_standard_library();
-        env.add_variable(var, cel_type);
-        check(&ast, &mut env)
+        let mut variables = standard_variables();
+        variables.insert(var.to_string(), cel_type);
+        let functions = standard_functions();
+        check(&ast, &variables, &functions, "")
     }
 
     #[test]

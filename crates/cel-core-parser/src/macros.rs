@@ -18,7 +18,7 @@
 
 use std::collections::HashMap;
 
-use crate::ast::{BinaryOp, Expr, ListElement, MapEntry, Span, Spanned, SpannedExpr, UnaryOp};
+use cel_core_common::{BinaryOp, Expr, ListElement, MapEntry, Span, Spanned, SpannedExpr, UnaryOp};
 
 /// Indicates whether a macro is called as a global function or as a method on a receiver.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

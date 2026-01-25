@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use cel_core_types::CelType;
+use cel_core_common::CelType;
 
 use crate::decls::VariableDecl;
 
@@ -32,6 +32,7 @@ impl Scope {
     }
 
     /// Add a variable declaration to this scope.
+    #[allow(dead_code)]
     pub fn add_decl(&mut self, decl: VariableDecl) {
         self.variables.insert(decl.name.clone(), decl);
     }
@@ -99,6 +100,7 @@ impl ScopeStack {
     }
 
     /// Add a variable declaration to the current scope.
+    #[allow(dead_code)]
     pub fn add_decl(&mut self, decl: VariableDecl) {
         self.current_mut().add_decl(decl);
     }
@@ -120,6 +122,7 @@ impl ScopeStack {
     }
 
     /// Get the depth of the scope stack.
+    #[allow(dead_code)]
     pub fn depth(&self) -> usize {
         self.scopes.len()
     }
