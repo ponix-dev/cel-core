@@ -17,7 +17,7 @@ pub struct LexError {
 
 /// CEL tokens.
 #[derive(Logos, Debug, Clone, PartialEq)]
-#[logos(skip r"[ \t\n\r]+")]
+#[logos(skip r"[ \t\n\r\f]+")]
 #[logos(skip r"//[^\n]*")]
 pub enum Token {
     // === Numeric Literals ===
@@ -45,6 +45,8 @@ pub enum Token {
     #[regex(r"[0-9]+\.[0-9]+([eE][+-]?[0-9]+)?", lex_float, priority = 5)]
     // Float with exponent only: 1e10, 1E-5
     #[regex(r"[0-9]+[eE][+-]?[0-9]+", lex_float, priority = 2)]
+    // Float starting with decimal point: .5, .99, .5e3
+    #[regex(r"\.[0-9]+([eE][+-]?[0-9]+)?", lex_float, priority = 6)]
     Float(f64),
 
     // === String Literals ===
@@ -63,6 +65,20 @@ pub enum Token {
     String(String),
 
     // === Bytes Literals ===
+    // Raw bytes triple-quoted (must come first)
+    #[regex(r#"[bB][rR]""""#, lex_raw_bytes_triple_double)]
+    #[regex(r"[bB][rR]'''", lex_raw_bytes_triple_single)]
+    #[regex(r#"[rR][bB]""""#, lex_raw_bytes_triple_double)]
+    #[regex(r"[rR][bB]'''", lex_raw_bytes_triple_single)]
+    // Triple-quoted bytes (must come before single/double)
+    #[regex(r#"[bB]""""#, lex_bytes_triple_double)]
+    #[regex(r"[bB]'''", lex_bytes_triple_single)]
+    // Raw bytes single/double-quoted
+    #[regex(r#"[bB][rR]""#, lex_raw_bytes_double)]
+    #[regex(r"[bB][rR]'", lex_raw_bytes_single)]
+    #[regex(r#"[rR][bB]""#, lex_raw_bytes_double)]
+    #[regex(r"[rR][bB]'", lex_raw_bytes_single)]
+    // Regular bytes
     #[regex(r#"[bB]""#, lex_bytes_double)]
     #[regex(r"[bB]'", lex_bytes_single)]
     Bytes(Vec<u8>),
@@ -267,8 +283,8 @@ fn lex_quoted_string(lex: &mut logos::Lexer<Token>, quote: char) -> Option<Strin
                 't' => result.push('\t'),
                 'v' => result.push('\x0B'),
                 '?' => result.push('?'),
-                'x' => {
-                    // \xHH - 2 hex digits
+                'x' | 'X' => {
+                    // \xHH or \XHH - 2 hex digits
                     let h1 = chars.next()?;
                     let h2 = chars.next()?;
                     consumed += h1.len_utf8() + h2.len_utf8();
@@ -382,6 +398,30 @@ fn lex_bytes_double(lex: &mut logos::Lexer<Token>) -> Option<Vec<u8>> {
 
 fn lex_bytes_single(lex: &mut logos::Lexer<Token>) -> Option<Vec<u8>> {
     lex_quoted_string(lex, '\'').map(|s| s.into_bytes())
+}
+
+fn lex_bytes_triple_double(lex: &mut logos::Lexer<Token>) -> Option<Vec<u8>> {
+    lex_triple_string(lex, "\"\"\"").map(|s| s.into_bytes())
+}
+
+fn lex_bytes_triple_single(lex: &mut logos::Lexer<Token>) -> Option<Vec<u8>> {
+    lex_triple_string(lex, "'''").map(|s| s.into_bytes())
+}
+
+fn lex_raw_bytes_double(lex: &mut logos::Lexer<Token>) -> Option<Vec<u8>> {
+    lex_raw_string(lex, '"').map(|s| s.into_bytes())
+}
+
+fn lex_raw_bytes_single(lex: &mut logos::Lexer<Token>) -> Option<Vec<u8>> {
+    lex_raw_string(lex, '\'').map(|s| s.into_bytes())
+}
+
+fn lex_raw_bytes_triple_double(lex: &mut logos::Lexer<Token>) -> Option<Vec<u8>> {
+    lex_triple_string(lex, "\"\"\"").map(|s| s.into_bytes())
+}
+
+fn lex_raw_bytes_triple_single(lex: &mut logos::Lexer<Token>) -> Option<Vec<u8>> {
+    lex_triple_string(lex, "'''").map(|s| s.into_bytes())
 }
 
 // === Public Lexer API ===
