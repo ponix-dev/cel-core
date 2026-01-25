@@ -1,7 +1,6 @@
 //! Type checking utilities for CEL expressions.
 
-use cel_core_parser::ast::{Expr, ListElement, MapEntry};
-use cel_core_types::CelType;
+use cel_core_common::{CelType, Expr, ListElement, MapEntry};
 
 use super::builtins::get_builtin;
 use super::function::{Arity, FunctionKind};
@@ -293,7 +292,7 @@ mod tests {
 
     #[test]
     fn infer_homogeneous_list_type() {
-        use cel_core_parser::SpannedExpr;
+        use cel_core_common::SpannedExpr;
 
         let items = vec![
             ListElement {
@@ -315,7 +314,7 @@ mod tests {
 
     #[test]
     fn infer_heterogeneous_list_type() {
-        use cel_core_parser::SpannedExpr;
+        use cel_core_common::SpannedExpr;
 
         let items = vec![
             ListElement {
@@ -340,7 +339,7 @@ mod tests {
 
     #[test]
     fn infer_homogeneous_map_type() {
-        use cel_core_parser::SpannedExpr;
+        use cel_core_common::SpannedExpr;
 
         let entries = vec![
             MapEntry {

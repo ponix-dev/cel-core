@@ -11,3 +11,4 @@ authors.workspace = true
 
 [dependencies]
 logos.workspace = true
+cel-core-common.workspace = true

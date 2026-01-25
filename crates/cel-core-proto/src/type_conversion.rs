@@ -1,25 +1,30 @@
-//! Conversion between CelType and proto Type.
+//! Conversion between CEL native types and proto types.
 //!
-//! This module provides bidirectional conversion between `cel_core_types::CelType`
-//! and the proto `Type` representation from cel-spec.
+//! This module provides bidirectional conversion between:
+//! - `cel_core_common::CelType` and proto `Type`
+//! - `cel_core_common::CelValue` and proto `Constant`
 //!
 //! ## Proto Round-Trip Limitations
 //!
+//! ### CelType
 //! The cel-spec proto format does not distinguish between enum and message types.
 //! Both `CelType::Enum` and `CelType::Message` serialize to `ProtoTypeKind::MessageType`.
 //! When deserializing, all message types become `CelType::Message`.
 //!
 //! This means: `CelType::Enum("MyEnum")` -> proto -> `CelType::Message("MyEnum")`
 //!
-//! If preserving enum distinction is required, use the native `CelType` representation.
+//! ### CelValue
+//! The proto `Constant` also has deprecated Duration and Timestamp variants which
+//! we don't support in `CelValue`. Converting from proto will return `None` for these.
 
+use crate::gen::cel::expr::constant::ConstantKind;
 use crate::gen::cel::expr::r#type::{
     AbstractType as ProtoAbstractType, FunctionType as ProtoFunctionType,
     ListType as ProtoListType, MapType as ProtoMapType, PrimitiveType as ProtoPrimitiveType,
     TypeKind as ProtoTypeKind, WellKnownType as ProtoWellKnownType,
 };
-use crate::gen::cel::expr::Type as ProtoType;
-use cel_core_types::CelType;
+use crate::gen::cel::expr::{Constant as ProtoConstant, Type as ProtoType};
+use cel_core_common::{CelType, CelValue};
 use std::sync::Arc;
 
 /// Convert a proto Type to a CelType.
@@ -172,6 +177,49 @@ impl From<&ProtoType> for CelType {
 impl From<&CelType> for ProtoType {
     fn from(cel_type: &CelType) -> Self {
         cel_type_to_proto(cel_type)
+    }
+}
+
+// ==================== CelValue <-> Constant ====================
+
+/// Convert a proto Constant to a CelValue.
+///
+/// Returns `None` for deprecated Duration and Timestamp constant kinds.
+pub fn cel_value_from_proto(proto: &ProtoConstant) -> Option<CelValue> {
+    match &proto.constant_kind {
+        Some(ConstantKind::NullValue(_)) => Some(CelValue::Null),
+        Some(ConstantKind::BoolValue(v)) => Some(CelValue::Bool(*v)),
+        Some(ConstantKind::Int64Value(v)) => Some(CelValue::Int(*v)),
+        Some(ConstantKind::Uint64Value(v)) => Some(CelValue::UInt(*v)),
+        Some(ConstantKind::DoubleValue(v)) => Some(CelValue::Double(*v)),
+        Some(ConstantKind::StringValue(v)) => Some(CelValue::String(v.clone())),
+        Some(ConstantKind::BytesValue(v)) => Some(CelValue::Bytes(v.to_vec())),
+        // Deprecated constant kinds - not supported in CelValue
+        Some(ConstantKind::DurationValue(_)) | Some(ConstantKind::TimestampValue(_)) => None,
+        None => None,
+    }
+}
+
+/// Convert a CelValue to a proto Constant.
+pub fn cel_value_to_proto(value: &CelValue) -> ProtoConstant {
+    let constant_kind = match value {
+        CelValue::Null => ConstantKind::NullValue(0),
+        CelValue::Bool(v) => ConstantKind::BoolValue(*v),
+        CelValue::Int(v) => ConstantKind::Int64Value(*v),
+        CelValue::UInt(v) => ConstantKind::Uint64Value(*v),
+        CelValue::Double(v) => ConstantKind::DoubleValue(*v),
+        CelValue::String(v) => ConstantKind::StringValue(v.clone()),
+        CelValue::Bytes(v) => ConstantKind::BytesValue(v.clone().into()),
+    };
+
+    ProtoConstant {
+        constant_kind: Some(constant_kind),
+    }
+}
+
+impl From<&CelValue> for ProtoConstant {
+    fn from(value: &CelValue) -> Self {
+        cel_value_to_proto(value)
     }
 }
 

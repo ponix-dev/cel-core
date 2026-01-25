@@ -1,4 +1,7 @@
 //! CEL Abstract Syntax Tree definitions.
+//!
+//! This module contains the AST types that represent parsed CEL expressions.
+//! These types are shared across the parser, checker, and other CEL crates.
 
 /// Source span for error reporting and LSP features.
 /// Uses byte offsets into the source string.

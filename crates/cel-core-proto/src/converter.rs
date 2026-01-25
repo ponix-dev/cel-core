@@ -16,7 +16,7 @@ use crate::operators::{
     TERNARY_FUNCTION,
 };
 use crate::source_info::{build_source_info, compute_line_offsets, get_position};
-use cel_core_parser::{Expr, ListElement, MapEntry, Spanned, SpannedExpr, StructField};
+use cel_core_common::{Expr, ListElement, MapEntry, Spanned, SpannedExpr, StructField};
 use std::collections::HashMap;
 
 /// Bidirectional converter between cel-parser AST and proto Expr.
@@ -692,7 +692,7 @@ fn build_type_name_expr(name: &str, pos: usize) -> SpannedExpr {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cel_core_parser::{BinaryOp, UnaryOp};
+    use cel_core_common::{BinaryOp, UnaryOp};
 
     fn make_ast(node: Expr) -> SpannedExpr {
         // Use ID 0 for test nodes since exact ID doesn't matter for roundtrip tests

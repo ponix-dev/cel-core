@@ -79,7 +79,7 @@ fn error_on_reserved_word_as_identifier() {
 
 #[test]
 fn error_recovery_produces_partial_ast() {
-    use cel_core_parser::Expr;
+    use cel_core_common::Expr;
 
     // Test that error recovery can produce a partial AST with Expr::Error nodes
     // For a malformed list element, we should get a list with an error node

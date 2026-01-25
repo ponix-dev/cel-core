@@ -64,10 +64,32 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b35204fbdc0b3f4446b89fc1ac2cf84a8a68971995d0bf2e925ec7cd960f9cb3"
 
 [[package]]
+name = "cel-core"
+version = "0.1.3"
+dependencies = [
+ "cel-core-checker",
+ "cel-core-common",
+ "cel-core-parser",
+]
+
+[[package]]
+name = "cel-core-checker"
+version = "0.1.3"
+dependencies = [
+ "cel-core-common",
+ "cel-core-parser",
+]
+
+[[package]]
+name = "cel-core-common"
+version = "0.1.3"
+
+[[package]]
 name = "cel-core-conformance"
 version = "0.1.3"
 dependencies = [
- "cel-core-parser",
+ "cel-core",
+ "cel-core-common",
  "cel-core-proto",
  "prost",
  "prost-reflect",
@@ -77,8 +99,8 @@ dependencies = [
 name = "cel-core-lsp"
 version = "0.1.3"
 dependencies = [
+ "cel-core-common",
  "cel-core-parser",
- "cel-core-types",
  "dashmap",
  "regex",
  "tokio",
@@ -89,6 +111,7 @@ dependencies = [
 name = "cel-core-parser"
 version = "0.1.3"
 dependencies = [
+ "cel-core-common",
  "logos 0.14.4",
 ]
 
@@ -96,16 +119,12 @@ dependencies = [
 name = "cel-core-proto"
 version = "0.1.3"
 dependencies = [
+ "cel-core-common",
  "cel-core-parser",
- "cel-core-types",
  "prost",
  "prost-types",
  "thiserror",
 ]
-
-[[package]]
-name = "cel-core-types"
-version = "0.1.3"
 
 [[package]]
 name = "cfg-if"

@@ -8,8 +8,11 @@ This document outlines the path to achieving full CEL (Common Expression Languag
 
 ```
 crates/
+  cel-core-common/       # Shared types: CelType, CelValue, AST
   cel-core-parser/       # Lexer + parser, produces AST
+  cel-core-checker/      # Type checker, produces CheckedExpr
   cel-core-proto/        # Bidirectional AST <-> proto conversion
+  cel-core/              # Unified Env API (cel-go pattern)
   cel-core-lsp/          # Language Server Protocol implementation
   cel-core-conformance/  # Conformance testing against cel-spec
 ```
@@ -20,11 +23,12 @@ crates/
 |-----------|--------|-------|
 | **Lexer** | Complete | Logos-based, all CEL tokens |
 | **Parser** | Complete | Hand-written recursive descent, error recovery |
-| **AST** | Complete | All expression types, span tracking |
-| **Proto Conversion** | Partial | AST to/from `ParsedExpr`, no `CheckedExpr` |
+| **AST** | Complete | All expression types, span tracking, node IDs |
+| **Proto Conversion** | Complete | AST to/from `ParsedExpr` and `CheckedExpr` |
+| **Type Checker** | Partial | `cel-core-checker` crate, standard library, 15/30 conformance files pass |
 | **LSP** | Partial | Diagnostics, hover, semantic tokens |
-| **Validation** | Partial | Arity checking, receiver types (literals only) |
-| **Type Checking** | Not started | No `CheckedExpr` production |
+| **Unified Env** | Complete | `cel-core` crate with `Env` struct (cel-go pattern) |
+| **Program** | Not started | No compiled/cacheable representation |
 | **Evaluation** | Not started | No runtime execution |
 
 ---
@@ -66,11 +70,14 @@ The checker validates the expression against a type environment and produces a `
 - **`expr`**: The original parsed expression
 - **`source_info`**: Source location data
 
-**Current status:** Not implemented. We have partial validation in `cel-core-lsp` for LSP diagnostics, but it:
-- Only infers types for literals (not expressions)
-- Doesn't produce `CheckedExpr`
-- Doesn't handle generics (`List<T>`, `Map<K,V>`)
-- Doesn't resolve function overloads
+**Current status:** Partially implemented in `cel-core-checker` crate:
+- ✅ Type inference for all expression types
+- ✅ Parameterized types (`List<T>`, `Map<K,V>`)
+- ✅ Function overload resolution
+- ✅ `CheckedExpr` production via `cel-core-proto`
+- ✅ Standard library with ~50 function declarations
+- ❌ Extension libraries (string_ext, math_ext, etc.)
+- ❌ Proto message field resolution
 
 ### Phase 3: Program (Compilation)
 
@@ -94,6 +101,117 @@ This is the key insight: **parsing and checking are expensive, evaluation is che
 The evaluator walks the compiled program with concrete variable values and produces a result.
 
 **Current status:** Not implemented. No evaluator, no `Value` type, no operator implementations.
+
+---
+
+## Unified Env Architecture (cel-go Parity)
+
+cel-go uses a central `Env` struct that coordinates all phases. This is the recommended pattern for CEL implementations:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                         Env                                  │
+│  - Variable declarations (types)                            │
+│  - Function declarations (standard lib + extensions)        │
+│  - Parser config (macros)                                   │
+│  - Checker config                                           │
+├─────────────────────────────────────────────────────────────┤
+│  env.parse(source) ──→ Ast                                  │
+│  env.check(ast) ──→ Ast (with types)                        │
+│  env.compile(source) ──→ Ast (parse + check combined)       │
+│  env.program(ast) ──→ Program (executable, cacheable)       │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                       Program                                │
+│  - Stateless, thread-safe, cacheable                        │
+│  - Contains compiled expression + resolved functions        │
+├─────────────────────────────────────────────────────────────┤
+│  program.eval(bindings) ──→ Value                           │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Current State vs cel-go
+
+| cel-go | Ours | Status |
+|--------|------|--------|
+| `Env` (unified coordinator) | `cel_core::Env` | ✅ Complete |
+| `env.Parse()` | `env.parse()` | ✅ Complete |
+| `env.Check()` | `env.check()` | ✅ Complete |
+| `env.Compile()` | `env.compile()` | ✅ Complete |
+| `env.Program()` | None | ❌ Missing |
+| `program.Eval()` | None | ❌ Missing |
+| Extension libraries | None | ❌ Missing |
+
+### Proposed Unified Env
+
+```rust
+pub struct Env {
+    type_env: TypeEnv,            // Variable + function declarations
+    parser_options: ParseOptions, // Macro config, etc.
+}
+
+impl Env {
+    /// Create with standard library
+    pub fn new() -> Self;
+
+    /// Add extension libraries
+    pub fn with_string_extension(self) -> Self;
+    pub fn with_math_extension(self) -> Self;
+    pub fn with_optional_extension(self) -> Self;
+
+    /// Add variable declarations
+    pub fn with_variable(self, name: &str, cel_type: CelType) -> Self;
+
+    /// Parse source to AST
+    pub fn parse(&self, source: &str) -> Result<Ast, Issues>;
+
+    /// Type check an AST
+    pub fn check(&self, ast: &Ast) -> Result<CheckedAst, Issues>;
+
+    /// Parse + check combined
+    pub fn compile(&self, source: &str) -> Result<CheckedAst, Issues>;
+
+    /// Create executable program
+    pub fn program(&self, ast: &CheckedAst) -> Result<Program, Error>;
+}
+
+pub struct Program {
+    expr: CompiledExpr,
+    functions: HashMap<String, FunctionImpl>,
+}
+
+impl Program {
+    /// Evaluate with variable bindings
+    pub fn eval(&self, bindings: &Activation) -> Result<Value, Error>;
+}
+```
+
+### Extension Libraries
+
+Extensions are optional function libraries that can be added to an `Env`:
+
+| Extension | Functions | Test File |
+|-----------|-----------|-----------|
+| `string_ext` | `charAt`, `indexOf`, `substring`, `reverse`, `format` | `string_ext.textproto` |
+| `math_ext` | `math.greatest`, `math.least` | `math_ext.textproto` |
+| `encoders_ext` | `base64.encode`, `base64.decode` | `encoders_ext.textproto` |
+| `optional_ext` | `optional.of`, `optional.none`, `optional.ofNonZeroValue` | `optionals.textproto` |
+| `bindings_ext` | `cel.bind` | `bindings_ext.textproto` |
+| `block_ext` | `cel.block` | `block_ext.textproto` |
+
+Extensions are registered at `Env` creation time:
+
+```rust
+let env = Env::new()
+    .with_string_extension()
+    .with_math_extension()
+    .with_variable("request", CelType::message("http.Request"));
+
+let program = env.compile("request.path.substring(0, 5)")?;
+let result = program.eval(&activation)?;
+```
 
 ---
 
@@ -154,77 +272,71 @@ The proto converter correctly handles `optional_indices` for lists and `optional
 
 ---
 
-### Phase 2: Type System
+### Phase 2: Type System ✅
 
 **Goal:** Full type inference and `CheckedExpr` production.
 
 #### 2.1 Enhanced Type Representation ✅
 
-Implemented parameterized types in a new `cel-core-types` crate:
+Implemented parameterized types in `cel-core-common` crate:
 
 ```rust
-// Current
 pub enum CelType {
-    List,
-    Map,
-    // ...
-}
-
-// Enhanced
-pub enum CelType {
-    List(Box<CelType>),           // List<T>
-    Map(Box<CelType>, Box<CelType>), // Map<K, V>
-    Type(Box<CelType>),           // type(T) - type values
-    Message(String),              // Proto message type
-    Enum(String),                 // Proto enum type
+    // Primitives
+    Bool, Int, UInt, Double, String, Bytes,
+    // Parameterized
+    List(Arc<CelType>),
+    Map(Arc<CelType>, Arc<CelType>),
+    Type(Arc<CelType>),
+    // Proto types
+    Message(Arc<str>),
+    Enum(Arc<str>),
+    // Type checking
+    TypeParam(Arc<str>),  // Generic type parameter
+    TypeVar(u64),         // Inference variable
     // ...
 }
 ```
 
-#### 2.2 Type Checker Implementation
+#### 2.2 Type Checker Implementation ✅
 
-Create a new `cel-core-checker` crate (or module in `cel-core-lsp`) that:
-
-1. **Walks the AST** assigning types to each node
-2. **Resolves identifiers** against the type environment
-3. **Resolves function overloads** based on argument types
-4. **Produces `CheckedExpr`** with `type_map` and `reference_map`
-5. **Supports checker options** matching cel-go's `CheckerOption` configuration
+Implemented in `cel-core-checker` crate:
 
 ```rust
-pub struct Checker {
-    config: TypeCheckConfig,
-    type_env: HashMap<String, CelType>,
+pub struct Checker<'env> {
+    env: &'env mut TypeEnv,
     type_map: HashMap<i64, CelType>,
-    reference_map: HashMap<i64, Reference>,
+    reference_map: HashMap<i64, ReferenceInfo>,
+    errors: Vec<CheckError>,
+    substitutions: HashMap<Arc<str>, CelType>,
 }
 
-impl Checker {
-    pub fn check(&mut self, parsed: &ParsedExpr) -> Result<CheckedExpr, Vec<Issue>>;
-}
+pub fn check(expr: &SpannedExpr, env: &mut TypeEnv) -> CheckResult;
 ```
+
+Features implemented:
+- ✅ Type inference for all expression types
+- ✅ Function overload resolution with type parameter substitution
+- ✅ `type_map` and `reference_map` production
+- ✅ Scoped type environments for comprehensions
+- ✅ Standard library with ~50 function declarations
 
 #### 2.3 Checker Options (cel-go parity)
 
 cel-go provides configurable checker behavior via `CheckerOption`. Key options to support:
 
-| cel-go Option | Description |
-|--------------|-------------|
-| `HomogeneousAggregateLiterals` | When enabled (default), heterogeneous collections like `[1, "hello"]` produce type errors instead of `list<dyn>` |
-| `CrossTypeNumericComparisons` | Allow comparisons between int, uint, and double |
-| `ValidatedDeclarations` | Pre-validated type declarations for performance |
+| cel-go Option | Description | Status |
+|--------------|-------------|--------|
+| `HomogeneousAggregateLiterals` | Heterogeneous collections produce errors | ❌ Not yet |
+| `CrossTypeNumericComparisons` | Allow int/uint/double comparisons | ❌ Not yet |
+| `ValidatedDeclarations` | Pre-validated type declarations | ❌ Not yet |
 
-See: https://github.com/google/cel-go/blob/master/checker/options.go
+#### 2.4 Function Overload Resolution ✅
 
-The `TypeCheckConfig` struct (scaffolded in `cel-core-lsp/src/types/checker.rs`) will expand to support these options.
-
-#### 2.4 Function Overload Resolution
-
-Many CEL functions are overloaded:
-- `+`: `int + int`, `double + double`, `string + string`, `list + list`, `duration + timestamp`, etc.
-- `size`: `size(string)`, `size(list)`, `size(map)`, `size(bytes)`
-
-The checker must select the correct overload based on argument types and record it in `reference_map`.
+Implemented in `cel-core-checker/src/overload.rs`:
+- Type parameter binding (`T`, `K`, `V`)
+- Best-match selection for multiple overloads
+- Substitution tracking across expressions
 
 #### 2.5 Integration with LSP
 
@@ -233,34 +345,62 @@ The existing LSP validation should use the new checker for:
 - Type information for hover
 - Better completion suggestions
 
+**Status:** Not yet integrated. LSP still uses older validation.
+
 ---
 
-### Phase 3: Compiled Program
+### Phase 3: Unified Env + Program
 
-**Goal:** Create a reusable, cacheable compiled representation.
+**Goal:** Create a unified `Env` coordinator and cacheable `Program` representation.
 
-#### 3.1 Internal Program Representation
+#### 3.1 Unified Env
+
+Create `cel-core` crate (or extend existing) with unified environment:
+
+```rust
+pub struct Env {
+    type_env: TypeEnv,
+    parser_options: ParseOptions,
+    function_impls: HashMap<String, FunctionImpl>,
+}
+
+impl Env {
+    pub fn new() -> Self;
+    pub fn with_string_extension(self) -> Self;
+    pub fn with_math_extension(self) -> Self;
+    pub fn with_variable(self, name: &str, cel_type: CelType) -> Self;
+
+    pub fn parse(&self, source: &str) -> Result<Ast, Issues>;
+    pub fn check(&self, ast: &Ast) -> Result<CheckedAst, Issues>;
+    pub fn compile(&self, source: &str) -> Result<CheckedAst, Issues>;
+    pub fn program(&self, ast: &CheckedAst) -> Result<Program, Error>;
+}
+```
+
+#### 3.2 Program Representation
 
 ```rust
 pub struct Program {
-    /// The checked expression (or parsed, for unchecked eval)
+    /// The checked expression
     expr: CompiledExpr,
     /// Resolved types for each node
     types: HashMap<i64, CelType>,
     /// Resolved function implementations
-    functions: HashMap<i64, FunctionImpl>,
+    functions: HashMap<i64, Arc<dyn Fn(&[Value]) -> Value>>,
 }
 
 impl Program {
-    /// Compile from a checked expression (preferred)
-    pub fn from_checked(checked: &CheckedExpr) -> Result<Self, CompileError>;
-
-    /// Compile from a parsed expression (unchecked, less efficient)
-    pub fn from_parsed(parsed: &ParsedExpr) -> Result<Self, CompileError>;
+    /// Evaluate with variable bindings
+    pub fn eval(&self, activation: &dyn Activation) -> Result<Value, EvalError>;
 }
 ```
 
-#### 3.2 Optimization Opportunities
+Key properties (matching cel-go):
+- **Stateless** - no mutable state
+- **Thread-safe** - can be shared via `Arc<Program>`
+- **Cacheable** - compile once, evaluate many times
+
+#### 3.3 Optimization Opportunities
 
 The compiled program can include optimizations:
 - **Constant folding**: `1 + 2` -> `3`
@@ -324,17 +464,55 @@ The evaluator handles:
 - **Comprehensions**: `all`, `exists`, `map`, `filter`
 - **Error propagation**: CEL's error-as-value semantics
 
-#### 4.4 Built-in Function Implementations
+#### 4.4 Standard Library Functions
 
-~50 built-in functions need implementations:
+The standard library (~50 functions) is always available:
 
 | Category | Functions |
 |----------|-----------|
 | Type conversion | `int`, `uint`, `double`, `string`, `bytes`, `bool`, `type`, `dyn` |
-| String | `size`, `contains`, `startsWith`, `endsWith`, `matches`, `charAt`, `indexOf`, `lastIndexOf`, `replace`, `split`, `join`, `substring`, `trim`, `lower`, `upper` |
-| Collections | `size`, `in` |
-| Timestamp/Duration | `getFullYear`, `getMonth`, `getDate`, `getHours`, `getMinutes`, `getSeconds`, `getMilliseconds`, `getDayOfWeek`, `getDayOfYear` |
+| String (standard) | `size`, `contains`, `startsWith`, `endsWith`, `matches` |
+| Collections | `size`, `in`, indexing, field access |
+| Timestamp/Duration | `getFullYear`, `getMonth`, `getDate`, `getHours`, etc. |
 | Macros | `has`, `all`, `exists`, `exists_one`, `map`, `filter` |
+
+#### 4.5 Extension Libraries
+
+Extensions are optional and added via `Env` configuration:
+
+| Extension | Functions | Status |
+|-----------|-----------|--------|
+| `string_ext` | `charAt`, `indexOf`, `lastIndexOf`, `substring`, `replace`, `split`, `join`, `trim`, `lower`, `upper`, `reverse`, `format` | ❌ |
+| `math_ext` | `math.greatest`, `math.least` | ❌ |
+| `encoders_ext` | `base64.encode`, `base64.decode` | ❌ |
+| `optional_ext` | `optional.of`, `optional.none`, `optional.ofNonZeroValue`, `value`, `hasValue`, `or`, `orValue`, `optMap`, `optFlatMap` | ❌ |
+| `bindings_ext` | `cel.bind` | ❌ |
+| `block_ext` | `cel.block` | ❌ |
+
+Extensions are implemented as functions that return `Vec<FunctionDecl>`:
+
+```rust
+// In cel-core-checker/src/extensions/strings.rs
+pub fn string_extension() -> Vec<FunctionDecl> {
+    vec![
+        FunctionDecl::new("charAt")
+            .with_overload(
+                "string_char_at_int",
+                &[CelType::String, CelType::Int],
+                CelType::String,
+                true, // is_receiver
+            ),
+        FunctionDecl::new("indexOf")
+            .with_overload(
+                "string_index_of_string",
+                &[CelType::String, CelType::String],
+                CelType::Int,
+                true,
+            ),
+        // ...
+    ]
+}
+```
 
 ---
 
@@ -378,59 +556,75 @@ Track conformance by category, starting with:
 
 ---
 
-## Crate Structure (Proposed)
+## Crate Structure
 
 ```
 crates/
-  cel-core-parser/       # Lexer, parser, AST (with node IDs)
-  cel-core-types/        # Type system, CelType, CelValue (new)
-  cel-core-checker/      # Type checking, produces CheckedExpr (new)
-  cel-core-eval/         # Program compilation and evaluation (new)
-  cel-core-proto/        # Proto conversion (enhanced)
-  cel-core-lsp/          # LSP implementation (uses above)
-  cel-core-conformance/  # Conformance testing
+  cel-core-common/       # Shared types: CelType, CelValue, AST       ✅ Complete
+  cel-core-parser/       # Lexer, parser (depends on common)          ✅ Complete
+  cel-core-checker/      # Type checking, standard library            ✅ Partial
+  cel-core-proto/        # Bidirectional proto conversion             ✅ Complete
+  cel-core/              # Unified Env API (cel-go pattern)           ✅ Complete
+  cel-core-lsp/          # LSP implementation                         ✅ Partial
+  cel-core-conformance/  # Conformance testing                        ✅ Complete
 ```
 
-Alternatively, `cel-core-types`, `cel-core-checker`, and `cel-core-eval` could be a single `cel-core-runtime` crate.
+The `cel-core` crate will be the main entry point, re-exporting key types and providing the unified `Env` API:
+
+```rust
+// User-facing API
+use cel_core::{Env, Program, Value};
+
+let env = Env::new()
+    .with_variable("name", CelType::String);
+
+let program = env.compile("name.startsWith('test')")?;
+let result = program.eval(&[("name", Value::String("test123".into()))])?;
+```
 
 ---
 
 ## Milestones
 
-### Milestone 1: Basic Evaluation
-- [ ] Value type with primitives
-- [ ] Evaluator for literals
-- [ ] Arithmetic operators
-- [ ] Comparison operators
-- [ ] Logical operators (with short-circuit)
-- [ ] Variable binding resolution
-- [ ] Pass: basic literal conformance tests
+### Milestone 1: Parser ✅
+- [x] Lexer with all CEL tokens
+- [x] Recursive descent parser with error recovery
+- [x] Node IDs in AST
+- [x] Macro expansion (`all`, `exists`, `map`, `filter`, etc.)
+- [x] Optional syntax support
 
-### Milestone 2: Collections and Strings
-- [ ] List and map value support
-- [ ] Collection operators (`in`, indexing)
-- [ ] String built-in functions
-- [ ] Pass: string and collection conformance tests
+### Milestone 2: Type Checker ✅
+- [x] Parameterized types (`List<T>`, `Map<K,V>`)
+- [x] Type inference through expressions
+- [x] Function overload resolution
+- [x] `CheckedExpr` production
+- [x] Standard library (~50 functions)
+- [x] Conformance tests: 15/30 files passing
 
-### Milestone 3: Type Checking
-- [x] Node IDs in parser
-- [x] Parameterized types
-- [ ] Type inference through expressions
-- [ ] Function overload resolution
-- [ ] `CheckedExpr` production
-- [ ] Integration with LSP
+### Milestone 3: Unified Env + Extensions
+- [x] Create `cel-core` crate with unified `Env`
+- [ ] Extension library infrastructure
+- [ ] `string_ext` - `charAt`, `indexOf`, `substring`, `format`
+- [ ] `math_ext` - `math.greatest`, `math.least`
+- [ ] `optional_ext` - `optional.of`, `optional.none`
+- [ ] Conformance tests: 25/30 files passing
 
-### Milestone 4: Macros and Comprehensions
-- [x] Macro expansion in parser
+### Milestone 4: Evaluation
+- [ ] `Value` type with all CEL values
+- [ ] `Program` compilation from `CheckedExpr`
+- [ ] `Activation` for variable bindings
+- [ ] Arithmetic, comparison, logical operators
+- [ ] Short-circuit evaluation (`&&`, `||`, ternary)
 - [ ] Comprehension evaluation
-- [x] `all`, `exists`, `exists_one`, `map`, `filter`
-- [x] Pass: comprehension conformance tests
+- [ ] String function implementations
+- [ ] Conformance tests: evaluation verification
 
 ### Milestone 5: Full Conformance
 - [ ] Timestamp and duration support
-- [ ] Proto message integration
-- [ ] Error semantics
+- [ ] Proto message field resolution
+- [ ] Error-as-value semantics
 - [ ] All conformance tests passing
+- [ ] LSP integration with new checker
 
 ---
 

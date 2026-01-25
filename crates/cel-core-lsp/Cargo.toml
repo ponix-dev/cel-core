@@ -10,8 +10,8 @@ repository.workspace = true
 authors.workspace = true
 
 [dependencies]
+cel-core-common.workspace = true
 cel-core-parser.workspace = true
-cel-core-types.workspace = true
 dashmap = "5.5"
 tower-lsp = "0.20"
 tokio = { version = "1", features = ["full"] }

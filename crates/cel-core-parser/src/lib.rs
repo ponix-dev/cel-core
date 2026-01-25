@@ -1,11 +1,11 @@
 //! CEL (Common Expression Language) parser.
 
-pub mod ast;
 mod lexer;
 pub mod macros;
 mod parser;
 
-pub use ast::{BinaryOp, Expr, ListElement, MapEntry, Span, Spanned, SpannedExpr, StructField, UnaryOp};
+use cel_core_common::{Span, SpannedExpr};
+
 pub use macros::{ArgCount, Macro, MacroExpander, MacroExpansion, MacroRegistry, MacroStyle, MacroContext};
 pub use parser::MacroCalls;
 

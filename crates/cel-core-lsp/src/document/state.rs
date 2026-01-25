@@ -2,7 +2,8 @@
 
 use std::sync::Arc;
 
-use cel_core_parser::{ParseError, SpannedExpr};
+use cel_core_common::SpannedExpr;
+use cel_core_parser::ParseError;
 use dashmap::DashMap;
 use tower_lsp::lsp_types::Url;
 

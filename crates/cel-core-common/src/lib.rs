@@ -1,11 +1,77 @@
-//! CEL type system with parameterized types.
+//! Common types for CEL: type system, values, and AST.
 //!
-//! This module provides the core type representation for CEL expressions,
-//! supporting parameterized types like `List<T>`, `Map<K, V>`, and `type(T)`.
+//! This crate provides the foundational types shared across CEL crates:
+//!
+//! - **Type System**: `CelType` for representing CEL types with parameterized
+//!   types like `List<T>`, `Map<K, V>`, and `type(T)`.
+//! - **Values**: `CelValue` for representing constant values.
+//! - **AST**: Expression types (`Expr`, `SpannedExpr`, `BinaryOp`, etc.) for
+//!   representing parsed CEL syntax.
 
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+
+// AST module
+mod ast;
+pub use ast::{
+    BinaryOp, Expr, ListElement, MapEntry, Span, Spanned, SpannedExpr, StructField, UnaryOp,
+};
+
+// ==================== CelValue ====================
+
+/// A CEL constant value.
+///
+/// This represents compile-time constant values that can appear in CEL expressions,
+/// such as literals and enum constants.
+#[derive(Debug, Clone, PartialEq)]
+pub enum CelValue {
+    /// Null value.
+    Null,
+    /// Boolean value.
+    Bool(bool),
+    /// Signed 64-bit integer.
+    Int(i64),
+    /// Unsigned 64-bit integer.
+    UInt(u64),
+    /// 64-bit floating point.
+    Double(f64),
+    /// Unicode string.
+    String(String),
+    /// Byte sequence.
+    Bytes(Vec<u8>),
+}
+
+impl CelValue {
+    /// Get the CEL type of this value.
+    pub fn cel_type(&self) -> CelType {
+        match self {
+            CelValue::Null => CelType::Null,
+            CelValue::Bool(_) => CelType::Bool,
+            CelValue::Int(_) => CelType::Int,
+            CelValue::UInt(_) => CelType::UInt,
+            CelValue::Double(_) => CelType::Double,
+            CelValue::String(_) => CelType::String,
+            CelValue::Bytes(_) => CelType::Bytes,
+        }
+    }
+}
+
+impl fmt::Display for CelValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            CelValue::Null => write!(f, "null"),
+            CelValue::Bool(v) => write!(f, "{}", v),
+            CelValue::Int(v) => write!(f, "{}", v),
+            CelValue::UInt(v) => write!(f, "{}u", v),
+            CelValue::Double(v) => write!(f, "{}", v),
+            CelValue::String(v) => write!(f, "\"{}\"", v),
+            CelValue::Bytes(v) => write!(f, "b\"{}\"", String::from_utf8_lossy(v)),
+        }
+    }
+}
+
+// ==================== CelType ====================
 
 static TYPE_VAR_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -85,7 +151,7 @@ impl CelType {
     ///
     /// # Example
     /// ```
-    /// use cel_core_types::CelType;
+    /// use cel_core_common::CelType;
     /// let list_of_int = CelType::list(CelType::Int);
     /// assert_eq!(list_of_int.display_name(), "list<int>");
     /// ```
@@ -97,7 +163,7 @@ impl CelType {
     ///
     /// # Example
     /// ```
-    /// use cel_core_types::CelType;
+    /// use cel_core_common::CelType;
     /// let map_str_int = CelType::map(CelType::String, CelType::Int);
     /// assert_eq!(map_str_int.display_name(), "map<string, int>");
     /// ```
@@ -109,7 +175,7 @@ impl CelType {
     ///
     /// # Example
     /// ```
-    /// use cel_core_types::CelType;
+    /// use cel_core_common::CelType;
     /// let type_of_int = CelType::type_of(CelType::Int);
     /// assert_eq!(type_of_int.display_name(), "type(int)");
     /// ```
@@ -121,7 +187,7 @@ impl CelType {
     ///
     /// # Example
     /// ```
-    /// use cel_core_types::CelType;
+    /// use cel_core_common::CelType;
     /// let msg = CelType::message("google.protobuf.Timestamp");
     /// assert_eq!(msg.display_name(), "google.protobuf.Timestamp");
     /// ```
@@ -146,7 +212,7 @@ impl CelType {
     ///
     /// # Example
     /// ```
-    /// use cel_core_types::CelType;
+    /// use cel_core_common::CelType;
     /// let func = CelType::function(&[CelType::String], CelType::Int);
     /// assert_eq!(func.display_name(), "(string) -> int");
     /// ```
