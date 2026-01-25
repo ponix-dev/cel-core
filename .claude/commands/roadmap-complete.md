@@ -52,11 +52,11 @@ Create or update `.claude/handoff.md` with the following template:
 
 ## Commit Guidelines
 
-1. **Commit the handoff and roadmap updates**:
-   - Follow conventional commit format: `type: short description`
+1. **Follow conventional commits**: `type: short description`
    - Types: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`
-   - Keep messages short and concise
-   - Do NOT reference Claude in commit messages (PRs can reference Claude)
+   - Keep commit messages to a single sentence
+   - Do NOT add Claude co-authorship to commits
+   - Save detailed explanations for the PR description
 
 2. **Ensure all work is committed** before creating the PR
 

@@ -154,6 +154,13 @@ if let Some(ast) = result.ast {
 
 ## Code Conventions
 
+### Commits
+- Use conventional commit format: `type: short description`
+- Types: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`
+- Keep commit messages to a single sentence
+- Do NOT add Claude co-authorship to commits
+- Save detailed explanations for PR descriptions
+
 ### Error Handling
 - Parser supports error recovery - `ParseResult` can have both `ast` and `errors`
 - `Expr::Error` nodes mark unparseable sections in partial ASTs
