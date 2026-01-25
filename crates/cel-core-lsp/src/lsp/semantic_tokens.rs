@@ -214,7 +214,7 @@ impl<'a> TokenCollector<'a> {
 
                 self.visit_expr(else_expr);
             }
-            Expr::Member { expr: inner, field } => {
+            Expr::Member { expr: inner, field, .. } => {
                 self.visit_expr(inner);
 
                 // Dot
@@ -227,7 +227,7 @@ impl<'a> TokenCollector<'a> {
                 let field_start = expr.span.end - field.len();
                 self.push(field_start, expr.span.end, token_types::VARIABLE, 0);
             }
-            Expr::Index { expr: inner, index } => {
+            Expr::Index { expr: inner, index, .. } => {
                 self.visit_expr(inner);
 
                 // Opening bracket - find it after the inner expression
@@ -255,7 +255,7 @@ impl<'a> TokenCollector<'a> {
                             modifiers,
                         );
                     }
-                    Expr::Member { expr: obj, field } => {
+                    Expr::Member { expr: obj, field, .. } => {
                         self.visit_expr(obj);
 
                         // Dot

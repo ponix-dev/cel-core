@@ -470,7 +470,7 @@ fn expand_has(
     let arg = args.into_iter().next().unwrap();
 
     match arg.node {
-        Expr::Member { expr, field } => {
+        Expr::Member { expr, field, .. } => {
             let result = Spanned::new(
                 ctx.next_id(),
                 Expr::MemberTestOnly { expr, field },

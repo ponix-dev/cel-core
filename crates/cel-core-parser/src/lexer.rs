@@ -17,7 +17,7 @@ pub struct LexError {
 
 /// CEL tokens.
 #[derive(Logos, Debug, Clone, PartialEq)]
-#[logos(skip r"[ \t\n\r]+")]
+#[logos(skip r"[ \t\n\r\f]+")]
 #[logos(skip r"//[^\n]*")]
 pub enum Token {
     // === Numeric Literals ===
@@ -35,16 +35,27 @@ pub enum Token {
     #[regex(r"[0-9]+", lex_decimal_int, priority = 1)]
     Int(i64),
 
+    // Integer overflow - specifically handle the i64::MIN absolute value case
+    // 9223372036854775808 = |i64::MIN| = i64::MAX + 1
+    // This allows "-9223372036854775808" to parse correctly
+    #[token("9223372036854775808", |_| "9223372036854775808".to_string(), priority = 2)]
+    IntOverflow(String),
+
     // Float with decimal point and optional exponent: 1.5, 1.5e10
     #[regex(r"[0-9]+\.[0-9]+([eE][+-]?[0-9]+)?", lex_float, priority = 5)]
     // Float with exponent only: 1e10, 1E-5
     #[regex(r"[0-9]+[eE][+-]?[0-9]+", lex_float, priority = 2)]
+    // Float starting with decimal point: .5, .99, .5e3
+    #[regex(r"\.[0-9]+([eE][+-]?[0-9]+)?", lex_float, priority = 6)]
     Float(f64),
 
     // === String Literals ===
     // Triple-quoted strings (must come before single/double to match first)
     #[regex(r#"""""#, lex_triple_double_string)]
     #[regex(r"'''", lex_triple_single_string)]
+    // Raw triple-quoted strings (must come before raw single/double to match first)
+    #[regex(r#"[rR]""""#, lex_raw_triple_double_string)]
+    #[regex(r"[rR]'''", lex_raw_triple_single_string)]
     // Raw strings
     #[regex(r#"[rR]""#, lex_raw_double_string)]
     #[regex(r"[rR]'", lex_raw_single_string)]
@@ -54,6 +65,20 @@ pub enum Token {
     String(String),
 
     // === Bytes Literals ===
+    // Raw bytes triple-quoted (must come first)
+    #[regex(r#"[bB][rR]""""#, lex_raw_bytes_triple_double)]
+    #[regex(r"[bB][rR]'''", lex_raw_bytes_triple_single)]
+    #[regex(r#"[rR][bB]""""#, lex_raw_bytes_triple_double)]
+    #[regex(r"[rR][bB]'''", lex_raw_bytes_triple_single)]
+    // Triple-quoted bytes (must come before single/double)
+    #[regex(r#"[bB]""""#, lex_bytes_triple_double)]
+    #[regex(r"[bB]'''", lex_bytes_triple_single)]
+    // Raw bytes single/double-quoted
+    #[regex(r#"[bB][rR]""#, lex_raw_bytes_double)]
+    #[regex(r"[bB][rR]'", lex_raw_bytes_single)]
+    #[regex(r#"[rR][bB]""#, lex_raw_bytes_double)]
+    #[regex(r"[rR][bB]'", lex_raw_bytes_single)]
+    // Regular bytes
     #[regex(r#"[bB]""#, lex_bytes_double)]
     #[regex(r"[bB]'", lex_bytes_single)]
     Bytes(Vec<u8>),
@@ -90,6 +115,7 @@ pub enum Token {
 
     // === Identifier ===
     #[regex(r"[a-zA-Z_][a-zA-Z0-9_]*", |lex| lex.slice().to_string(), priority = 0)]
+    #[regex(r"`[^`]+`", lex_backtick_ident)]
     Ident(String),
 
     // === Operators (multi-char first) ===
@@ -150,6 +176,7 @@ impl std::fmt::Display for Token {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Token::Int(n) => write!(f, "{}", n),
+            Token::IntOverflow(s) => write!(f, "{}", s),
             Token::UInt(n) => write!(f, "{}u", n),
             Token::Float(n) => write!(f, "{}", n),
             Token::String(s) => write!(f, "\"{}\"", s),
@@ -213,6 +240,11 @@ fn lex_float(lex: &mut logos::Lexer<Token>) -> Option<f64> {
     lex.slice().parse().ok()
 }
 
+fn lex_backtick_ident(lex: &mut logos::Lexer<Token>) -> String {
+    let s = lex.slice();
+    s[1..s.len() - 1].to_string() // Strip backticks
+}
+
 // === Lexer Callbacks for Strings ===
 
 fn lex_double_string(lex: &mut logos::Lexer<Token>) -> Option<String> {
@@ -251,8 +283,8 @@ fn lex_quoted_string(lex: &mut logos::Lexer<Token>, quote: char) -> Option<Strin
                 't' => result.push('\t'),
                 'v' => result.push('\x0B'),
                 '?' => result.push('?'),
-                'x' => {
-                    // \xHH - 2 hex digits
+                'x' | 'X' => {
+                    // \xHH or \XHH - 2 hex digits
                     let h1 = chars.next()?;
                     let h2 = chars.next()?;
                     consumed += h1.len_utf8() + h2.len_utf8();
@@ -350,6 +382,14 @@ fn lex_triple_string(lex: &mut logos::Lexer<Token>, end_quote: &str) -> Option<S
     }
 }
 
+fn lex_raw_triple_double_string(lex: &mut logos::Lexer<Token>) -> Option<String> {
+    lex_triple_string(lex, "\"\"\"")
+}
+
+fn lex_raw_triple_single_string(lex: &mut logos::Lexer<Token>) -> Option<String> {
+    lex_triple_string(lex, "'''")
+}
+
 // === Lexer Callbacks for Bytes ===
 
 fn lex_bytes_double(lex: &mut logos::Lexer<Token>) -> Option<Vec<u8>> {
@@ -358,6 +398,30 @@ fn lex_bytes_double(lex: &mut logos::Lexer<Token>) -> Option<Vec<u8>> {
 
 fn lex_bytes_single(lex: &mut logos::Lexer<Token>) -> Option<Vec<u8>> {
     lex_quoted_string(lex, '\'').map(|s| s.into_bytes())
+}
+
+fn lex_bytes_triple_double(lex: &mut logos::Lexer<Token>) -> Option<Vec<u8>> {
+    lex_triple_string(lex, "\"\"\"").map(|s| s.into_bytes())
+}
+
+fn lex_bytes_triple_single(lex: &mut logos::Lexer<Token>) -> Option<Vec<u8>> {
+    lex_triple_string(lex, "'''").map(|s| s.into_bytes())
+}
+
+fn lex_raw_bytes_double(lex: &mut logos::Lexer<Token>) -> Option<Vec<u8>> {
+    lex_raw_string(lex, '"').map(|s| s.into_bytes())
+}
+
+fn lex_raw_bytes_single(lex: &mut logos::Lexer<Token>) -> Option<Vec<u8>> {
+    lex_raw_string(lex, '\'').map(|s| s.into_bytes())
+}
+
+fn lex_raw_bytes_triple_double(lex: &mut logos::Lexer<Token>) -> Option<Vec<u8>> {
+    lex_triple_string(lex, "\"\"\"").map(|s| s.into_bytes())
+}
+
+fn lex_raw_bytes_triple_single(lex: &mut logos::Lexer<Token>) -> Option<Vec<u8>> {
+    lex_triple_string(lex, "'''").map(|s| s.into_bytes())
 }
 
 // === Public Lexer API ===
@@ -646,6 +710,28 @@ line""""#
         assert_eq!(
             lex_tokens("namespace"),
             vec![Token::Reserved("namespace".to_string())]
+        );
+    }
+
+    #[test]
+    fn lex_integer_overflow() {
+        // i64::MAX = 9223372036854775807 (fits)
+        assert_eq!(
+            lex_tokens("9223372036854775807"),
+            vec![Token::Int(9223372036854775807)]
+        );
+
+        // i64::MAX + 1 = 9223372036854775808 (overflow - this is |i64::MIN|)
+        // This specific value is needed for "-9223372036854775808" to work
+        assert_eq!(
+            lex_tokens("9223372036854775808"),
+            vec![Token::IntOverflow("9223372036854775808".to_string())]
+        );
+
+        // Normal 19-digit number that fits
+        assert_eq!(
+            lex_tokens("1000000000000000000"),
+            vec![Token::Int(1000000000000000000)]
         );
     }
 }

@@ -76,6 +76,22 @@ pub const TERNARY_FUNCTION: &str = "_?_:_";
 /// The proto function name for the index operator.
 pub const INDEX_FUNCTION: &str = "_[_]";
 
+/// The proto function name for the optional index operator.
+pub const OPTIONAL_INDEX_FUNCTION: &str = "_[?_]";
+
+/// The proto function name for the optional select operator.
+pub const OPTIONAL_SELECT_FUNCTION: &str = "_?._";
+
+/// Check if a function name represents the optional index operator.
+pub fn is_optional_index_function(function: &str) -> bool {
+    function == "_[?_]"
+}
+
+/// Check if a function name represents the optional select operator.
+pub fn is_optional_select_function(function: &str) -> bool {
+    function == "_?._"
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

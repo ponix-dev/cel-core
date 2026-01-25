@@ -86,10 +86,14 @@ pub enum Expr {
     Member {
         expr: Box<SpannedExpr>,
         field: String,
+        /// Whether this is an optional select (x.?y instead of x.y)
+        optional: bool,
     },
     Index {
         expr: Box<SpannedExpr>,
         index: Box<SpannedExpr>,
+        /// Whether this is an optional index (x[?k] instead of x[k])
+        optional: bool,
     },
     Call {
         expr: Box<SpannedExpr>,
