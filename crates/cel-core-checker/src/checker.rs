@@ -1,0 +1,765 @@
+//! Core type checker implementation.
+//!
+//! This module provides the main `Checker` struct and the `check` function
+//! for type-checking CEL expressions.
+
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use cel_core_parser::{BinaryOp, Expr, SpannedExpr, UnaryOp};
+use cel_core_proto::Constant;
+use cel_core_types::CelType;
+
+use crate::decls::FunctionDecl;
+use crate::env::TypeEnv;
+use crate::errors::CheckError;
+use crate::overload::{finalize_type, resolve_overload, substitute_type};
+
+/// Reference information for a resolved identifier or function.
+#[derive(Debug, Clone)]
+pub struct ReferenceInfo {
+    /// The fully qualified name.
+    pub name: String,
+    /// Matching overload IDs for function calls.
+    pub overload_ids: Vec<String>,
+    /// Constant value for enum constants.
+    pub value: Option<Constant>,
+}
+
+impl ReferenceInfo {
+    /// Create a new identifier reference.
+    pub fn ident(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            overload_ids: Vec::new(),
+            value: None,
+        }
+    }
+
+    /// Create a new function reference with overload IDs.
+    pub fn function(name: impl Into<String>, overload_ids: Vec<String>) -> Self {
+        Self {
+            name: name.into(),
+            overload_ids,
+            value: None,
+        }
+    }
+}
+
+/// Result of type checking an expression.
+#[derive(Debug)]
+pub struct CheckResult {
+    /// Map from expression ID to inferred type.
+    pub type_map: HashMap<i64, CelType>,
+    /// Map from expression ID to resolved reference.
+    pub reference_map: HashMap<i64, ReferenceInfo>,
+    /// Errors encountered during type checking.
+    pub errors: Vec<CheckError>,
+}
+
+impl CheckResult {
+    /// Check if type checking was successful (no errors).
+    pub fn is_ok(&self) -> bool {
+        self.errors.is_empty()
+    }
+
+    /// Get the type for an expression ID.
+    pub fn get_type(&self, expr_id: i64) -> Option<&CelType> {
+        self.type_map.get(&expr_id)
+    }
+
+    /// Get the reference for an expression ID.
+    pub fn get_reference(&self, expr_id: i64) -> Option<&ReferenceInfo> {
+        self.reference_map.get(&expr_id)
+    }
+}
+
+/// Type checker for CEL expressions.
+pub struct Checker<'env> {
+    /// The type environment.
+    env: &'env mut TypeEnv,
+    /// Map from expression ID to inferred type.
+    type_map: HashMap<i64, CelType>,
+    /// Map from expression ID to resolved reference.
+    reference_map: HashMap<i64, ReferenceInfo>,
+    /// Type checking errors.
+    errors: Vec<CheckError>,
+    /// Type parameter substitutions.
+    substitutions: HashMap<Arc<str>, CelType>,
+}
+
+impl<'env> Checker<'env> {
+    /// Create a new type checker with the given environment.
+    pub fn new(env: &'env mut TypeEnv) -> Self {
+        Self {
+            env,
+            type_map: HashMap::new(),
+            reference_map: HashMap::new(),
+            errors: Vec::new(),
+            substitutions: HashMap::new(),
+        }
+    }
+
+    /// Type check an expression and return the result.
+    pub fn check(mut self, expr: &SpannedExpr) -> CheckResult {
+        self.check_expr(expr);
+        self.finalize_types();
+
+        CheckResult {
+            type_map: self.type_map,
+            reference_map: self.reference_map,
+            errors: self.errors,
+        }
+    }
+
+    /// Store the type for an expression.
+    fn set_type(&mut self, expr_id: i64, cel_type: CelType) {
+        self.type_map.insert(expr_id, cel_type);
+    }
+
+    /// Store a reference for an expression.
+    fn set_reference(&mut self, expr_id: i64, reference: ReferenceInfo) {
+        self.reference_map.insert(expr_id, reference);
+    }
+
+    /// Report an error.
+    fn report_error(&mut self, error: CheckError) {
+        self.errors.push(error);
+    }
+
+    /// Finalize all types by replacing unbound type variables with Dyn.
+    fn finalize_types(&mut self) {
+        for ty in self.type_map.values_mut() {
+            *ty = finalize_type(ty);
+            *ty = substitute_type(ty, &self.substitutions);
+            *ty = finalize_type(ty);
+        }
+    }
+
+    /// Type check an expression and return its type.
+    fn check_expr(&mut self, expr: &SpannedExpr) -> CelType {
+        let result = match &expr.node {
+            Expr::Null => CelType::Null,
+            Expr::Bool(_) => CelType::Bool,
+            Expr::Int(_) => CelType::Int,
+            Expr::UInt(_) => CelType::UInt,
+            Expr::Float(_) => CelType::Double,
+            Expr::String(_) => CelType::String,
+            Expr::Bytes(_) => CelType::Bytes,
+
+            Expr::Ident(name) => self.check_ident(name, expr),
+            Expr::RootIdent(name) => self.check_ident(name, expr),
+
+            Expr::List(elements) => self.check_list(elements, expr),
+            Expr::Map(entries) => self.check_map(entries, expr),
+
+            Expr::Unary { op, expr: inner } => self.check_unary(*op, inner, expr),
+            Expr::Binary { op, left, right } => self.check_binary(*op, left, right, expr),
+            Expr::Ternary { cond, then_expr, else_expr } => {
+                self.check_ternary(cond, then_expr, else_expr, expr)
+            }
+
+            Expr::Member { expr: obj, field, optional: _ } => {
+                self.check_member(obj, field, expr)
+            }
+            Expr::Index { expr: obj, index, optional: _ } => {
+                self.check_index(obj, index, expr)
+            }
+            Expr::Call { expr: callee, args } => self.check_call(callee, args, expr),
+            Expr::Struct { type_name, fields } => self.check_struct(type_name, fields, expr),
+
+            Expr::Comprehension {
+                iter_var,
+                iter_var2,
+                iter_range,
+                accu_var,
+                accu_init,
+                loop_condition,
+                loop_step,
+                result,
+            } => self.check_comprehension(
+                iter_var,
+                iter_var2,
+                iter_range,
+                accu_var,
+                accu_init,
+                loop_condition,
+                loop_step,
+                result,
+                expr,
+            ),
+
+            Expr::MemberTestOnly { expr: obj, field } => {
+                self.check_member_test(obj, field, expr)
+            }
+
+            Expr::Error => CelType::Error,
+        };
+
+        self.set_type(expr.id, result.clone());
+        result
+    }
+
+    /// Check an identifier expression.
+    fn check_ident(&mut self, name: &str, expr: &SpannedExpr) -> CelType {
+        if let Some(decl) = self.env.resolve_ident(name) {
+            let cel_type = decl.cel_type.clone();
+            self.set_reference(expr.id, ReferenceInfo::ident(name));
+            cel_type
+        } else {
+            self.report_error(CheckError::undeclared_reference(name, expr.span.clone(), expr.id));
+            CelType::Error
+        }
+    }
+
+    /// Check a list literal.
+    fn check_list(&mut self, elements: &[cel_core_parser::ListElement], _expr: &SpannedExpr) -> CelType {
+        if elements.is_empty() {
+            return CelType::list(CelType::fresh_type_var());
+        }
+
+        let mut elem_types = Vec::new();
+        for elem in elements {
+            let elem_type = self.check_expr(&elem.expr);
+            elem_types.push(elem_type);
+        }
+
+        let joined = self.join_types(&elem_types);
+        CelType::list(joined)
+    }
+
+    /// Check a map literal.
+    fn check_map(&mut self, entries: &[cel_core_parser::MapEntry], _expr: &SpannedExpr) -> CelType {
+        if entries.is_empty() {
+            return CelType::map(CelType::fresh_type_var(), CelType::fresh_type_var());
+        }
+
+        let mut key_types = Vec::new();
+        let mut value_types = Vec::new();
+
+        for entry in entries {
+            let key_type = self.check_expr(&entry.key);
+            let value_type = self.check_expr(&entry.value);
+            key_types.push(key_type);
+            value_types.push(value_type);
+        }
+
+        let key_joined = self.join_types(&key_types);
+        let value_joined = self.join_types(&value_types);
+
+        CelType::map(key_joined, value_joined)
+    }
+
+    /// Join multiple types into a common type.
+    fn join_types(&self, types: &[CelType]) -> CelType {
+        if types.is_empty() {
+            return CelType::fresh_type_var();
+        }
+
+        let first = &types[0];
+
+        // Check if all types are the same
+        if types.iter().all(|t| t == first || matches!(t, CelType::Dyn) || matches!(first, CelType::Dyn)) {
+            if matches!(first, CelType::Dyn) {
+                // If first is Dyn, try to find a concrete type
+                for t in types {
+                    if !matches!(t, CelType::Dyn) {
+                        return t.clone();
+                    }
+                }
+            }
+            return first.clone();
+        }
+
+        // Check if all types are assignable to each other
+        let all_compatible = types.iter().all(|t| {
+            first.is_assignable_from(t) || t.is_assignable_from(first)
+        });
+
+        if all_compatible {
+            first.clone()
+        } else {
+            CelType::Dyn
+        }
+    }
+
+    /// Check a unary operation.
+    fn check_unary(&mut self, op: UnaryOp, inner: &SpannedExpr, expr: &SpannedExpr) -> CelType {
+        let inner_type = self.check_expr(inner);
+
+        let func_name = match op {
+            UnaryOp::Neg => "-_",
+            UnaryOp::Not => "!_",
+        };
+
+        self.resolve_function_call(func_name, None, &[inner_type], expr)
+    }
+
+    /// Check a binary operation.
+    fn check_binary(
+        &mut self,
+        op: BinaryOp,
+        left: &SpannedExpr,
+        right: &SpannedExpr,
+        expr: &SpannedExpr,
+    ) -> CelType {
+        let left_type = self.check_expr(left);
+        let right_type = self.check_expr(right);
+
+        let func_name = binary_op_to_function(op);
+
+        self.resolve_function_call(func_name, None, &[left_type, right_type], expr)
+    }
+
+    /// Check a ternary expression.
+    fn check_ternary(
+        &mut self,
+        cond: &SpannedExpr,
+        then_expr: &SpannedExpr,
+        else_expr: &SpannedExpr,
+        expr: &SpannedExpr,
+    ) -> CelType {
+        let cond_type = self.check_expr(cond);
+        let then_type = self.check_expr(then_expr);
+        let else_type = self.check_expr(else_expr);
+
+        // Condition must be bool
+        if !matches!(cond_type, CelType::Bool | CelType::Dyn | CelType::Error) {
+            self.report_error(CheckError::type_mismatch(
+                CelType::Bool,
+                cond_type,
+                cond.span.clone(),
+                cond.id,
+            ));
+        }
+
+        // Use ternary operator for type resolution
+        self.resolve_function_call("_?_:_", None, &[CelType::Bool, then_type, else_type], expr)
+    }
+
+    /// Check a member access expression.
+    fn check_member(&mut self, obj: &SpannedExpr, field: &str, expr: &SpannedExpr) -> CelType {
+        // First, try to resolve as qualified identifier (e.g., pkg.Type)
+        if let Some(qualified_name) = self.try_qualified_name(obj, field) {
+            if let Some(decl) = self.env.resolve_qualified(&qualified_name) {
+                let cel_type = decl.cel_type.clone();
+                self.set_reference(expr.id, ReferenceInfo::ident(&qualified_name));
+                return cel_type;
+            }
+        }
+
+        // Otherwise, it's a field access
+        let obj_type = self.check_expr(obj);
+
+        // Check for well-known types with fields
+        match &obj_type {
+            CelType::Message(_) | CelType::Dyn => {
+                // For messages and Dyn, we can't verify field existence statically
+                CelType::Dyn
+            }
+            CelType::Map(_, value_type) => {
+                // Map field access returns the value type
+                (**value_type).clone()
+            }
+            _ => {
+                // Other types don't support field access
+                self.report_error(CheckError::undefined_field(
+                    &obj_type.display_name(),
+                    field,
+                    expr.span.clone(),
+                    expr.id,
+                ));
+                CelType::Error
+            }
+        }
+    }
+
+    /// Try to build a qualified name from a member chain.
+    fn try_qualified_name(&self, obj: &SpannedExpr, field: &str) -> Option<String> {
+        match &obj.node {
+            Expr::Ident(name) => Some(format!("{}.{}", name, field)),
+            Expr::RootIdent(name) => Some(format!(".{}.{}", name, field)),
+            Expr::Member { expr: inner, field: inner_field, .. } => {
+                let prefix = self.try_qualified_name(inner, inner_field)?;
+                Some(format!("{}.{}", prefix, field))
+            }
+            _ => None,
+        }
+    }
+
+    /// Check an index access expression.
+    fn check_index(&mut self, obj: &SpannedExpr, index: &SpannedExpr, expr: &SpannedExpr) -> CelType {
+        let obj_type = self.check_expr(obj);
+        let index_type = self.check_expr(index);
+
+        self.resolve_function_call("_[_]", None, &[obj_type, index_type], expr)
+    }
+
+    /// Check a function call expression.
+    fn check_call(&mut self, callee: &SpannedExpr, args: &[SpannedExpr], expr: &SpannedExpr) -> CelType {
+        // Determine if this is a method call or standalone call
+        match &callee.node {
+            Expr::Member { expr: receiver, field: func_name, .. } => {
+                // Method call: receiver.method(args)
+                let receiver_type = self.check_expr(receiver);
+                let arg_types: Vec<_> = args.iter().map(|a| self.check_expr(a)).collect();
+                self.resolve_function_call(func_name, Some(receiver_type), &arg_types, expr)
+            }
+            Expr::Ident(func_name) => {
+                // Standalone call: func(args)
+                let arg_types: Vec<_> = args.iter().map(|a| self.check_expr(a)).collect();
+                self.resolve_function_call(func_name, None, &arg_types, expr)
+            }
+            _ => {
+                // Expression call (unusual)
+                let _ = self.check_expr(callee);
+                for arg in args {
+                    self.check_expr(arg);
+                }
+                CelType::Dyn
+            }
+        }
+    }
+
+    /// Resolve a function call and return the result type.
+    fn resolve_function_call(
+        &mut self,
+        name: &str,
+        receiver: Option<CelType>,
+        args: &[CelType],
+        expr: &SpannedExpr,
+    ) -> CelType {
+        if let Some(func) = self.env.lookup_function(name) {
+            let func = func.clone(); // Clone to avoid borrow conflict
+            self.resolve_with_function(&func, receiver, args, expr)
+        } else {
+            self.report_error(CheckError::undeclared_reference(
+                name,
+                expr.span.clone(),
+                expr.id,
+            ));
+            CelType::Error
+        }
+    }
+
+    /// Resolve a function call with a known function declaration.
+    fn resolve_with_function(
+        &mut self,
+        func: &FunctionDecl,
+        receiver: Option<CelType>,
+        args: &[CelType],
+        expr: &SpannedExpr,
+    ) -> CelType {
+        if let Some(result) = resolve_overload(
+            func,
+            receiver.as_ref(),
+            args,
+            &mut self.substitutions,
+        ) {
+            self.set_reference(expr.id, ReferenceInfo::function(&func.name, result.overload_ids));
+            result.result_type
+        } else {
+            let all_args: Vec<_> = receiver.iter().cloned().chain(args.iter().cloned()).collect();
+            self.report_error(CheckError::no_matching_overload(
+                &func.name,
+                all_args,
+                expr.span.clone(),
+                expr.id,
+            ));
+            CelType::Error
+        }
+    }
+
+    /// Check a struct literal expression.
+    fn check_struct(
+        &mut self,
+        type_name: &SpannedExpr,
+        fields: &[cel_core_parser::StructField],
+        expr: &SpannedExpr,
+    ) -> CelType {
+        // Get the type name
+        let name = self.get_type_name(type_name);
+
+        // Check field values
+        for field in fields {
+            self.check_expr(&field.value);
+        }
+
+        // Return a message type
+        if let Some(ref name) = name {
+            self.set_reference(expr.id, ReferenceInfo::ident(name));
+            CelType::message(name)
+        } else {
+            CelType::Dyn
+        }
+    }
+
+    /// Get the type name from a type expression.
+    fn get_type_name(&self, expr: &SpannedExpr) -> Option<String> {
+        match &expr.node {
+            Expr::Ident(name) => Some(name.clone()),
+            Expr::RootIdent(name) => Some(format!(".{}", name)),
+            Expr::Member { expr: inner, field, .. } => {
+                let prefix = self.get_type_name(inner)?;
+                Some(format!("{}.{}", prefix, field))
+            }
+            _ => None,
+        }
+    }
+
+    /// Check a comprehension expression.
+    fn check_comprehension(
+        &mut self,
+        iter_var: &str,
+        iter_var2: &str,
+        iter_range: &SpannedExpr,
+        accu_var: &str,
+        accu_init: &SpannedExpr,
+        loop_condition: &SpannedExpr,
+        loop_step: &SpannedExpr,
+        result: &SpannedExpr,
+        _expr: &SpannedExpr,
+    ) -> CelType {
+        // Check iter_range in outer scope
+        let range_type = self.check_expr(iter_range);
+
+        // Determine iteration variable type from range
+        let iter_type = match &range_type {
+            CelType::List(elem) => (**elem).clone(),
+            CelType::Map(key, _) => (**key).clone(),
+            CelType::Dyn => CelType::Dyn,
+            _ => CelType::Dyn,
+        };
+
+        // Check accu_init in outer scope
+        let accu_type = self.check_expr(accu_init);
+
+        // Enter new scope for comprehension body
+        self.env.enter_scope();
+
+        // Bind iteration variable(s)
+        self.env.add_variable(iter_var, iter_type.clone());
+        if !iter_var2.is_empty() {
+            // For two-variable iteration (maps), bind second var
+            let iter_type2 = match &range_type {
+                CelType::Map(_, value) => (**value).clone(),
+                _ => CelType::Dyn,
+            };
+            self.env.add_variable(iter_var2, iter_type2);
+        }
+
+        // Bind accumulator variable
+        self.env.add_variable(accu_var, accu_type.clone());
+
+        // Check loop_condition (must be bool)
+        let cond_type = self.check_expr(loop_condition);
+        if !matches!(cond_type, CelType::Bool | CelType::Dyn | CelType::Error) {
+            self.report_error(CheckError::type_mismatch(
+                CelType::Bool,
+                cond_type,
+                loop_condition.span.clone(),
+                loop_condition.id,
+            ));
+        }
+
+        // Check loop_step (should match accu type)
+        let _ = self.check_expr(loop_step);
+
+        // Check result
+        let result_type = self.check_expr(result);
+
+        // Exit comprehension scope
+        self.env.exit_scope();
+
+        result_type
+    }
+
+    /// Check a member test (has() macro result).
+    fn check_member_test(&mut self, obj: &SpannedExpr, _field: &str, _expr: &SpannedExpr) -> CelType {
+        // Check the object
+        let _ = self.check_expr(obj);
+
+        // has() always returns bool
+        CelType::Bool
+    }
+}
+
+/// Check an expression and return the result.
+pub fn check(expr: &SpannedExpr, env: &mut TypeEnv) -> CheckResult {
+    let checker = Checker::new(env);
+    checker.check(expr)
+}
+
+/// Convert a binary operator to its function name.
+fn binary_op_to_function(op: BinaryOp) -> &'static str {
+    match op {
+        BinaryOp::Add => "_+_",
+        BinaryOp::Sub => "_-_",
+        BinaryOp::Mul => "_*_",
+        BinaryOp::Div => "_/_",
+        BinaryOp::Mod => "_%_",
+        BinaryOp::Eq => "_==_",
+        BinaryOp::Ne => "_!=_",
+        BinaryOp::Lt => "_<_",
+        BinaryOp::Le => "_<=_",
+        BinaryOp::Gt => "_>_",
+        BinaryOp::Ge => "_>=_",
+        BinaryOp::And => "_&&_",
+        BinaryOp::Or => "_||_",
+        BinaryOp::In => "@in",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::errors::CheckErrorKind;
+
+    fn check_expr(source: &str) -> CheckResult {
+        let result = cel_core_parser::parse(source);
+        let ast = result.ast.expect("parse should succeed");
+        let mut env = TypeEnv::with_standard_library();
+        check(&ast, &mut env)
+    }
+
+    fn check_expr_with_var(source: &str, var: &str, cel_type: CelType) -> CheckResult {
+        let result = cel_core_parser::parse(source);
+        let ast = result.ast.expect("parse should succeed");
+        let mut env = TypeEnv::with_standard_library();
+        env.add_variable(var, cel_type);
+        check(&ast, &mut env)
+    }
+
+    #[test]
+    fn test_literal_types() {
+        assert_eq!(check_expr("null").get_type(1), Some(&CelType::Null));
+        assert_eq!(check_expr("true").get_type(1), Some(&CelType::Bool));
+        assert_eq!(check_expr("42").get_type(1), Some(&CelType::Int));
+        assert_eq!(check_expr("42u").get_type(1), Some(&CelType::UInt));
+        assert_eq!(check_expr("3.14").get_type(1), Some(&CelType::Double));
+        assert_eq!(check_expr("\"hello\"").get_type(1), Some(&CelType::String));
+        assert_eq!(check_expr("b\"hello\"").get_type(1), Some(&CelType::Bytes));
+    }
+
+    #[test]
+    fn test_undefined_variable() {
+        let result = check_expr("x");
+        assert!(!result.is_ok());
+        assert!(result.errors.iter().any(|e| matches!(
+            &e.kind,
+            CheckErrorKind::UndeclaredReference { name, .. } if name == "x"
+        )));
+    }
+
+    #[test]
+    fn test_defined_variable() {
+        let result = check_expr_with_var("x", "x", CelType::Int);
+        assert!(result.is_ok());
+        assert_eq!(result.get_type(1), Some(&CelType::Int));
+    }
+
+    #[test]
+    fn test_binary_add_int() {
+        let result = check_expr_with_var("x + 1", "x", CelType::Int);
+        assert!(result.is_ok());
+        // The binary expression has ID 3 (after x=1 and 1=2)
+        let types: Vec<_> = result.type_map.values().collect();
+        assert!(types.contains(&&CelType::Int));
+    }
+
+    #[test]
+    fn test_list_literal() {
+        let result = check_expr("[1, 2, 3]");
+        assert!(result.is_ok());
+        // Find the list type
+        let list_types: Vec<_> = result.type_map.values()
+            .filter(|t| matches!(t, CelType::List(_)))
+            .collect();
+        assert_eq!(list_types.len(), 1);
+        assert_eq!(list_types[0], &CelType::list(CelType::Int));
+    }
+
+    #[test]
+    fn test_map_literal() {
+        let result = check_expr("{\"a\": 1, \"b\": 2}");
+        assert!(result.is_ok());
+        // Find the map type
+        let map_types: Vec<_> = result.type_map.values()
+            .filter(|t| matches!(t, CelType::Map(_, _)))
+            .collect();
+        assert_eq!(map_types.len(), 1);
+        assert_eq!(map_types[0], &CelType::map(CelType::String, CelType::Int));
+    }
+
+    #[test]
+    fn test_comparison() {
+        let result = check_expr_with_var("x > 0", "x", CelType::Int);
+        assert!(result.is_ok());
+        // The result type should be Bool
+        let bool_types: Vec<_> = result.type_map.values()
+            .filter(|t| matches!(t, CelType::Bool))
+            .collect();
+        assert!(!bool_types.is_empty());
+    }
+
+    #[test]
+    fn test_method_call() {
+        let result = check_expr("\"hello\".contains(\"lo\")");
+        assert!(result.is_ok());
+        // The result should be Bool
+        let bool_types: Vec<_> = result.type_map.values()
+            .filter(|t| matches!(t, CelType::Bool))
+            .collect();
+        assert!(!bool_types.is_empty());
+    }
+
+    #[test]
+    fn test_size_method() {
+        let result = check_expr("\"hello\".size()");
+        assert!(result.is_ok());
+        let int_types: Vec<_> = result.type_map.values()
+            .filter(|t| matches!(t, CelType::Int))
+            .collect();
+        assert!(!int_types.is_empty());
+    }
+
+    #[test]
+    fn test_ternary() {
+        let result = check_expr_with_var("x ? 1 : 2", "x", CelType::Bool);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_type_mismatch_addition() {
+        let result = check_expr_with_var("x + \"str\"", "x", CelType::Int);
+        assert!(!result.is_ok());
+        assert!(result.errors.iter().any(|e| matches!(
+            &e.kind,
+            CheckErrorKind::NoMatchingOverload { function, .. } if function == "_+_"
+        )));
+    }
+
+    #[test]
+    fn test_empty_list() {
+        let result = check_expr("[]");
+        assert!(result.is_ok());
+        // Empty list should have a type variable element type that gets finalized to Dyn
+        let list_types: Vec<_> = result.type_map.values()
+            .filter(|t| matches!(t, CelType::List(_)))
+            .collect();
+        assert_eq!(list_types.len(), 1);
+    }
+
+    #[test]
+    fn test_reference_recording() {
+        let result = check_expr_with_var("x + 1", "x", CelType::Int);
+        assert!(result.is_ok());
+
+        // Should have a reference for the identifier
+        let refs: Vec<_> = result.reference_map.values().collect();
+        assert!(refs.iter().any(|r| r.name == "x"));
+
+        // Should have a reference for the operator
+        assert!(refs.iter().any(|r| r.name == "_+_"));
+    }
+}

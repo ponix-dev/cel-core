@@ -11,5 +11,7 @@ authors.workspace = true
 [dependencies]
 cel-core-parser.workspace = true
 cel-core-proto.workspace = true
+cel-core-checker.workspace = true
+cel-core-types.workspace = true
 prost.workspace = true
 prost-reflect = { version = "0.16", features = ["text-format"] }
