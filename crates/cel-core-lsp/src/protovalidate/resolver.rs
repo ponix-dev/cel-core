@@ -3,8 +3,10 @@
 //! This module provides the `ProtovalidateResolver` which defines the variables
 //! and functions available in protovalidate CEL expressions.
 
+use cel_core_types::CelType;
+
 use crate::types::{
-    is_builtin, is_method_only, is_standalone_only, Arity, ArityCheck, CelType, FunctionKind,
+    is_builtin, is_method_only, is_standalone_only, Arity, ArityCheck, FunctionKind,
     VariableResolver,
 };
 
@@ -78,14 +80,11 @@ pub fn check_protovalidate_method_arity(name: &str, arg_count: usize) -> ArityCh
 
 /// Get allowed receiver types for a protovalidate method.
 pub fn get_protovalidate_receiver_types(name: &str) -> Option<&'static [CelType]> {
-    get_protovalidate_builtin(name).and_then(|b| match &b.kind {
-        FunctionKind::Standalone => None,
-        FunctionKind::Method(types) | FunctionKind::Both(types) => Some(*types),
-    })
+    get_protovalidate_builtin(name).and_then(|b| b.kind.receiver_types())
 }
 
 /// Check if a protovalidate method can be called on the given receiver type.
-pub fn is_valid_protovalidate_method_call(receiver_type: CelType, method: &str) -> bool {
+pub fn is_valid_protovalidate_method_call(receiver_type: &CelType, method: &str) -> bool {
     let Some(builtin) = get_protovalidate_builtin(method) else {
         return true;
     };
@@ -93,7 +92,10 @@ pub fn is_valid_protovalidate_method_call(receiver_type: CelType, method: &str) 
     match &builtin.kind {
         FunctionKind::Standalone => true,
         FunctionKind::Method(allowed_types) | FunctionKind::Both(allowed_types) => {
-            allowed_types.contains(&receiver_type)
+            // Check if receiver type is compatible with any allowed type
+            allowed_types.iter().any(|allowed| {
+                receiver_type.is_assignable_from(allowed) || allowed.is_assignable_from(receiver_type)
+            })
         }
     }
 }

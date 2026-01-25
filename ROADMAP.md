@@ -158,9 +158,9 @@ The proto converter correctly handles `optional_indices` for lists and `optional
 
 **Goal:** Full type inference and `CheckedExpr` production.
 
-#### 2.1 Enhanced Type Representation
+#### 2.1 Enhanced Type Representation ✅
 
-Current `CelType` is flat. We need parameterized types:
+Implemented parameterized types in a new `cel-core-types` crate:
 
 ```rust
 // Current
@@ -398,7 +398,7 @@ Alternatively, `cel-core-types`, `cel-core-checker`, and `cel-core-eval` could b
 
 ### Milestone 3: Type Checking
 - [x] Node IDs in parser
-- [ ] Parameterized types
+- [x] Parameterized types
 - [ ] Type inference through expressions
 - [ ] Function overload resolution
 - [ ] `CheckedExpr` production

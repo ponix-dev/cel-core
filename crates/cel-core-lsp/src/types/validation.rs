@@ -224,11 +224,15 @@ fn validate_expr<R: VariableResolver>(
                             // Type check the first argument for standalone functions
                             // that have receiver type constraints (like `size`)
                             if let Some(first_arg) = args.first() {
-                                if let Some(arg_type) = infer_literal_type(&first_arg.node) {
+                                if let Some(ref arg_type) = infer_literal_type(&first_arg.node) {
                                     if let Some(allowed_types) = get_allowed_receiver_types(name) {
-                                        if !allowed_types.contains(&arg_type) {
+                                        // Use is_assignable_from for compatibility with parameterized types
+                                        let is_compatible = allowed_types.iter().any(|allowed| {
+                                            arg_type.is_assignable_from(allowed) || allowed.is_assignable_from(arg_type)
+                                        });
+                                        if !is_compatible {
                                             let allowed_str: Vec<_> =
-                                                allowed_types.iter().map(|t| t.as_str()).collect();
+                                                allowed_types.iter().map(|t: &CelType| t.as_str()).collect();
                                             errors.push(ValidationError {
                                                 kind: ValidationErrorKind::InvalidArgumentType,
                                                 message: format!(
@@ -315,7 +319,7 @@ fn validate_expr<R: VariableResolver>(
                         }
 
                         // Type check the receiver (try builtin first, then protovalidate)
-                        if let Some(receiver_type) = infer_literal_type(&receiver.node) {
+                        if let Some(ref receiver_type) = infer_literal_type(&receiver.node) {
                             let is_valid = if is_builtin(field) {
                                 is_valid_method_call(receiver_type, field)
                             } else {
@@ -326,7 +330,7 @@ fn validate_expr<R: VariableResolver>(
                                     .or_else(|| get_protovalidate_receiver_types(field));
                                 if let Some(allowed_types) = allowed_types {
                                     let allowed_str: Vec<_> =
-                                        allowed_types.iter().map(|t| t.as_str()).collect();
+                                        allowed_types.iter().map(|t: &CelType| t.as_str()).collect();
                                     errors.push(ValidationError {
                                         kind: ValidationErrorKind::InvalidArgumentType,
                                         message: format!(

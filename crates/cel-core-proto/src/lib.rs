@@ -27,6 +27,7 @@ mod error;
 pub mod gen;
 mod operators;
 mod source_info;
+mod type_conversion;
 
 pub use converter::AstConverter;
 pub use error::ConversionError;
@@ -35,6 +36,7 @@ pub use operators::{
     is_ternary_function, unary_op_to_function, INDEX_FUNCTION, TERNARY_FUNCTION,
 };
 pub use source_info::{build_source_info, compute_line_offsets, get_position};
+pub use type_conversion::{cel_type_from_proto, cel_type_to_proto};
 
 // Re-export proto types for convenience
 pub use gen::cel::expr::{CheckedExpr, Constant, Expr, ParsedExpr, SourceInfo, Type, Value};
