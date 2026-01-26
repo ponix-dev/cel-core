@@ -28,6 +28,10 @@ pub use decls::{FunctionDecl, OverloadDecl, VariableDecl};
 // Extensions module
 pub mod extensions;
 
+// Proto types module
+pub mod proto_types;
+pub use proto_types::{ProtoTypeRegistry, ResolvedProtoType, proto_message_to_cel_type};
+
 // ==================== CelValue ====================
 
 /// A CEL constant value.

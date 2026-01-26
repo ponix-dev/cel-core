@@ -609,7 +609,11 @@ let result = program.eval(&[("name", Value::String("test123".into()))])?;
 - [x] `encoders_ext` - `base64.encode`, `base64.decode`
 - [x] `optional_ext` - `optional.of`, `optional.none`, `optional.ofNonZeroValue`, `hasValue`, `value`, `or`, `orValue`
 - [x] Moved `decls.rs` to `cel-core-common` for shared use
-- [ ] Conformance tests: 25/30 files passing
+- [x] Proto type registry for message field resolution
+- [x] Unified `Ast` type with proto roundtrip support
+- [x] AST unparser (to_cel_string)
+- [x] Container support for qualified name resolution
+- [x] Conformance tests: 24/30 files passing
 
 ### Milestone 4: Evaluation
 - [ ] `Value` type with all CEL values
@@ -623,7 +627,7 @@ let result = program.eval(&[("name", Value::String("test123".into()))])?;
 
 ### Milestone 5: Full Conformance
 - [ ] Timestamp and duration support
-- [ ] Proto message field resolution
+- [x] Proto message field resolution
 - [ ] Error-as-value semantics
 - [ ] All conformance tests passing
 - [ ] LSP integration with new checker

@@ -14,8 +14,8 @@
 //!     .with_variable("x", CelType::Int);
 //!
 //! // Parse and type-check in one step
-//! let result = env.compile("x + 1");
-//! assert!(result.is_ok());
+//! let ast = env.compile("x + 1").unwrap();
+//! assert!(ast.is_checked());
 //! ```
 //!
 //! # Architecture
@@ -32,10 +32,15 @@
 //! - `FunctionDecl`, `OverloadDecl`, `VariableDecl` from `cel-core-checker`
 //! - `CelType`, `SpannedExpr` from `cel-core-common`
 //! - `ParseResult` from `cel-core-parser`
+//! - `CheckedExpr`, `ParsedExpr` from `cel-core-proto`
 
+mod ast;
 mod env;
+pub mod unparser;
 
-pub use env::Env;
+pub use ast::{Ast, AstError};
+pub use env::{CompileError, Env};
+pub use unparser::ast_to_string;
 
 // Re-export from checker
 pub use cel_core_checker::{
@@ -48,3 +53,6 @@ pub use cel_core_parser::ParseResult;
 
 // Re-export from common
 pub use cel_core_common::{CelType, SpannedExpr};
+
+// Re-export proto types for convenience (like cel-go does)
+pub use cel_core_proto::{CheckedExpr, ParsedExpr};
