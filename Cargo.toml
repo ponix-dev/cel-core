@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.3"
+version = "0.2.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/ponix-dev/cel-core"
@@ -13,5 +13,5 @@ authors = ["ponix-dev"]
 logos = "0.14"
 prost = "0.14"
 prost-reflect = "0.16"
-cel-core = { path = "crates/cel-core", version = "0.1.3" }
-cel-core-proto = { path = "crates/cel-core-proto", version = "0.1.3" }
+cel-core = { path = "crates/cel-core", version = "0.2.0" }
+cel-core-proto = { path = "crates/cel-core-proto", version = "0.2.0" }

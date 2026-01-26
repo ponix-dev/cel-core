@@ -2,6 +2,34 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## v0.2.0 - 2026-01-26
+#### Features
+- add proto type support and unified Ast type - (e518b5b) - Simon Rall
+- add extension library infrastructure - (fcf21d0) - Simon Rall
+- initial checker impl - (8e073ad) - Simon Rall
+- add optional chaining, backtick identifiers, raw triple strings, reserved word fields, and INT64_MIN support - (c4b034a) - Simon Rall
+- add parameterized type system with cel-core-types crate - (96390a1) - Simon Rall
+- add optional syntax support for lists, maps, and structs - (3d06035) - Simon Rall
+- macro expansion - (60a11f5) - Simon Rall
+#### Bug Fixes
+- complete lexer support for CEL conformance tests - (1ba5e9c) - Simon Rall
+- cleanup unused code - (cf3fc45) - Simon Rall
+#### Documentation
+- update README with new crate structure and usage examples - (824a6ca) - Simon Rall
+- update roadmap for unified Env completion - (e3bdf1e) - Simon Rall
+- readme - (e5082ef) - Simon Rall
+#### Refactoring
+- ast proto api - (c9fdef6) - Simon Rall
+- <span style="background-color: #d73a49; color: white; padding: 2px 6px; border-radius: 3px; font-weight: bold; font-size: 0.85em;">BREAKING</span>consolidate internal crates into cel-core - (fb304d5) - Simon Rall
+- dep graph - (5c1264b) - Simon Rall
+- pr feedback - (87f6c97) - Simon Rall
+- roadmap claude commands - (ac89b40) - Simon Rall
+#### Miscellaneous Chores
+- update gitignore - (fcad91d) - Simon Rall
+- remove handoff.md - (1a03f3e) - Simon Rall
+
+- - -
+
 ## v0.1.3 - 2026-01-19
 #### Bug Fixes
 - proto generate - (c069c1a) - Simon Rall
