@@ -81,7 +81,7 @@ For wire compatibility with other CEL implementations, use `cel-core-proto`:
 
 ```rust
 use cel_core::{Env, CelType};
-use cel_core_proto::{to_parsed_expr, to_checked_expr};
+use cel_core_proto::AstToProto;
 
 let env = Env::with_standard_library()
     .with_variable("x", CelType::Int);
@@ -89,8 +89,8 @@ let env = Env::with_standard_library()
 let ast = env.compile("x + 1")?;
 
 // Convert to proto format for serialization/interop
-let parsed_expr = to_parsed_expr(ast.expr(), ast.source());
-let checked_expr = to_checked_expr(ast.type_info().unwrap(), &parsed_expr);
+let parsed_expr = ast.to_parsed_expr();
+let checked_expr = ast.to_checked_expr()?;
 
 // These can be serialized with prost and sent to cel-go/cel-cpp
 ```

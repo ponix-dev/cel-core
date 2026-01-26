@@ -4,14 +4,30 @@
 //! by providing conversion between the internal `cel-core` AST representation and the official
 //! google/cel-spec protobuf format.
 //!
-//! # Parsing and Checking
+//! # Quick Start
 //!
-//! The main conversion functions are:
+//! The simplest way to convert an `Ast` to proto format is using the [`AstToProto`] extension trait:
+//!
+//! ```
+//! use cel_core::{Env, CelType};
+//! use cel_core_proto::AstToProto;
+//!
+//! let env = Env::with_standard_library()
+//!     .with_variable("x", CelType::Int);
+//!
+//! let ast = env.compile("x + 1").unwrap();
+//!
+//! // Convert to proto format
+//! let parsed_expr = ast.to_parsed_expr();
+//! let checked_expr = ast.to_checked_expr().unwrap();
+//! ```
+//!
+//! # Low-level API
+//!
+//! For more control, use the standalone conversion functions:
 //!
 //! - [`to_parsed_expr`] / [`from_parsed_expr`] - Convert between AST and proto `ParsedExpr`
 //! - [`to_checked_expr`] / [`to_checked_expr_from_ast`] - Convert check results to proto `CheckedExpr`
-//!
-//! # Example
 //!
 //! ```
 //! use cel_core_proto::{to_parsed_expr, to_checked_expr, from_parsed_expr};
@@ -152,10 +168,62 @@ pub fn from_parsed_expr(parsed: &ParsedExpr) -> Result<SpannedExpr, ConversionEr
     converter.expr_to_ast(expr, source_info)
 }
 
+/// Extension trait for converting `cel_core::Ast` to proto format.
+///
+/// This trait provides convenient methods on `Ast` for proto conversion,
+/// following the pattern of cel-go where these are methods on the Ast type.
+///
+/// # Example
+///
+/// ```
+/// use cel_core::{Env, CelType};
+/// use cel_core_proto::AstToProto;
+///
+/// let env = Env::with_standard_library()
+///     .with_variable("x", CelType::Int);
+///
+/// let ast = env.compile("x + 1").unwrap();
+///
+/// // Convert to proto format
+/// let parsed = ast.to_parsed_expr();
+/// let checked = ast.to_checked_expr().unwrap();
+/// ```
+pub trait AstToProto {
+    /// Convert the AST to a proto `ParsedExpr`.
+    fn to_parsed_expr(&self) -> ParsedExpr;
+
+    /// Convert the AST to a proto `ParsedExpr` with macro call information.
+    ///
+    /// The `macro_calls` map records the original call expressions before macro expansion,
+    /// which is useful for IDE features that need to show the original source form.
+    fn to_parsed_expr_with_macros(&self, macro_calls: &MacroCalls) -> ParsedExpr;
+
+    /// Convert a checked AST to a proto `CheckedExpr`.
+    ///
+    /// Returns an error if the AST has not been type-checked.
+    fn to_checked_expr(&self) -> Result<CheckedExpr, ConversionError>;
+}
+
+impl AstToProto for cel_core::Ast {
+    fn to_parsed_expr(&self) -> ParsedExpr {
+        to_parsed_expr(self.expr(), self.source())
+    }
+
+    fn to_parsed_expr_with_macros(&self, macro_calls: &MacroCalls) -> ParsedExpr {
+        to_parsed_expr_with_macros(self.expr(), self.source(), macro_calls)
+    }
+
+    fn to_checked_expr(&self) -> Result<CheckedExpr, ConversionError> {
+        let type_info = self.type_info().ok_or(ConversionError::NotChecked)?;
+        let parsed = self.to_parsed_expr();
+        Ok(to_checked_expr(type_info, &parsed))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cel_core::Expr;
+    use cel_core::{CelType, Env, Expr};
 
     #[test]
     fn test_to_parsed_expr() {
@@ -167,6 +235,40 @@ mod tests {
 
         assert!(parsed.expr.is_some());
         assert!(parsed.source_info.is_some());
+    }
+
+    #[test]
+    fn test_ast_to_proto_parsed_expr() {
+        let env = Env::with_standard_library().with_variable("x", CelType::Int);
+        let ast = env.compile("x + 1").unwrap();
+
+        let parsed = ast.to_parsed_expr();
+
+        assert!(parsed.expr.is_some());
+        assert!(parsed.source_info.is_some());
+    }
+
+    #[test]
+    fn test_ast_to_proto_checked_expr() {
+        let env = Env::with_standard_library().with_variable("x", CelType::Int);
+        let ast = env.compile("x + 1").unwrap();
+
+        let checked = ast.to_checked_expr().unwrap();
+
+        assert!(checked.expr.is_some());
+        assert!(checked.source_info.is_some());
+        assert!(!checked.type_map.is_empty());
+        assert!(!checked.reference_map.is_empty());
+    }
+
+    #[test]
+    fn test_ast_to_proto_checked_expr_unchecked_fails() {
+        let env = Env::with_standard_library().with_variable("x", CelType::Int);
+        let ast = env.parse_only("x + 1").unwrap();
+
+        let result = ast.to_checked_expr();
+
+        assert!(matches!(result, Err(ConversionError::NotChecked)));
     }
 
     #[test]

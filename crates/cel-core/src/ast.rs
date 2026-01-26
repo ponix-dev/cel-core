@@ -26,9 +26,10 @@
 //! `cel-core-proto` crate:
 //!
 //! ```ignore
-//! use cel_core_proto::{to_checked_expr, to_parsed_expr};
+//! use cel_core_proto::AstToProto;
 //!
-//! let checked_proto = to_checked_expr(&ast.type_info().unwrap(), &to_parsed_expr(ast.expr(), ast.source()));
+//! let parsed_expr = ast.to_parsed_expr();
+//! let checked_expr = ast.to_checked_expr()?;
 //! ```
 
 use std::sync::Arc;
