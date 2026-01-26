@@ -5,9 +5,7 @@
 
 use std::sync::LazyLock;
 
-use cel_core_common::CelType;
-
-use crate::decls::{FunctionDecl, OverloadDecl};
+use cel_core_common::{CelType, FunctionDecl, OverloadDecl};
 
 /// The CEL standard library containing all built-in operators and functions.
 pub static STANDARD_LIBRARY: LazyLock<Vec<FunctionDecl>> = LazyLock::new(build_standard_library);

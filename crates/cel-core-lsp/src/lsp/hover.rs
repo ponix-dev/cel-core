@@ -72,6 +72,8 @@ fn find_node_containing_offset<'a>(ast: &'a SpannedExpr, offset: usize) -> Optio
             .or_else(|| find_node_containing_offset(loop_step, offset))
             .or_else(|| find_node_containing_offset(result, offset)),
         Expr::MemberTestOnly { expr, .. } => find_node_containing_offset(expr, offset),
+        Expr::Bind { init, body, .. } => find_node_containing_offset(init, offset)
+            .or_else(|| find_node_containing_offset(body, offset)),
         Expr::Error => None,
     };
 

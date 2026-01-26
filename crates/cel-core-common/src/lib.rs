@@ -1,4 +1,4 @@
-//! Common types for CEL: type system, values, and AST.
+//! Common types for CEL: type system, values, AST, and declarations.
 //!
 //! This crate provides the foundational types shared across CEL crates:
 //!
@@ -7,6 +7,9 @@
 //! - **Values**: `CelValue` for representing constant values.
 //! - **AST**: Expression types (`Expr`, `SpannedExpr`, `BinaryOp`, etc.) for
 //!   representing parsed CEL syntax.
+//! - **Declarations**: `FunctionDecl`, `OverloadDecl`, `VariableDecl` for
+//!   defining the type environment.
+//! - **Extensions**: Optional function libraries like `string_ext` and `math_ext`.
 
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -17,6 +20,13 @@ mod ast;
 pub use ast::{
     BinaryOp, Expr, ListElement, MapEntry, Span, Spanned, SpannedExpr, StructField, UnaryOp,
 };
+
+// Declarations module
+mod decls;
+pub use decls::{FunctionDecl, OverloadDecl, VariableDecl};
+
+// Extensions module
+pub mod extensions;
 
 // ==================== CelValue ====================
 
@@ -140,6 +150,9 @@ pub enum CelType {
     TypeVar(u64),
     /// Wrapper type for proto wrapper types (e.g., `google.protobuf.Int64Value`)
     Wrapper(Arc<CelType>),
+    /// Optional type: `optional<T>` - represents a value that may or may not be present.
+    /// Used by the CEL optionals extension.
+    Optional(Arc<CelType>),
     /// Error type - used when type inference fails
     Error,
 }
@@ -238,9 +251,16 @@ impl CelType {
         CelType::Wrapper(Arc::new(inner))
     }
 
-    /// Create an optional (wrapper) type - syntactic sugar for `wrapper`.
+    /// Create an optional type: `optional<T>`.
+    ///
+    /// # Example
+    /// ```
+    /// use cel_core_common::CelType;
+    /// let opt_int = CelType::optional(CelType::Int);
+    /// assert_eq!(opt_int.display_name(), "optional<int>");
+    /// ```
     pub fn optional(inner: CelType) -> Self {
-        CelType::Wrapper(Arc::new(inner))
+        CelType::Optional(Arc::new(inner))
     }
 }
 
@@ -320,6 +340,11 @@ impl CelType {
             // Underlying type accepts Wrapper (unboxing)
             (other, CelType::Wrapper(inner)) => other.is_assignable_from(inner.as_ref()),
 
+            // Optional type assignability
+            (CelType::Optional(self_inner), CelType::Optional(other_inner)) => {
+                self_inner.is_assignable_from(other_inner)
+            }
+
             // Type values need compatible inner types
             (CelType::Type(self_inner), CelType::Type(other_inner)) => {
                 self_inner.is_assignable_from(other_inner)
@@ -365,6 +390,9 @@ impl CelType {
                 ak.unify_with_substitution(bk, substitutions)
                     && av.unify_with_substitution(bv, substitutions)
             }
+            (CelType::Optional(a), CelType::Optional(b)) => {
+                a.unify_with_substitution(b, substitutions)
+            }
             // Fall back to regular assignability for other cases
             _ => self.is_assignable_from(other),
         }
@@ -398,6 +426,14 @@ impl CelType {
     pub fn message_name(&self) -> Option<&str> {
         match self {
             CelType::Message(name) => Some(name),
+            _ => None,
+        }
+    }
+
+    /// Get the inner type of an optional, or None if not an optional.
+    pub fn optional_inner(&self) -> Option<&CelType> {
+        match self {
+            CelType::Optional(inner) => Some(inner),
             _ => None,
         }
     }
@@ -444,6 +480,7 @@ impl CelType {
             CelType::TypeParam(name) => name.to_string(),
             CelType::TypeVar(id) => format!("?T{}", id),
             CelType::Wrapper(inner) => format!("wrapper<{}>", inner.display_name()),
+            CelType::Optional(inner) => format!("optional<{}>", inner.display_name()),
             CelType::Error => "error".to_string(),
         }
     }
@@ -477,6 +514,7 @@ impl CelType {
             CelType::TypeParam(_) => "type_param",
             CelType::TypeVar(_) => "type_var",
             CelType::Wrapper(_) => "wrapper",
+            CelType::Optional(_) => "optional",
             CelType::Error => "error",
         }
     }
@@ -518,6 +556,7 @@ impl UnificationContext {
             CelType::TypeVar(id) => self.bindings.get(id).cloned().unwrap_or_else(|| ty.clone()),
             CelType::List(elem) => CelType::list(self.fully_resolve(elem)),
             CelType::Map(k, v) => CelType::map(self.fully_resolve(k), self.fully_resolve(v)),
+            CelType::Optional(inner) => CelType::optional(self.fully_resolve(inner)),
             _ => ty.clone(),
         }
     }

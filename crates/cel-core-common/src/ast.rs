@@ -151,6 +151,22 @@ pub enum Expr {
         field: String,
     },
 
+    /// Variable binding expression (result of `cel.bind(x, init, body)` macro).
+    ///
+    /// Binds a variable to a value for use within a scoped expression.
+    /// The variable is only visible within the body expression.
+    ///
+    /// # Example
+    /// `cel.bind(msg, "hello", msg + msg)` evaluates to `"hellohello"`
+    Bind {
+        /// The name of the variable to bind
+        var_name: String,
+        /// The initializer expression for the variable
+        init: Box<SpannedExpr>,
+        /// The body expression where the variable is in scope
+        body: Box<SpannedExpr>,
+    },
+
     /// Placeholder for parse errors (enables partial AST).
     /// Used during error recovery to represent unparseable sections.
     Error,

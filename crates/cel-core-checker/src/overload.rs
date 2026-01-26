@@ -6,9 +6,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use cel_core_common::CelType;
-
-use crate::decls::FunctionDecl;
+use cel_core_common::{CelType, FunctionDecl};
 
 /// Result of overload resolution.
 #[derive(Debug)]
@@ -169,6 +167,10 @@ fn is_assignable(
         (inner, CelType::Wrapper(param_inner)) => is_assignable(inner, param_inner, substitutions),
         // Wrapper is assignable to underlying type (unboxing)
         (CelType::Wrapper(arg_inner), inner) => is_assignable(arg_inner.as_ref(), inner, substitutions),
+        // Optional types
+        (CelType::Optional(arg_inner), CelType::Optional(param_inner)) => {
+            is_assignable(arg_inner, param_inner, substitutions)
+        }
         _ => false,
     }
 }
@@ -206,6 +208,7 @@ pub fn substitute_type(ty: &CelType, substitutions: &HashMap<Arc<str>, CelType>)
         ),
         CelType::Type(inner) => CelType::type_of(substitute_type(inner, substitutions)),
         CelType::Wrapper(inner) => CelType::wrapper(substitute_type(inner, substitutions)),
+        CelType::Optional(inner) => CelType::optional(substitute_type(inner, substitutions)),
         CelType::Function { params, result } => CelType::Function {
             params: Arc::from(
                 params
@@ -238,6 +241,7 @@ pub fn finalize_type(ty: &CelType) -> CelType {
         CelType::Map(key, val) => CelType::map(finalize_type(key), finalize_type(val)),
         CelType::Type(inner) => CelType::type_of(finalize_type(inner)),
         CelType::Wrapper(inner) => CelType::wrapper(finalize_type(inner)),
+        CelType::Optional(inner) => CelType::optional(finalize_type(inner)),
         CelType::Function { params, result } => CelType::Function {
             params: Arc::from(
                 params.iter().map(finalize_type).collect::<Vec<_>>(),
@@ -257,7 +261,7 @@ pub fn finalize_type(ty: &CelType) -> CelType {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::decls::OverloadDecl;
+    use cel_core_common::OverloadDecl;
 
     #[test]
     fn test_resolve_simple_overload() {

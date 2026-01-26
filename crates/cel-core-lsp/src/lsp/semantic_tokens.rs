@@ -360,6 +360,11 @@ impl<'a> TokenCollector<'a> {
                 // MemberTestOnly is synthetic from has() - visit inner expression
                 self.visit_expr(inner);
             }
+            Expr::Bind { init, body, .. } => {
+                // Bind is synthetic from cel.bind() - visit sub-expressions
+                self.visit_expr(init);
+                self.visit_expr(body);
+            }
             Expr::Error => {
                 // Skip error nodes
             }

@@ -30,7 +30,7 @@ pub struct CelConformanceService {
 impl CelConformanceService {
     pub fn new() -> Self {
         Self {
-            env: Env::with_standard_library(),
+            env: Env::with_standard_library().with_all_extensions(),
         }
     }
 }

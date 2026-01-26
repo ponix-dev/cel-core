@@ -517,6 +517,17 @@ impl<'a> Parser<'a> {
             }
             // Method call: receiver.name(args)
             Expr::Member { expr, field, .. } => {
+                // First check if receiver.field is a global macro (like cel.bind)
+                if let Expr::Ident(receiver_name) = &expr.node {
+                    let full_name = format!("{}.{}", receiver_name, field);
+                    if self.macros.lookup(&full_name, 0, false).is_some()
+                        || self.macros.lookup(&full_name, 1, false).is_some()
+                        || self.macros.lookup(&full_name, 2, false).is_some()
+                        || self.macros.lookup(&full_name, 3, false).is_some()
+                    {
+                        return Some((full_name, None, false));
+                    }
+                }
                 // Check if this is a receiver macro
                 if self.macros.lookup(field, 0, true).is_some() ||
                    self.macros.lookup(field, 1, true).is_some() ||

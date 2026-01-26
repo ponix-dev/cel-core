@@ -135,6 +135,7 @@ pub fn infer_literal_type(expr: &Expr) -> Option<CelType> {
         Expr::Ternary { .. } => None,
         Expr::Struct { .. } => None,
         Expr::Comprehension { .. } => None, // Result type depends on the macro
+        Expr::Bind { .. } => None,          // Result type depends on the body
         Expr::Error => None,
     }
 }

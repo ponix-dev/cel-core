@@ -449,6 +449,14 @@ fn validate_expr<R: VariableResolver>(
             validate_expr(inner, resolver, errors, false);
         }
 
+        Expr::Bind { var_name, init, body } => {
+            // Validate init in outer scope
+            validate_expr(init, resolver, errors, false);
+
+            // Validate body with the bound variable in scope
+            validate_bind_body(var_name, body, resolver, errors);
+        }
+
         // Literals and error nodes need no validation
         Expr::Null
         | Expr::Bool(_)
@@ -487,6 +495,147 @@ fn validate_comprehension_body<R: VariableResolver>(
     validate_expr_with_comp_resolver(loop_condition, &comp_resolver, errors, false);
     validate_expr_with_comp_resolver(loop_step, &comp_resolver, errors, false);
     validate_expr_with_comp_resolver(result, &comp_resolver, errors, false);
+}
+
+/// Validate bind body expressions with the bound variable in scope.
+fn validate_bind_body<R: VariableResolver>(
+    var_name: &str,
+    body: &SpannedExpr,
+    outer_resolver: &R,
+    errors: &mut Vec<ValidationError>,
+) {
+    let bind_resolver = BindResolver {
+        outer_resolver,
+        var_name,
+    };
+
+    validate_expr_with_bind_resolver(body, &bind_resolver, errors, false);
+}
+
+/// A resolver wrapper that adds a bound variable from cel.bind().
+struct BindResolver<'a, R: VariableResolver> {
+    outer_resolver: &'a R,
+    var_name: &'a str,
+}
+
+/// Validate expression using a bind resolver.
+fn validate_expr_with_bind_resolver<R: VariableResolver>(
+    expr: &SpannedExpr,
+    bind_resolver: &BindResolver<'_, R>,
+    errors: &mut Vec<ValidationError>,
+    in_call_position: bool,
+) {
+    match &expr.node {
+        Expr::Ident(name) => {
+            if name == bind_resolver.var_name {
+                // Bound variable - always valid
+                return;
+            }
+            // Fall through to normal validation
+            if in_call_position {
+                if !bind_resolver.outer_resolver.is_valid_function(name)
+                    && !bind_resolver.outer_resolver.is_defined(name)
+                {
+                    errors.push(ValidationError {
+                        kind: ValidationErrorKind::UndefinedVariable,
+                        message: format!("undefined function '{}'", name),
+                        span: expr.span.clone(),
+                        name: name.clone(),
+                    });
+                }
+            } else if !bind_resolver.outer_resolver.is_defined(name) {
+                errors.push(ValidationError {
+                    kind: ValidationErrorKind::UndefinedVariable,
+                    message: format!("undefined variable '{}'", name),
+                    span: expr.span.clone(),
+                    name: name.clone(),
+                });
+            }
+        }
+
+        Expr::List(items) => {
+            for item in items {
+                validate_expr_with_bind_resolver(&item.expr, bind_resolver, errors, false);
+            }
+        }
+        Expr::Map(entries) => {
+            for entry in entries {
+                validate_expr_with_bind_resolver(&entry.key, bind_resolver, errors, false);
+                validate_expr_with_bind_resolver(&entry.value, bind_resolver, errors, false);
+            }
+        }
+        Expr::Unary { expr: inner, .. } => {
+            validate_expr_with_bind_resolver(inner, bind_resolver, errors, false);
+        }
+        Expr::Binary { left, right, .. } => {
+            validate_expr_with_bind_resolver(left, bind_resolver, errors, false);
+            validate_expr_with_bind_resolver(right, bind_resolver, errors, false);
+        }
+        Expr::Ternary {
+            cond,
+            then_expr,
+            else_expr,
+        } => {
+            validate_expr_with_bind_resolver(cond, bind_resolver, errors, false);
+            validate_expr_with_bind_resolver(then_expr, bind_resolver, errors, false);
+            validate_expr_with_bind_resolver(else_expr, bind_resolver, errors, false);
+        }
+        Expr::Member { expr: inner, .. } | Expr::MemberTestOnly { expr: inner, .. } => {
+            validate_expr_with_bind_resolver(inner, bind_resolver, errors, false);
+        }
+        Expr::Index { expr: inner, index, .. } => {
+            validate_expr_with_bind_resolver(inner, bind_resolver, errors, false);
+            validate_expr_with_bind_resolver(index, bind_resolver, errors, false);
+        }
+        Expr::Call { expr: callee, args } => {
+            validate_expr_with_bind_resolver(callee, bind_resolver, errors, true);
+            for arg in args {
+                validate_expr_with_bind_resolver(arg, bind_resolver, errors, false);
+            }
+        }
+        Expr::Struct { type_name, fields } => {
+            validate_expr_with_bind_resolver(type_name, bind_resolver, errors, false);
+            for field in fields {
+                validate_expr_with_bind_resolver(&field.value, bind_resolver, errors, false);
+            }
+        }
+        Expr::Comprehension {
+            iter_range,
+            accu_init,
+            loop_condition,
+            loop_step,
+            result,
+            ..
+        } => {
+            validate_expr_with_bind_resolver(iter_range, bind_resolver, errors, false);
+            validate_expr_with_bind_resolver(accu_init, bind_resolver, errors, false);
+            validate_expr_with_bind_resolver(loop_condition, bind_resolver, errors, false);
+            validate_expr_with_bind_resolver(loop_step, bind_resolver, errors, false);
+            validate_expr_with_bind_resolver(result, bind_resolver, errors, false);
+        }
+        Expr::Bind { init, body, .. } => {
+            validate_expr_with_bind_resolver(init, bind_resolver, errors, false);
+            validate_expr_with_bind_resolver(body, bind_resolver, errors, false);
+        }
+        Expr::RootIdent(name) => {
+            if !bind_resolver.outer_resolver.is_defined(name) {
+                errors.push(ValidationError {
+                    kind: ValidationErrorKind::UndefinedVariable,
+                    message: format!("undefined variable '.{}'", name),
+                    span: expr.span.clone(),
+                    name: name.clone(),
+                });
+            }
+        }
+        Expr::Null
+        | Expr::Bool(_)
+        | Expr::Int(_)
+        | Expr::UInt(_)
+        | Expr::Float(_)
+        | Expr::String(_)
+        | Expr::Bytes(_)
+        | Expr::Error => {}
+    }
 }
 
 /// A resolver wrapper that adds comprehension-scoped variables.
@@ -636,6 +785,10 @@ fn validate_expr_with_comp_resolver<R: VariableResolver>(
                     name: name.clone(),
                 });
             }
+        }
+        Expr::Bind { init, body, .. } => {
+            validate_expr_with_comp_resolver(init, comp_resolver, errors, false);
+            validate_expr_with_comp_resolver(body, comp_resolver, errors, false);
         }
         Expr::Null
         | Expr::Bool(_)

@@ -10,10 +10,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use cel_core_common::{BinaryOp, Expr, SpannedExpr, UnaryOp};
+use cel_core_common::{BinaryOp, Expr, FunctionDecl, SpannedExpr, UnaryOp, VariableDecl};
 use cel_core_common::{CelType, CelValue};
-
-use crate::decls::{FunctionDecl, VariableDecl};
 use crate::errors::CheckError;
 use crate::overload::{finalize_type, resolve_overload, substitute_type};
 use crate::scope::ScopeStack;
@@ -187,11 +185,11 @@ impl<'a> Checker<'a> {
                 self.check_ternary(cond, then_expr, else_expr, expr)
             }
 
-            Expr::Member { expr: obj, field, optional: _ } => {
-                self.check_member(obj, field, expr)
+            Expr::Member { expr: obj, field, optional } => {
+                self.check_member(obj, field, *optional, expr)
             }
-            Expr::Index { expr: obj, index, optional: _ } => {
-                self.check_index(obj, index, expr)
+            Expr::Index { expr: obj, index, optional } => {
+                self.check_index(obj, index, *optional, expr)
             }
             Expr::Call { expr: callee, args } => self.check_call(callee, args, expr),
             Expr::Struct { type_name, fields } => self.check_struct(type_name, fields, expr),
@@ -219,6 +217,10 @@ impl<'a> Checker<'a> {
 
             Expr::MemberTestOnly { expr: obj, field } => {
                 self.check_member_test(obj, field, expr)
+            }
+
+            Expr::Bind { var_name, init, body } => {
+                self.check_bind(var_name, init, body, expr)
             }
 
             Expr::Error => CelType::Error,
@@ -366,7 +368,7 @@ impl<'a> Checker<'a> {
     }
 
     /// Check a member access expression.
-    fn check_member(&mut self, obj: &SpannedExpr, field: &str, expr: &SpannedExpr) -> CelType {
+    fn check_member(&mut self, obj: &SpannedExpr, field: &str, optional: bool, expr: &SpannedExpr) -> CelType {
         // First, try to resolve as qualified identifier (e.g., pkg.Type)
         if let Some(qualified_name) = self.try_qualified_name(obj, field) {
             if let Some(decl) = self.resolve_qualified(&qualified_name) {
@@ -379,10 +381,16 @@ impl<'a> Checker<'a> {
         // Otherwise, it's a field access
         let obj_type = self.check_expr(obj);
 
+        // Unwrap optional types for field access
+        let (inner_type, was_optional) = match &obj_type {
+            CelType::Optional(inner) => ((**inner).clone(), true),
+            other => (other.clone(), false),
+        };
+
         // Check for well-known types with fields
-        match &obj_type {
-            CelType::Message(_) | CelType::Dyn => {
-                // For messages and Dyn, we can't verify field existence statically
+        let result = match &inner_type {
+            CelType::Message(_) | CelType::Dyn | CelType::TypeVar(_) => {
+                // For messages, Dyn, and type variables, we can't verify field existence statically
                 CelType::Dyn
             }
             CelType::Map(_, value_type) => {
@@ -392,13 +400,24 @@ impl<'a> Checker<'a> {
             _ => {
                 // Other types don't support field access
                 self.report_error(CheckError::undefined_field(
-                    &obj_type.display_name(),
+                    &inner_type.display_name(),
                     field,
                     expr.span.clone(),
                     expr.id,
                 ));
-                CelType::Error
+                return CelType::Error;
             }
+        };
+
+        // Wrap in optional if using optional select (.?) or receiver was optional
+        // But flatten nested optionals - CEL semantics say chaining doesn't create optional<optional<T>>
+        if optional || was_optional {
+            match &result {
+                CelType::Optional(_) => result, // Already optional, don't double-wrap
+                _ => CelType::optional(result),
+            }
+        } else {
+            result
         }
     }
 
@@ -438,11 +457,29 @@ impl<'a> Checker<'a> {
     }
 
     /// Check an index access expression.
-    fn check_index(&mut self, obj: &SpannedExpr, index: &SpannedExpr, expr: &SpannedExpr) -> CelType {
+    fn check_index(&mut self, obj: &SpannedExpr, index: &SpannedExpr, optional: bool, expr: &SpannedExpr) -> CelType {
         let obj_type = self.check_expr(obj);
         let index_type = self.check_expr(index);
 
-        self.resolve_function_call("_[_]", None, &[obj_type, index_type], expr)
+        // Unwrap optional types for index access
+        let (inner_type, was_optional) = match &obj_type {
+            CelType::Optional(inner) => ((**inner).clone(), true),
+            other => (other.clone(), false),
+        };
+
+        // Resolve index operation on inner type
+        let result = self.resolve_function_call("_[_]", None, &[inner_type, index_type], expr);
+
+        // Wrap in optional if using optional index ([?]) or receiver was optional
+        // But flatten nested optionals - CEL semantics say chaining doesn't create optional<optional<T>>
+        if optional || was_optional {
+            match &result {
+                CelType::Optional(_) => result, // Already optional, don't double-wrap
+                _ => CelType::optional(result),
+            }
+        } else {
+            result
+        }
     }
 
     /// Check a function call expression.
@@ -450,7 +487,15 @@ impl<'a> Checker<'a> {
         // Determine if this is a method call or standalone call
         match &callee.node {
             Expr::Member { expr: receiver, field: func_name, .. } => {
-                // Method call: receiver.method(args)
+                // First, try to resolve as a namespaced function (e.g., math.greatest)
+                if let Some(qualified_name) = self.try_qualified_function_name(receiver, func_name) {
+                    if self.functions.contains_key(&qualified_name) {
+                        let arg_types: Vec<_> = args.iter().map(|a| self.check_expr(a)).collect();
+                        return self.resolve_function_call(&qualified_name, None, &arg_types, expr);
+                    }
+                }
+
+                // Fall back to method call: receiver.method(args)
                 let receiver_type = self.check_expr(receiver);
                 let arg_types: Vec<_> = args.iter().map(|a| self.check_expr(a)).collect();
                 self.resolve_function_call(func_name, Some(receiver_type), &arg_types, expr)
@@ -468,6 +513,20 @@ impl<'a> Checker<'a> {
                 }
                 CelType::Dyn
             }
+        }
+    }
+
+    /// Try to build a qualified function name from a member chain.
+    ///
+    /// This supports namespaced functions like `math.greatest` or `strings.quote`.
+    fn try_qualified_function_name(&self, obj: &SpannedExpr, field: &str) -> Option<String> {
+        match &obj.node {
+            Expr::Ident(name) => Some(format!("{}.{}", name, field)),
+            Expr::Member { expr: inner, field: inner_field, .. } => {
+                let prefix = self.try_qualified_function_name(inner, inner_field)?;
+                Some(format!("{}.{}", prefix, field))
+            }
+            _ => None,
         }
     }
 
@@ -577,6 +636,7 @@ impl<'a> Checker<'a> {
         let iter_type = match &range_type {
             CelType::List(elem) => (**elem).clone(),
             CelType::Map(key, _) => (**key).clone(),
+            CelType::Optional(inner) => (**inner).clone(), // For optMap/optFlatMap macros
             CelType::Dyn => CelType::Dyn,
             _ => CelType::Dyn,
         };
@@ -631,6 +691,33 @@ impl<'a> Checker<'a> {
 
         // has() always returns bool
         CelType::Bool
+    }
+
+    /// Check a bind expression (cel.bind macro result).
+    ///
+    /// `cel.bind(var, init, body)` binds a variable to a value for use in the body.
+    fn check_bind(
+        &mut self,
+        var_name: &str,
+        init: &SpannedExpr,
+        body: &SpannedExpr,
+        _expr: &SpannedExpr,
+    ) -> CelType {
+        // Check the initializer expression
+        let init_type = self.check_expr(init);
+
+        // Enter a new scope with the bound variable
+        self.scopes.enter_scope();
+        self.scopes.add_variable(var_name, init_type);
+
+        // Check the body in the new scope
+        let body_type = self.check_expr(body);
+
+        // Exit the scope
+        self.scopes.exit_scope();
+
+        // The type of the bind expression is the type of the body
+        body_type
     }
 }
 

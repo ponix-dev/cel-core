@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 
 use cel_core_checker::{check, CheckResult, FunctionDecl, STANDARD_LIBRARY};
-use cel_core_common::{CelType, SpannedExpr};
+use cel_core_common::{extensions, CelType, SpannedExpr};
 use cel_core_parser::ParseResult;
 
 /// Unified environment for CEL expression processing.
@@ -141,6 +141,56 @@ impl Env {
     /// Get the container namespace.
     pub fn container(&self) -> &str {
         &self.container
+    }
+
+    /// Add an extension library to the environment (builder pattern).
+    ///
+    /// Extensions provide additional functions beyond the standard library.
+    /// Each extension is a collection of `FunctionDecl` values.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use cel_core::Env;
+    /// use cel_core_common::extensions::string_extension;
+    ///
+    /// let env = Env::with_standard_library()
+    ///     .with_extension(string_extension());
+    /// ```
+    pub fn with_extension(mut self, extension: impl IntoIterator<Item = FunctionDecl>) -> Self {
+        for decl in extension {
+            self.add_function(decl);
+        }
+        self
+    }
+
+    /// Add all available extension libraries to the environment (builder pattern).
+    ///
+    /// This is a convenience method that adds all standard extensions:
+    /// - String extension (`charAt`, `indexOf`, `substring`, etc.)
+    /// - Math extension (`math.greatest`, `math.least`, `math.abs`, etc.)
+    /// - Encoders extension (`base64.encode`, `base64.decode`)
+    /// - Optionals extension (`optional.of`, `optional.none`, `hasValue`, etc.)
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use cel_core::Env;
+    ///
+    /// let env = Env::with_standard_library()
+    ///     .with_all_extensions();
+    /// ```
+    pub fn with_all_extensions(mut self) -> Self {
+        self = self
+            .with_extension(extensions::string_extension())
+            .with_extension(extensions::math_extension())
+            .with_extension(extensions::encoders_extension())
+            .with_extension(extensions::optionals_extension());
+
+        // Add optional_type type constant for the optionals extension
+        self.add_type_constant("optional_type", CelType::optional(CelType::Dyn));
+
+        self
     }
 
     /// Get the variables map.
@@ -298,5 +348,311 @@ mod tests {
         env.add_function(func);
 
         assert!(env.functions().contains_key("custom"));
+    }
+
+    #[test]
+    fn test_with_extension() {
+        use cel_core_common::extensions::string_extension;
+
+        let env = Env::with_standard_library().with_extension(string_extension());
+
+        // String extension should add charAt function
+        assert!(env.functions().contains_key("charAt"));
+        assert!(env.functions().contains_key("indexOf"));
+        assert!(env.functions().contains_key("substring"));
+    }
+
+    #[test]
+    fn test_with_all_extensions() {
+        let env = Env::with_standard_library().with_all_extensions();
+
+        // String extension functions
+        assert!(env.functions().contains_key("charAt"));
+        assert!(env.functions().contains_key("indexOf"));
+        assert!(env.functions().contains_key("join"));
+        assert!(env.functions().contains_key("strings.quote"));
+
+        // Math extension functions
+        assert!(env.functions().contains_key("math.greatest"));
+        assert!(env.functions().contains_key("math.least"));
+        assert!(env.functions().contains_key("math.abs"));
+        assert!(env.functions().contains_key("math.bitAnd"));
+
+        // Encoders extension functions
+        assert!(env.functions().contains_key("base64.encode"));
+        assert!(env.functions().contains_key("base64.decode"));
+
+        // Optionals extension functions
+        assert!(env.functions().contains_key("optional.of"));
+        assert!(env.functions().contains_key("optional.none"));
+        assert!(env.functions().contains_key("optional.ofNonZeroValue"));
+        assert!(env.functions().contains_key("hasValue"));
+        assert!(env.functions().contains_key("value"));
+        assert!(env.functions().contains_key("or"));
+        assert!(env.functions().contains_key("orValue"));
+    }
+
+    #[test]
+    fn test_encoders_extension_base64() {
+        let env = Env::with_standard_library()
+            .with_all_extensions()
+            .with_variable("data", CelType::Bytes)
+            .with_variable("encoded", CelType::String);
+
+        // base64.encode(bytes) -> string
+        let result = env.compile("base64.encode(data)");
+        assert!(result.is_ok(), "base64.encode should compile: {:?}", result);
+        assert!(result.unwrap().is_ok());
+
+        // base64.decode(string) -> bytes
+        let result = env.compile("base64.decode(encoded)");
+        assert!(result.is_ok(), "base64.decode should compile: {:?}", result);
+        assert!(result.unwrap().is_ok());
+    }
+
+    #[test]
+    fn test_string_extension_char_at() {
+        let env = Env::with_standard_library()
+            .with_all_extensions()
+            .with_variable("s", CelType::String);
+
+        let result = env.compile("s.charAt(0)");
+        assert!(result.is_ok(), "charAt should compile: {:?}", result);
+        assert!(result.unwrap().is_ok());
+    }
+
+    #[test]
+    fn test_string_extension_index_of() {
+        let env = Env::with_standard_library()
+            .with_all_extensions()
+            .with_variable("s", CelType::String);
+
+        // Basic indexOf
+        let result = env.compile("s.indexOf(\"a\")");
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_ok());
+
+        // indexOf with offset
+        let result = env.compile("s.indexOf(\"a\", 2)");
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_ok());
+    }
+
+    #[test]
+    fn test_string_extension_substring() {
+        let env = Env::with_standard_library()
+            .with_all_extensions()
+            .with_variable("s", CelType::String);
+
+        // substring with one arg
+        let result = env.compile("s.substring(1)");
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_ok());
+
+        // substring with two args
+        let result = env.compile("s.substring(1, 5)");
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_ok());
+    }
+
+    #[test]
+    fn test_string_extension_split() {
+        let env = Env::with_standard_library()
+            .with_all_extensions()
+            .with_variable("s", CelType::String);
+
+        let result = env.compile("s.split(\",\")");
+        assert!(result.is_ok());
+        let check_result = result.unwrap();
+        assert!(check_result.is_ok());
+
+        // Result should be list<string>
+        // The root expr type should be list<string>
+    }
+
+    #[test]
+    fn test_string_extension_join() {
+        let env = Env::with_standard_library()
+            .with_all_extensions()
+            .with_variable("parts", CelType::list(CelType::String));
+
+        // join without separator
+        let result = env.compile("parts.join()");
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_ok());
+
+        // join with separator
+        let result = env.compile("parts.join(\",\")");
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_ok());
+    }
+
+    #[test]
+    fn test_math_extension_greatest() {
+        let env = Env::with_standard_library().with_all_extensions();
+
+        // Binary
+        let result = env.compile("math.greatest(1, 2)");
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_ok());
+
+        // Ternary
+        let result = env.compile("math.greatest(1, 2, 3)");
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_ok());
+
+        // With list
+        let result = env.compile("math.greatest([1, 2, 3])");
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_ok());
+    }
+
+    #[test]
+    fn test_math_extension_least() {
+        let env = Env::with_standard_library().with_all_extensions();
+
+        let result = env.compile("math.least(1, 2)");
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_ok());
+    }
+
+    #[test]
+    fn test_math_extension_abs() {
+        let env = Env::with_standard_library()
+            .with_all_extensions()
+            .with_variable("x", CelType::Int);
+
+        let result = env.compile("math.abs(x)");
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_ok());
+    }
+
+    #[test]
+    fn test_math_extension_bit_operations() {
+        let env = Env::with_standard_library()
+            .with_all_extensions()
+            .with_variable("a", CelType::Int)
+            .with_variable("b", CelType::Int);
+
+        let result = env.compile("math.bitAnd(a, b)");
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_ok());
+
+        let result = env.compile("math.bitOr(a, b)");
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_ok());
+
+        let result = env.compile("math.bitNot(a)");
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_ok());
+    }
+
+    #[test]
+    fn test_optionals_extension_of_and_none() {
+        let env = Env::with_standard_library()
+            .with_all_extensions()
+            .with_variable("x", CelType::Int);
+
+        // optional.of(x)
+        let result = env.compile("optional.of(x)");
+        assert!(result.is_ok(), "optional.of should compile: {:?}", result);
+        assert!(result.unwrap().is_ok());
+
+        // optional.none()
+        let result = env.compile("optional.none()");
+        assert!(result.is_ok(), "optional.none should compile: {:?}", result);
+        assert!(result.unwrap().is_ok());
+
+        // optional.ofNonZeroValue(x)
+        let result = env.compile("optional.ofNonZeroValue(x)");
+        assert!(
+            result.is_ok(),
+            "optional.ofNonZeroValue should compile: {:?}",
+            result
+        );
+        assert!(result.unwrap().is_ok());
+    }
+
+    #[test]
+    fn test_cel_bind_macro() {
+        let env = Env::with_standard_library().with_all_extensions();
+
+        // cel.bind(x, 10, x + 1) should work - bind x to 10, return x + 1
+        let result = env.compile("cel.bind(x, 10, x + 1)");
+        assert!(result.is_ok(), "cel.bind should parse: {:?}", result);
+        let check_result = result.unwrap();
+        assert!(
+            check_result.is_ok(),
+            "cel.bind should type-check: {:?}",
+            check_result.errors
+        );
+
+        // cel.bind with string
+        let result = env.compile("cel.bind(msg, \"hello\", msg + msg)");
+        assert!(result.is_ok(), "cel.bind with string should parse");
+        let check_result = result.unwrap();
+        assert!(
+            check_result.is_ok(),
+            "cel.bind with string should type-check: {:?}",
+            check_result.errors
+        );
+
+        // Nested cel.bind
+        let result = env.compile("cel.bind(x, 1, cel.bind(y, 2, x + y))");
+        assert!(result.is_ok(), "nested cel.bind should parse");
+        let check_result = result.unwrap();
+        assert!(
+            check_result.is_ok(),
+            "nested cel.bind should type-check: {:?}",
+            check_result.errors
+        );
+    }
+
+    #[test]
+    fn test_optionals_extension_methods() {
+        let env = Env::with_standard_library()
+            .with_all_extensions()
+            .with_variable("opt", CelType::optional(CelType::Int))
+            .with_variable("opt2", CelType::optional(CelType::Int));
+
+        // opt.hasValue()
+        let result = env.compile("opt.hasValue()");
+        assert!(result.is_ok(), "hasValue should parse: {:?}", result);
+        let check_result = result.unwrap();
+        assert!(
+            check_result.is_ok(),
+            "hasValue should type-check: {:?}",
+            check_result.errors
+        );
+
+        // opt.value()
+        let result = env.compile("opt.value()");
+        assert!(result.is_ok(), "value should parse: {:?}", result);
+        let check_result = result.unwrap();
+        assert!(
+            check_result.is_ok(),
+            "value should type-check: {:?}",
+            check_result.errors
+        );
+
+        // opt.or(opt2)
+        let result = env.compile("opt.or(opt2)");
+        assert!(result.is_ok(), "or should parse: {:?}", result);
+        let check_result = result.unwrap();
+        assert!(
+            check_result.is_ok(),
+            "or should type-check: {:?}",
+            check_result.errors
+        );
+
+        // opt.orValue(42)
+        let result = env.compile("opt.orValue(42)");
+        assert!(result.is_ok(), "orValue should parse: {:?}", result);
+        let check_result = result.unwrap();
+        assert!(
+            check_result.is_ok(),
+            "orValue should type-check: {:?}",
+            check_result.errors
+        );
     }
 }
