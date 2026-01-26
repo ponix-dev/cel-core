@@ -188,8 +188,8 @@ fn run_check_conformance_file(filename: &str) -> (usize, Vec<String>) {
             // Build type declarations from type_env
             let type_decls = build_type_decls(test);
 
-            // Run the type checker
-            let check_result = service.check(&parsed_expr, &type_decls);
+            // Run the type checker with container from test
+            let check_result = service.check(&parsed_expr, &type_decls, &test.container);
             if !check_result.is_ok() {
                 let errors: Vec<_> = check_result.issues.iter().map(|i| i.message.clone()).collect();
                 failures.push(format!("{}: check failed: {}", test_name, errors.join("; ")));
@@ -269,9 +269,9 @@ fn run_conformance_file(filename: &str) -> Vec<String> {
             // Build type declarations from type_env
             let type_decls = build_type_decls(test);
 
-            // Run type checker
+            // Run type checker with container from test
             let parsed_expr = parse_result.parsed_expr.unwrap();
-            let check_result = service.check(&parsed_expr, &type_decls);
+            let check_result = service.check(&parsed_expr, &type_decls, &test.container);
             if !check_result.is_ok() {
                 let error_msg = check_result
                     .issues

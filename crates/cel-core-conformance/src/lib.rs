@@ -144,10 +144,11 @@ pub trait ConformanceService {
     /// # Arguments
     /// * `parsed` - The parsed expression to check
     /// * `type_env` - Type declarations for variables in the expression
+    /// * `container` - Container namespace for qualified name resolution
     ///
     /// # Returns
     /// A CheckResponse containing the checked expression or issues.
-    fn check(&self, parsed: &ParsedExpr, type_env: &[TypeDecl]) -> CheckResponse;
+    fn check(&self, parsed: &ParsedExpr, type_env: &[TypeDecl], container: &str) -> CheckResponse;
 
     /// Evaluate an expression with the given bindings.
     ///

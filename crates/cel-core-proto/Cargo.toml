@@ -15,6 +15,7 @@ doctest = false
 [dependencies]
 cel-core-common.workspace = true
 cel-core-parser.workspace = true
+cel-core-checker.workspace = true
 prost.workspace = true
 prost-types = "0.14"
 thiserror = "2"

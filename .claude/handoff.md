@@ -1,90 +1,73 @@
 # Roadmap Handoff
 
 ## Last Updated
-2026-01-25
+2026-01-26
 
 ## Just Completed
-- [x] Milestone 3: Extension library infrastructure
+- [x] Proto type registry for message field resolution
+- [x] Unified `Ast` type with proto roundtrip support
+- [x] AST unparser (to_cel_string)
+- [x] Container support for qualified name resolution
+- [x] Conformance tests: 24/30 files passing (up from 20/30)
 
 ### Summary
-Implemented the extension library infrastructure for CEL, adding type declarations for four extension libraries that can be registered with the `Env`. Extensions follow the cel-go pattern and can be added via `with_extension()` or `with_all_extensions()`.
+Added proto type support for CEL type checking, enabling resolution of protobuf message fields, enum values, and qualified type names. Also added a unified `Ast` type following the cel-go pattern with proto roundtrip support, and an unparser for converting ASTs back to CEL source text.
 
 ### Key Files Added/Modified
-- `crates/cel-core-common/src/extensions/` - New directory for extension modules
-  - `string_ext.rs` - String extension functions
-  - `math_ext.rs` - Math extension functions
-  - `encoders_ext.rs` - Base64 encoder/decoder functions
-  - `optionals_ext.rs` - Optional type functions
-  - `mod.rs` - Re-exports all extension functions
-- `crates/cel-core-common/src/decls.rs` - Moved from checker, shared declarations
-- `crates/cel-core-common/src/lib.rs` - Export extensions and CelValue
-- `crates/cel-core/src/env.rs` - Added `with_extension()`, `with_all_extensions()`
-- `crates/cel-core-checker/src/` - Updated to import decls from common
+- `crates/cel-core-common/src/proto_types.rs` - NEW: `ProtoTypeRegistry` for resolving protobuf types
+- `crates/cel-core/src/ast.rs` - NEW: Unified `Ast` type with `to_checked_expr()`, `from_checked_expr()`, `to_cel_string()`
+- `crates/cel-core/src/unparser.rs` - NEW: Convert AST back to CEL source text
+- `crates/cel-core-proto/src/checked_expr.rs` - NEW: `to_checked_expr()` and `check_result_from_proto()` helpers
+- `crates/cel-core-checker/src/checker.rs` - Added proto type resolution, container support
+- `crates/cel-core/src/env.rs` - Added `CompileError`, `with_proto_types()`, `set_container()`
+- `crates/cel-core-conformance/src/service.rs` - Uses proto registry for conformance tests
 
-### Extension Functions Implemented
+### What ProtoTypeRegistry Provides
+- Message field type lookup (`get_field_type`)
+- Enum value resolution (`get_enum_value`)
+- Qualified name resolution with container scoping (`resolve_qualified`)
+- Well-known type mapping (Timestamp -> CelType::Timestamp, Duration -> CelType::Duration, wrappers)
+- Support for nested message/enum types
 
-**String Extension (`string_ext`):**
-- `charAt(string, int) -> string`
-- `indexOf(string, string) -> int`, `indexOf(string, string, int) -> int`
-- `lastIndexOf(string, string) -> int`, `lastIndexOf(string, string, int) -> int`
-- `substring(string, int) -> string`, `substring(string, int, int) -> string`
-- `replace(string, string, string) -> string`, `replace(string, string, string, int) -> string`
-- `split(string, string) -> list<string>`, `split(string, string, int) -> list<string>`
-- `join(list<string>) -> string`, `join(list<string>, string) -> string`
-- `trim(string) -> string`, `lowerAscii(string) -> string`, `upperAscii(string) -> string`
-- `reverse(string) -> string`, `strings.quote(string) -> string`
-
-**Math Extension (`math_ext`):**
-- `math.greatest(...)` / `math.least(...)` - Various numeric overloads
-- `math.abs(int/double/uint) -> same type`
-- `math.ceil(double) -> double`, `math.floor(double) -> double`
-- `math.round(double) -> double`, `math.trunc(double) -> double`
-- `math.sign(int/double/uint) -> same type`
-- `math.isNaN(double) -> bool`, `math.isInf(double) -> bool`, `math.isFinite(double) -> bool`
-- Bitwise: `math.bitAnd`, `math.bitOr`, `math.bitXor`, `math.bitNot`, `math.bitShiftLeft`, `math.bitShiftRight`
-
-**Encoders Extension (`encoders_ext`):**
-- `base64.encode(bytes) -> string`
-- `base64.decode(string) -> bytes`
-
-**Optionals Extension (`optionals_ext`):**
-- `optional.of(T) -> optional<T>`
-- `optional.none() -> optional<dyn>`
-- `optional.ofNonZeroValue(T) -> optional<T>`
-- `hasValue(optional<T>) -> bool`
-- `value(optional<T>) -> T`
-- `or(optional<T>, optional<T>) -> optional<T>`
-- `orValue(optional<T>, T) -> T`
+### What Unified Ast Provides
+- `Ast::is_checked()` - Check if AST has been type-checked
+- `Ast::result_type()` - Get the result type of the expression
+- `Ast::to_checked_expr()` - Convert to proto CheckedExpr
+- `Ast::to_parsed_expr()` - Convert to proto ParsedExpr
+- `Ast::from_checked_expr()` - Create from proto CheckedExpr (roundtrip)
+- `Ast::from_parsed_expr()` - Create from proto ParsedExpr
+- `Ast::to_cel_string()` - Convert back to CEL source text
 
 ### Architecture Decisions
-1. **Extensions in cel-core-common**: Placed extension declarations in common crate so they can be shared between checker and future evaluator
-2. **FunctionDecl/OverloadDecl in common**: Moved from checker to common to avoid circular dependencies
-3. **Opt-in extensions**: Extensions are not loaded by default; use `with_all_extensions()` or individual `with_extension()` calls
-4. **Type-only for now**: Extensions provide type checking but runtime evaluation is not yet implemented
+1. **ProtoTypeRegistry in cel-core-common**: Placed in common crate for sharing between checker and conformance
+2. **Descriptor pool integration**: Uses prost_reflect::DescriptorPool for efficient proto type lookup
+3. **Container scoping**: Checker tracks container (e.g., "cel.expr.conformance.proto3") for qualified name resolution
+4. **Well-known type mapping**: google.protobuf.Timestamp/Duration map to native CelType variants
 
 ## Next Up
-- [ ] Conformance improvements (target 25/30 passing)
-- [ ] Proto message field resolution
 - [ ] Milestone 4: Evaluation (`Value` type, `Program`, `Activation`)
+- [ ] Fix remaining conformance failures (6 files: block_ext, enums, macros2, proto2_ext, type_deduction)
 
-### Why This is Next
-With extensions complete, the remaining conformance failures are mostly:
-1. Proto message type support (e.g., `google.protobuf.Timestamp`)
-2. Advanced type deduction edge cases
-3. Evaluation-dependent tests
+### Remaining Conformance Failures
+1. **block_ext.textproto** - Requires `cel.block` macro support
+2. **enums.textproto** - Requires `proto.getExt`/`proto.hasExt` functions
+3. **macros2.textproto** - Some advanced macro edge cases
+4. **proto2_ext.textproto** - Proto2 extension support (`proto.getExt`, `proto.hasExt`)
+5. **type_deduction.textproto** - Advanced type parameter inference cases (flexible_type_parameter_assignment, wrappers)
 
-### Prerequisites
-- Proto type support needs message field accessor resolution
+### Prerequisites for Next Steps
 - Evaluation requires `Value` enum and operator implementations
+- `proto.getExt`/`proto.hasExt` need special handling for proto2 extensions
 
 ### Potential Challenges
-- Proto message handling requires integration with prost/protobuf
+- Type deduction failures involve subtle type parameter binding rules
+- Proto2 extensions are a different model than proto3 fields
 - Error-as-value semantics during evaluation
 
 ## Open Questions
-- Should proto message types be declared in standard library or registered separately?
-- How should we handle `cel.bind` macro scoping with the checker? (Currently works but complex)
+- Should `cel.block` be a macro or a special form?
+- How should proto2 extensions be declared vs proto3 fields?
 
 ## Conformance Status
-- 20/30 passing (unit tests)
-- Failing tests mostly require proto types or evaluation
+- 24/30 passing (parse + check tests)
+- Major categories passing: basic, comparisons, conversions, dynamic, fields, fp_math, integer_math, lists, logic, macros, namespace, optionals, parse, plumbing, proto2, proto3, string, timestamps, type_deduction_check (partial), unknowns

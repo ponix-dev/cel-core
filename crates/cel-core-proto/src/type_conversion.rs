@@ -65,7 +65,28 @@ pub fn cel_type_from_proto(proto: &ProtoType) -> CelType {
                 .unwrap_or(CelType::Dyn);
             CelType::Map(Arc::new(key), Arc::new(val))
         }
-        Some(ProtoTypeKind::MessageType(name)) => CelType::Message(Arc::from(name.as_str())),
+        Some(ProtoTypeKind::MessageType(name)) => {
+            // Handle well-known types that should map to CEL native types
+            match name.as_str() {
+                "google.protobuf.Timestamp" => CelType::Timestamp,
+                "google.protobuf.Duration" => CelType::Duration,
+                "google.protobuf.BoolValue" => CelType::wrapper(CelType::Bool),
+                "google.protobuf.Int32Value" | "google.protobuf.Int64Value" => {
+                    CelType::wrapper(CelType::Int)
+                }
+                "google.protobuf.UInt32Value" | "google.protobuf.UInt64Value" => {
+                    CelType::wrapper(CelType::UInt)
+                }
+                "google.protobuf.FloatValue" | "google.protobuf.DoubleValue" => {
+                    CelType::wrapper(CelType::Double)
+                }
+                "google.protobuf.StringValue" => CelType::wrapper(CelType::String),
+                "google.protobuf.BytesValue" => CelType::wrapper(CelType::Bytes),
+                "google.protobuf.Any" | "google.protobuf.Struct" | "google.protobuf.Value"
+                | "google.protobuf.ListValue" => CelType::Dyn,
+                _ => CelType::Message(Arc::from(name.as_str())),
+            }
+        }
         Some(ProtoTypeKind::TypeParam(name)) => CelType::TypeParam(Arc::from(name.as_str())),
         Some(ProtoTypeKind::Type(inner)) => {
             let inner_type = cel_type_from_proto(inner.as_ref());

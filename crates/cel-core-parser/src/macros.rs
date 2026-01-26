@@ -1353,7 +1353,7 @@ fn build_optional_none(ctx: &mut MacroContext, span: &Span) -> SpannedExpr {
 // === optMap() Macro ===
 
 /// Expand `optional.optMap(var, expr)` to:
-/// ```
+/// ```text
 /// receiver.hasValue()
 ///     ? cel.bind(var, receiver.value(), optional.of(expr))
 ///     : optional.none()
@@ -1416,7 +1416,7 @@ fn expand_opt_map(
 // === optFlatMap() Macro ===
 
 /// Expand `optional.optFlatMap(var, expr)` to:
-/// ```
+/// ```text
 /// receiver.hasValue()
 ///     ? cel.bind(var, receiver.value(), expr)
 ///     : optional.none()

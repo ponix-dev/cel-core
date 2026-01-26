@@ -4,25 +4,47 @@
 //! by providing conversion between the internal `cel-parser` AST representation and the official
 //! google/cel-spec protobuf format.
 //!
+//! # Parsing and Checking
+//!
+//! The main conversion functions are:
+//!
+//! - [`to_parsed_expr`] / [`from_parsed_expr`] - Convert between AST and proto `ParsedExpr`
+//! - [`to_checked_expr`] / [`to_checked_expr_from_ast`] - Convert check results to proto `CheckedExpr`
+//!
 //! # Example
 //!
 //! ```
-//! use cel_core_common::SpannedExpr;
-//! use cel_core_proto::{to_parsed_expr, from_parsed_expr};
+//! use cel_core_proto::{to_parsed_expr, to_checked_expr, from_parsed_expr};
+//! use cel_core_checker::{check, STANDARD_LIBRARY};
+//! use cel_core_common::CelType;
+//! use std::collections::HashMap;
 //!
 //! // Parse a CEL expression
-//! let result = cel_core_parser::parse("x + 1");
-//! let ast = result.ast.unwrap();
-//!
-//! // Convert to proto format
 //! let source = "x + 1";
+//! let ast = cel_core_parser::parse(source).ast.unwrap();
+//!
+//! // Convert to proto ParsedExpr
 //! let parsed_expr = to_parsed_expr(&ast, source);
+//!
+//! // Type check
+//! let mut variables = HashMap::new();
+//! variables.insert("x".to_string(), CelType::Int);
+//! let functions: HashMap<_, _> = STANDARD_LIBRARY.iter()
+//!     .map(|f| (f.name.clone(), f.clone()))
+//!     .collect();
+//! let check_result = check(&ast, &variables, &functions, "");
+//!
+//! // Convert to proto CheckedExpr
+//! let checked_expr = to_checked_expr(&check_result, &parsed_expr);
 //!
 //! // Convert back to AST
 //! let roundtripped = from_parsed_expr(&parsed_expr).unwrap();
 //! ```
 
+mod checked_expr;
 mod converter;
+
+pub use checked_expr::{check_result_from_proto, to_checked_expr, to_checked_expr_from_ast};
 mod error;
 pub mod gen;
 mod operators;

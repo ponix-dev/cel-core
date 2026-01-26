@@ -7,12 +7,14 @@ use crate::{
     Binding, CheckResponse, ConformanceService, EvalResponse, Issue, ParseResponse, TypeDecl,
 };
 use cel_core::Env;
-use cel_core_proto::gen::cel::expr::{CheckedExpr, ParsedExpr, Reference};
-use cel_core_proto::{
-    cel_type_from_proto, cel_type_to_proto, cel_value_to_proto, from_parsed_expr,
-};
+use cel_core_common::ProtoTypeRegistry;
+use cel_core_proto::gen::cel::expr::ParsedExpr;
+use cel_core_proto::{cel_type_from_proto, from_parsed_expr, to_checked_expr};
+
+#[cfg(test)]
 use cel_core_common::CelType;
-use std::collections::HashMap;
+#[cfg(test)]
+use cel_core_proto::cel_type_to_proto;
 
 /// CEL conformance service implementation using cel-core Env.
 ///
@@ -29,8 +31,31 @@ pub struct CelConformanceService {
 
 impl CelConformanceService {
     pub fn new() -> Self {
+        // Create proto type registry with conformance test proto descriptors
+        let mut registry = ProtoTypeRegistry::new();
+
+        // Add conformance test proto descriptors
+        // Order matters: dependencies must be added before dependents
+        registry
+            .add_file_descriptor_set(cel_core_proto::gen::cel::expr::FILE_DESCRIPTOR_SET)
+            .expect("Failed to add cel.expr descriptors");
+        registry
+            .add_file_descriptor_set(cel_core_proto::gen::cel::expr::conformance::FILE_DESCRIPTOR_SET)
+            .expect("Failed to add cel.expr.conformance descriptors");
+        registry
+            .add_file_descriptor_set(cel_core_proto::gen::cel::expr::conformance::proto2::FILE_DESCRIPTOR_SET)
+            .expect("Failed to add cel.expr.conformance.proto2 descriptors");
+        registry
+            .add_file_descriptor_set(cel_core_proto::gen::cel::expr::conformance::proto3::FILE_DESCRIPTOR_SET)
+            .expect("Failed to add cel.expr.conformance.proto3 descriptors");
+        registry
+            .add_file_descriptor_set(cel_core_proto::gen::cel::expr::conformance::test::FILE_DESCRIPTOR_SET)
+            .expect("Failed to add cel.expr.conformance.test descriptors");
+
         Self {
-            env: Env::with_standard_library().with_all_extensions(),
+            env: Env::with_standard_library()
+                .with_all_extensions()
+                .with_proto_types(registry),
         }
     }
 }
@@ -64,7 +89,7 @@ impl ConformanceService for CelConformanceService {
         ParseResponse { parsed_expr, issues }
     }
 
-    fn check(&self, parsed: &ParsedExpr, type_env: &[TypeDecl]) -> CheckResponse {
+    fn check(&self, parsed: &ParsedExpr, type_env: &[TypeDecl], container: &str) -> CheckResponse {
         // Convert ParsedExpr back to AST
         let ast = match from_parsed_expr(parsed) {
             Ok(ast) => ast,
@@ -78,6 +103,9 @@ impl ConformanceService for CelConformanceService {
 
         // Clone base env and add type declarations
         let mut env = self.env.clone();
+
+        // Set the container for qualified name resolution
+        env.set_container(container);
 
         for decl in type_env {
             let cel_type = cel_type_from_proto(&decl.cel_type);
@@ -94,39 +122,9 @@ impl ConformanceService for CelConformanceService {
             .map(|e| Issue::error(e.message()))
             .collect();
 
-        // Build CheckedExpr
+        // Build CheckedExpr using the helper from cel-core-proto
         let checked_expr = if check_result.is_ok() || !check_result.type_map.is_empty() {
-            // Build type_map: convert CelType to proto Type
-            let type_map: HashMap<i64, cel_core_proto::Type> = check_result
-                .type_map
-                .iter()
-                .filter(|(_, ty)| !matches!(ty, CelType::Dyn)) // Omit Dyn types
-                .map(|(id, ty)| (*id, cel_type_to_proto(ty)))
-                .collect();
-
-            // Build reference_map
-            let reference_map: HashMap<i64, Reference> = check_result
-                .reference_map
-                .iter()
-                .map(|(id, info)| {
-                    (
-                        *id,
-                        Reference {
-                            name: info.name.clone(),
-                            overload_id: info.overload_ids.clone(),
-                            value: info.value.as_ref().map(cel_value_to_proto),
-                        },
-                    )
-                })
-                .collect();
-
-            Some(CheckedExpr {
-                reference_map,
-                type_map,
-                source_info: parsed.source_info.clone(),
-                expr_version: String::new(),
-                expr: parsed.expr.clone(),
-            })
+            Some(to_checked_expr(&check_result, parsed))
         } else {
             None
         };
@@ -181,7 +179,7 @@ mod tests {
     fn test_check_literal() {
         let service = CelConformanceService::new();
         let parse_result = service.parse("42").parsed_expr.unwrap();
-        let check_result = service.check(&parse_result, &[]);
+        let check_result = service.check(&parse_result, &[], "");
         assert!(check_result.is_ok());
         assert!(check_result.checked_expr.is_some());
 
@@ -200,7 +198,7 @@ mod tests {
             cel_type: cel_type_to_proto(&CelType::Int),
         };
 
-        let check_result = service.check(&parse_result, &[type_decl]);
+        let check_result = service.check(&parse_result, &[type_decl], "");
         assert!(check_result.is_ok());
         assert!(check_result.checked_expr.is_some());
     }
@@ -209,7 +207,7 @@ mod tests {
     fn test_check_undefined_variable() {
         let service = CelConformanceService::new();
         let parse_result = service.parse("x").parsed_expr.unwrap();
-        let check_result = service.check(&parse_result, &[]);
+        let check_result = service.check(&parse_result, &[], "");
         assert!(!check_result.is_ok());
         assert!(check_result
             .issues
@@ -227,7 +225,7 @@ mod tests {
             cel_type: cel_type_to_proto(&CelType::Int),
         };
 
-        let check_result = service.check(&parse_result, &[type_decl]);
+        let check_result = service.check(&parse_result, &[type_decl], "");
         assert!(!check_result.is_ok());
         assert!(check_result
             .issues

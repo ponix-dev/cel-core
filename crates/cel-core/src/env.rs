@@ -4,10 +4,54 @@
 //! following the cel-go architecture pattern.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
-use cel_core_checker::{check, CheckResult, FunctionDecl, STANDARD_LIBRARY};
-use cel_core_common::{extensions, CelType, SpannedExpr};
-use cel_core_parser::ParseResult;
+use cel_core_checker::{check, check_with_proto_types, CheckError, CheckResult, FunctionDecl, STANDARD_LIBRARY};
+use cel_core_common::{extensions, CelType, ProtoTypeRegistry, SpannedExpr};
+use cel_core_parser::{ParseError, ParseResult};
+
+use crate::ast::Ast;
+
+/// Error from compiling a CEL expression.
+#[derive(Debug, Clone)]
+pub enum CompileError {
+    /// Parse errors occurred.
+    Parse(Vec<ParseError>),
+    /// Type checking errors occurred.
+    Check(Vec<CheckError>),
+    /// No AST was produced (should not happen normally).
+    NoAst,
+}
+
+impl std::fmt::Display for CompileError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CompileError::Parse(errors) => {
+                write!(f, "parse errors: ")?;
+                for (i, e) in errors.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, "; ")?;
+                    }
+                    write!(f, "{}", e.message)?;
+                }
+                Ok(())
+            }
+            CompileError::Check(errors) => {
+                write!(f, "check errors: ")?;
+                for (i, e) in errors.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, "; ")?;
+                    }
+                    write!(f, "{}", e.message())?;
+                }
+                Ok(())
+            }
+            CompileError::NoAst => write!(f, "no AST produced"),
+        }
+    }
+}
+
+impl std::error::Error for CompileError {}
 
 /// Unified environment for CEL expression processing.
 ///
@@ -37,6 +81,8 @@ pub struct Env {
     functions: HashMap<String, FunctionDecl>,
     /// Container namespace for qualified name resolution.
     container: String,
+    /// Proto type registry for resolving protobuf types.
+    proto_types: Option<Arc<ProtoTypeRegistry>>,
 }
 
 impl Env {
@@ -49,6 +95,7 @@ impl Env {
             variables: HashMap::new(),
             functions: HashMap::new(),
             container: String::new(),
+            proto_types: None,
         }
     }
 
@@ -143,6 +190,19 @@ impl Env {
         &self.container
     }
 
+    /// Set the proto type registry (builder pattern).
+    ///
+    /// The proto type registry is used for resolving protobuf types during type checking.
+    pub fn with_proto_types(mut self, registry: ProtoTypeRegistry) -> Self {
+        self.proto_types = Some(Arc::new(registry));
+        self
+    }
+
+    /// Get the proto type registry.
+    pub fn proto_types(&self) -> Option<&ProtoTypeRegistry> {
+        self.proto_types.as_ref().map(|r| r.as_ref())
+    }
+
     /// Add an extension library to the environment (builder pattern).
     ///
     /// Extensions provide additional functions beyond the standard library.
@@ -216,23 +276,83 @@ impl Env {
     /// This delegates to the checker with the environment's variables,
     /// functions, and container.
     pub fn check(&self, expr: &SpannedExpr) -> CheckResult {
+        if let Some(ref proto_types) = self.proto_types {
+            return check_with_proto_types(
+                expr,
+                &self.variables,
+                &self.functions,
+                &self.container,
+                proto_types,
+            );
+        }
+
         check(expr, &self.variables, &self.functions, &self.container)
     }
 
-    /// Parse and type-check a CEL expression.
+    /// Parse and type-check a CEL expression, returning a checked Ast.
     ///
-    /// This is a convenience method that combines `parse()` and `check()`.
-    /// Returns the check result if parsing succeeded, or an error if parsing failed.
-    pub fn compile(&self, source: &str) -> Result<CheckResult, ParseResult> {
+    /// This is the primary entry point for compiling CEL expressions.
+    /// Returns a checked `Ast` that can be converted to proto format.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use cel_core::Env;
+    /// use cel_core_common::CelType;
+    ///
+    /// let env = Env::with_standard_library()
+    ///     .with_variable("x", CelType::Int);
+    ///
+    /// let ast = env.compile("x + 1").unwrap();
+    /// assert!(ast.is_checked());
+    ///
+    /// // Convert to proto format
+    /// let checked_proto = ast.to_checked_expr().unwrap();
+    /// ```
+    pub fn compile(&self, source: &str) -> Result<Ast, CompileError> {
         let parse_result = self.parse(source);
 
-        if let Some(ref ast) = parse_result.ast {
-            if parse_result.errors.is_empty() {
-                return Ok(self.check(ast));
-            }
+        if !parse_result.errors.is_empty() {
+            return Err(CompileError::Parse(parse_result.errors));
         }
 
-        Err(parse_result)
+        let expr = parse_result.ast.ok_or(CompileError::NoAst)?;
+        let check_result = self.check(&expr);
+
+        if !check_result.errors.is_empty() {
+            return Err(CompileError::Check(check_result.errors));
+        }
+
+        Ok(Ast::new_checked(expr, source, check_result))
+    }
+
+    /// Parse a CEL expression without type-checking, returning an unchecked Ast.
+    ///
+    /// This is useful when you want to parse an expression but don't need
+    /// type information, or when you want to defer type-checking.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use cel_core::Env;
+    ///
+    /// let env = Env::with_standard_library();
+    ///
+    /// let ast = env.parse_only("1 + 2").unwrap();
+    /// assert!(!ast.is_checked());
+    ///
+    /// // Can still convert to ParsedExpr proto format
+    /// let parsed_proto = ast.to_parsed_expr();
+    /// ```
+    pub fn parse_only(&self, source: &str) -> Result<Ast, CompileError> {
+        let parse_result = self.parse(source);
+
+        if !parse_result.errors.is_empty() {
+            return Err(CompileError::Parse(parse_result.errors));
+        }
+
+        let expr = parse_result.ast.ok_or(CompileError::NoAst)?;
+        Ok(Ast::new_unchecked(expr, source))
     }
 }
 
@@ -315,9 +435,8 @@ mod tests {
     fn test_compile_success() {
         let env = Env::with_standard_library().with_variable("x", CelType::Int);
 
-        let result = env.compile("x + 1");
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_ok());
+        let ast = env.compile("x + 1").unwrap();
+        assert!(ast.is_checked());
     }
 
     #[test]
@@ -402,12 +521,10 @@ mod tests {
         // base64.encode(bytes) -> string
         let result = env.compile("base64.encode(data)");
         assert!(result.is_ok(), "base64.encode should compile: {:?}", result);
-        assert!(result.unwrap().is_ok());
 
         // base64.decode(string) -> bytes
         let result = env.compile("base64.decode(encoded)");
         assert!(result.is_ok(), "base64.decode should compile: {:?}", result);
-        assert!(result.unwrap().is_ok());
     }
 
     #[test]
@@ -418,7 +535,6 @@ mod tests {
 
         let result = env.compile("s.charAt(0)");
         assert!(result.is_ok(), "charAt should compile: {:?}", result);
-        assert!(result.unwrap().is_ok());
     }
 
     #[test]
@@ -428,14 +544,10 @@ mod tests {
             .with_variable("s", CelType::String);
 
         // Basic indexOf
-        let result = env.compile("s.indexOf(\"a\")");
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_ok());
+        assert!(env.compile("s.indexOf(\"a\")").is_ok());
 
         // indexOf with offset
-        let result = env.compile("s.indexOf(\"a\", 2)");
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_ok());
+        assert!(env.compile("s.indexOf(\"a\", 2)").is_ok());
     }
 
     #[test]
@@ -445,14 +557,10 @@ mod tests {
             .with_variable("s", CelType::String);
 
         // substring with one arg
-        let result = env.compile("s.substring(1)");
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_ok());
+        assert!(env.compile("s.substring(1)").is_ok());
 
         // substring with two args
-        let result = env.compile("s.substring(1, 5)");
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_ok());
+        assert!(env.compile("s.substring(1, 5)").is_ok());
     }
 
     #[test]
@@ -461,10 +569,8 @@ mod tests {
             .with_all_extensions()
             .with_variable("s", CelType::String);
 
-        let result = env.compile("s.split(\",\")");
-        assert!(result.is_ok());
-        let check_result = result.unwrap();
-        assert!(check_result.is_ok());
+        let ast = env.compile("s.split(\",\")").unwrap();
+        assert!(ast.is_checked());
 
         // Result should be list<string>
         // The root expr type should be list<string>
@@ -477,14 +583,10 @@ mod tests {
             .with_variable("parts", CelType::list(CelType::String));
 
         // join without separator
-        let result = env.compile("parts.join()");
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_ok());
+        assert!(env.compile("parts.join()").is_ok());
 
         // join with separator
-        let result = env.compile("parts.join(\",\")");
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_ok());
+        assert!(env.compile("parts.join(\",\")").is_ok());
     }
 
     #[test]
@@ -492,28 +594,19 @@ mod tests {
         let env = Env::with_standard_library().with_all_extensions();
 
         // Binary
-        let result = env.compile("math.greatest(1, 2)");
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_ok());
+        assert!(env.compile("math.greatest(1, 2)").is_ok());
 
         // Ternary
-        let result = env.compile("math.greatest(1, 2, 3)");
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_ok());
+        assert!(env.compile("math.greatest(1, 2, 3)").is_ok());
 
         // With list
-        let result = env.compile("math.greatest([1, 2, 3])");
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_ok());
+        assert!(env.compile("math.greatest([1, 2, 3])").is_ok());
     }
 
     #[test]
     fn test_math_extension_least() {
         let env = Env::with_standard_library().with_all_extensions();
-
-        let result = env.compile("math.least(1, 2)");
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_ok());
+        assert!(env.compile("math.least(1, 2)").is_ok());
     }
 
     #[test]
@@ -522,9 +615,7 @@ mod tests {
             .with_all_extensions()
             .with_variable("x", CelType::Int);
 
-        let result = env.compile("math.abs(x)");
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_ok());
+        assert!(env.compile("math.abs(x)").is_ok());
     }
 
     #[test]
@@ -534,17 +625,9 @@ mod tests {
             .with_variable("a", CelType::Int)
             .with_variable("b", CelType::Int);
 
-        let result = env.compile("math.bitAnd(a, b)");
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_ok());
-
-        let result = env.compile("math.bitOr(a, b)");
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_ok());
-
-        let result = env.compile("math.bitNot(a)");
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_ok());
+        assert!(env.compile("math.bitAnd(a, b)").is_ok());
+        assert!(env.compile("math.bitOr(a, b)").is_ok());
+        assert!(env.compile("math.bitNot(a)").is_ok());
     }
 
     #[test]
@@ -556,12 +639,10 @@ mod tests {
         // optional.of(x)
         let result = env.compile("optional.of(x)");
         assert!(result.is_ok(), "optional.of should compile: {:?}", result);
-        assert!(result.unwrap().is_ok());
 
         // optional.none()
         let result = env.compile("optional.none()");
         assert!(result.is_ok(), "optional.none should compile: {:?}", result);
-        assert!(result.unwrap().is_ok());
 
         // optional.ofNonZeroValue(x)
         let result = env.compile("optional.ofNonZeroValue(x)");
@@ -570,7 +651,6 @@ mod tests {
             "optional.ofNonZeroValue should compile: {:?}",
             result
         );
-        assert!(result.unwrap().is_ok());
     }
 
     #[test]
@@ -579,33 +659,15 @@ mod tests {
 
         // cel.bind(x, 10, x + 1) should work - bind x to 10, return x + 1
         let result = env.compile("cel.bind(x, 10, x + 1)");
-        assert!(result.is_ok(), "cel.bind should parse: {:?}", result);
-        let check_result = result.unwrap();
-        assert!(
-            check_result.is_ok(),
-            "cel.bind should type-check: {:?}",
-            check_result.errors
-        );
+        assert!(result.is_ok(), "cel.bind should compile: {:?}", result);
 
         // cel.bind with string
         let result = env.compile("cel.bind(msg, \"hello\", msg + msg)");
-        assert!(result.is_ok(), "cel.bind with string should parse");
-        let check_result = result.unwrap();
-        assert!(
-            check_result.is_ok(),
-            "cel.bind with string should type-check: {:?}",
-            check_result.errors
-        );
+        assert!(result.is_ok(), "cel.bind with string should compile: {:?}", result);
 
         // Nested cel.bind
         let result = env.compile("cel.bind(x, 1, cel.bind(y, 2, x + y))");
-        assert!(result.is_ok(), "nested cel.bind should parse");
-        let check_result = result.unwrap();
-        assert!(
-            check_result.is_ok(),
-            "nested cel.bind should type-check: {:?}",
-            check_result.errors
-        );
+        assert!(result.is_ok(), "nested cel.bind should compile: {:?}", result);
     }
 
     #[test]
@@ -617,42 +679,18 @@ mod tests {
 
         // opt.hasValue()
         let result = env.compile("opt.hasValue()");
-        assert!(result.is_ok(), "hasValue should parse: {:?}", result);
-        let check_result = result.unwrap();
-        assert!(
-            check_result.is_ok(),
-            "hasValue should type-check: {:?}",
-            check_result.errors
-        );
+        assert!(result.is_ok(), "hasValue should compile: {:?}", result);
 
         // opt.value()
         let result = env.compile("opt.value()");
-        assert!(result.is_ok(), "value should parse: {:?}", result);
-        let check_result = result.unwrap();
-        assert!(
-            check_result.is_ok(),
-            "value should type-check: {:?}",
-            check_result.errors
-        );
+        assert!(result.is_ok(), "value should compile: {:?}", result);
 
         // opt.or(opt2)
         let result = env.compile("opt.or(opt2)");
-        assert!(result.is_ok(), "or should parse: {:?}", result);
-        let check_result = result.unwrap();
-        assert!(
-            check_result.is_ok(),
-            "or should type-check: {:?}",
-            check_result.errors
-        );
+        assert!(result.is_ok(), "or should compile: {:?}", result);
 
         // opt.orValue(42)
         let result = env.compile("opt.orValue(42)");
-        assert!(result.is_ok(), "orValue should parse: {:?}", result);
-        let check_result = result.unwrap();
-        assert!(
-            check_result.is_ok(),
-            "orValue should type-check: {:?}",
-            check_result.errors
-        );
+        assert!(result.is_ok(), "orValue should compile: {:?}", result);
     }
 }

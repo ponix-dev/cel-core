@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 use cel_core_common::{BinaryOp, Expr, FunctionDecl, SpannedExpr, UnaryOp, VariableDecl};
 use cel_core_common::{CelType, CelValue};
+use cel_core_common::{ProtoTypeRegistry, ResolvedProtoType};
 use crate::errors::CheckError;
 use crate::overload::{finalize_type, resolve_overload, substitute_type};
 use crate::scope::ScopeStack;
@@ -48,7 +49,7 @@ impl ReferenceInfo {
 }
 
 /// Result of type checking an expression.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CheckResult {
     /// Map from expression ID to inferred type.
     pub type_map: HashMap<i64, CelType>,
@@ -94,6 +95,8 @@ pub struct Checker<'a> {
     errors: Vec<CheckError>,
     /// Type parameter substitutions.
     substitutions: HashMap<Arc<str>, CelType>,
+    /// Proto type registry for resolving protobuf types.
+    proto_types: Option<&'a ProtoTypeRegistry>,
 }
 
 impl<'a> Checker<'a> {
@@ -123,7 +126,14 @@ impl<'a> Checker<'a> {
             reference_map: HashMap::new(),
             errors: Vec::new(),
             substitutions: HashMap::new(),
+            proto_types: None,
         }
+    }
+
+    /// Set the proto type registry for resolving protobuf types.
+    pub fn with_proto_types(mut self, registry: &'a ProtoTypeRegistry) -> Self {
+        self.proto_types = Some(registry);
+        self
     }
 
     /// Type check an expression and return the result.
@@ -371,10 +381,16 @@ impl<'a> Checker<'a> {
     fn check_member(&mut self, obj: &SpannedExpr, field: &str, optional: bool, expr: &SpannedExpr) -> CelType {
         // First, try to resolve as qualified identifier (e.g., pkg.Type)
         if let Some(qualified_name) = self.try_qualified_name(obj, field) {
+            // Try variable/type resolution first
             if let Some(decl) = self.resolve_qualified(&qualified_name) {
                 let cel_type = decl.cel_type.clone();
                 self.set_reference(expr.id, ReferenceInfo::ident(&qualified_name));
                 return cel_type;
+            }
+
+            // Try proto type resolution (enum values, message types)
+            if let Some(resolved) = self.resolve_proto_qualified(&qualified_name, expr) {
+                return resolved;
             }
         }
 
@@ -389,8 +405,18 @@ impl<'a> Checker<'a> {
 
         // Check for well-known types with fields
         let result = match &inner_type {
-            CelType::Message(_) | CelType::Dyn | CelType::TypeVar(_) => {
-                // For messages, Dyn, and type variables, we can't verify field existence statically
+            CelType::Message(name) => {
+                // Try to get field type from proto registry
+                if let Some(registry) = self.proto_types {
+                    if let Some(field_type) = registry.get_field_type(name, field) {
+                        return self.wrap_optional_if_needed(field_type, optional, was_optional);
+                    }
+                }
+                // Fall back to Dyn if no registry or field not found
+                CelType::Dyn
+            }
+            CelType::Dyn | CelType::TypeVar(_) => {
+                // For Dyn and type variables, we can't verify field existence statically
                 CelType::Dyn
             }
             CelType::Map(_, value_type) => {
@@ -409,6 +435,11 @@ impl<'a> Checker<'a> {
             }
         };
 
+        self.wrap_optional_if_needed(result, optional, was_optional)
+    }
+
+    /// Wrap a type in optional if needed.
+    fn wrap_optional_if_needed(&self, result: CelType, optional: bool, was_optional: bool) -> CelType {
         // Wrap in optional if using optional select (.?) or receiver was optional
         // But flatten nested optionals - CEL semantics say chaining doesn't create optional<optional<T>>
         if optional || was_optional {
@@ -418,6 +449,31 @@ impl<'a> Checker<'a> {
             }
         } else {
             result
+        }
+    }
+
+    /// Try to resolve a qualified name as a proto type.
+    fn resolve_proto_qualified(&mut self, qualified_name: &str, expr: &SpannedExpr) -> Option<CelType> {
+        let registry = self.proto_types?;
+        let parts: Vec<&str> = qualified_name.split('.').collect();
+
+        match registry.resolve_qualified(&parts, self.container)? {
+            ResolvedProtoType::EnumValue { enum_name: _, value } => {
+                self.set_reference(expr.id, ReferenceInfo {
+                    name: qualified_name.to_string(),
+                    overload_ids: vec![],
+                    value: Some(CelValue::Int(value as i64)),
+                });
+                Some(CelType::Int)
+            }
+            ResolvedProtoType::Enum { name, cel_type } => {
+                self.set_reference(expr.id, ReferenceInfo::ident(&name));
+                Some(cel_type)
+            }
+            ResolvedProtoType::Message { name, cel_type } => {
+                self.set_reference(expr.id, ReferenceInfo::ident(&name));
+                Some(cel_type)
+            }
         }
     }
 
@@ -596,8 +652,16 @@ impl<'a> Checker<'a> {
 
         // Return a message type
         if let Some(ref name) = name {
-            self.set_reference(expr.id, ReferenceInfo::ident(name));
-            CelType::message(name)
+            // Try to resolve to fully qualified name using proto registry
+            let fq_name = if let Some(registry) = self.proto_types {
+                registry.resolve_message_name(name, self.container)
+                    .unwrap_or_else(|| name.clone())
+            } else {
+                name.clone()
+            };
+
+            self.set_reference(expr.id, ReferenceInfo::ident(&fq_name));
+            CelType::message(&fq_name)
         } else {
             CelType::Dyn
         }
@@ -738,6 +802,22 @@ pub fn check(
     container: &str,
 ) -> CheckResult {
     let checker = Checker::new(variables, functions, container);
+    checker.check(expr)
+}
+
+/// Check an expression with proto type registry.
+///
+/// This is like `check`, but also takes a proto type registry for resolving
+/// protobuf types during type checking.
+pub fn check_with_proto_types(
+    expr: &SpannedExpr,
+    variables: &HashMap<String, CelType>,
+    functions: &HashMap<String, FunctionDecl>,
+    container: &str,
+    proto_types: &ProtoTypeRegistry,
+) -> CheckResult {
+    let checker = Checker::new(variables, functions, container)
+        .with_proto_types(proto_types);
     checker.check(expr)
 }
 

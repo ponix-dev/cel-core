@@ -38,7 +38,7 @@ mod overload;
 mod scope;
 mod standard_library;
 
-pub use checker::{check, CheckResult, Checker, ReferenceInfo};
+pub use checker::{check, check_with_proto_types, CheckResult, Checker, ReferenceInfo};
 pub use errors::{CheckError, CheckErrorKind};
 pub use standard_library::STANDARD_LIBRARY;
 
