@@ -6,13 +6,13 @@
 use crate::{
     Binding, CheckResponse, ConformanceService, EvalResponse, Issue, ParseResponse, TypeDecl,
 };
+use cel_core::types::ProtoTypeRegistry;
 use cel_core::Env;
-use cel_core_common::ProtoTypeRegistry;
 use cel_core_proto::gen::cel::expr::ParsedExpr;
 use cel_core_proto::{cel_type_from_proto, from_parsed_expr, to_checked_expr};
 
 #[cfg(test)]
-use cel_core_common::CelType;
+use cel_core::CelType;
 #[cfg(test)]
 use cel_core_proto::cel_type_to_proto;
 
@@ -82,6 +82,7 @@ impl ConformanceService for CelConformanceService {
             .collect();
 
         // Convert AST to ParsedExpr using cel-proto (with macro_calls for IDE features)
+        // cel_core_proto now uses cel_core types directly
         let parsed_expr = result.ast.map(|ast| {
             cel_core_proto::to_parsed_expr_with_macros(&ast, source, &result.macro_calls)
         });
@@ -91,6 +92,7 @@ impl ConformanceService for CelConformanceService {
 
     fn check(&self, parsed: &ParsedExpr, type_env: &[TypeDecl], container: &str) -> CheckResponse {
         // Convert ParsedExpr back to AST
+        // cel_core_proto::from_parsed_expr returns cel_core::SpannedExpr directly now
         let ast = match from_parsed_expr(parsed) {
             Ok(ast) => ast,
             Err(e) => {
@@ -108,6 +110,7 @@ impl ConformanceService for CelConformanceService {
         env.set_container(container);
 
         for decl in type_env {
+            // cel_type_from_proto now returns cel_core::CelType directly
             let cel_type = cel_type_from_proto(&decl.cel_type);
             env.add_variable(&decl.name, cel_type);
         }
@@ -123,6 +126,7 @@ impl ConformanceService for CelConformanceService {
             .collect();
 
         // Build CheckedExpr using the helper from cel-core-proto
+        // cel_core_proto::to_checked_expr now takes cel_core::CheckResult directly
         let checked_expr = if check_result.is_ok() || !check_result.type_map.is_empty() {
             Some(to_checked_expr(&check_result, parsed))
         } else {

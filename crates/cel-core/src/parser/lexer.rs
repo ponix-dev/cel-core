@@ -1,6 +1,6 @@
 //! CEL lexer using logos.
 
-pub use cel_core_common::Span;
+use crate::types::Span;
 use logos::Logos;
 
 /// A token with its source span.

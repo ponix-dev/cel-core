@@ -1,6 +1,6 @@
 //! Common types for CEL: type system, values, AST, and declarations.
 //!
-//! This crate provides the foundational types shared across CEL crates:
+//! This module provides the foundational types shared across CEL components:
 //!
 //! - **Type System**: `CelType` for representing CEL types with parameterized
 //!   types like `List<T>`, `Map<K, V>`, and `type(T)`.
@@ -9,7 +9,6 @@
 //!   representing parsed CEL syntax.
 //! - **Declarations**: `FunctionDecl`, `OverloadDecl`, `VariableDecl` for
 //!   defining the type environment.
-//! - **Extensions**: Optional function libraries like `string_ext` and `math_ext`.
 
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -25,12 +24,9 @@ pub use ast::{
 mod decls;
 pub use decls::{FunctionDecl, OverloadDecl, VariableDecl};
 
-// Extensions module
-pub mod extensions;
-
 // Proto types module
-pub mod proto_types;
-pub use proto_types::{ProtoTypeRegistry, ResolvedProtoType, proto_message_to_cel_type};
+pub mod proto;
+pub use proto::{proto_message_to_cel_type, ProtoTypeRegistry, ResolvedProtoType};
 
 // ==================== CelValue ====================
 
@@ -168,7 +164,7 @@ impl CelType {
     ///
     /// # Example
     /// ```
-    /// use cel_core_common::CelType;
+    /// use cel_core::types::CelType;
     /// let list_of_int = CelType::list(CelType::Int);
     /// assert_eq!(list_of_int.display_name(), "list<int>");
     /// ```
@@ -180,7 +176,7 @@ impl CelType {
     ///
     /// # Example
     /// ```
-    /// use cel_core_common::CelType;
+    /// use cel_core::types::CelType;
     /// let map_str_int = CelType::map(CelType::String, CelType::Int);
     /// assert_eq!(map_str_int.display_name(), "map<string, int>");
     /// ```
@@ -192,7 +188,7 @@ impl CelType {
     ///
     /// # Example
     /// ```
-    /// use cel_core_common::CelType;
+    /// use cel_core::types::CelType;
     /// let type_of_int = CelType::type_of(CelType::Int);
     /// assert_eq!(type_of_int.display_name(), "type(int)");
     /// ```
@@ -204,7 +200,7 @@ impl CelType {
     ///
     /// # Example
     /// ```
-    /// use cel_core_common::CelType;
+    /// use cel_core::types::CelType;
     /// let msg = CelType::message("google.protobuf.Timestamp");
     /// assert_eq!(msg.display_name(), "google.protobuf.Timestamp");
     /// ```
@@ -229,7 +225,7 @@ impl CelType {
     ///
     /// # Example
     /// ```
-    /// use cel_core_common::CelType;
+    /// use cel_core::types::CelType;
     /// let func = CelType::function(&[CelType::String], CelType::Int);
     /// assert_eq!(func.display_name(), "(string) -> int");
     /// ```
@@ -259,7 +255,7 @@ impl CelType {
     ///
     /// # Example
     /// ```
-    /// use cel_core_common::CelType;
+    /// use cel_core::types::CelType;
     /// let opt_int = CelType::optional(CelType::Int);
     /// assert_eq!(opt_int.display_name(), "optional<int>");
     /// ```
@@ -691,7 +687,10 @@ mod tests {
     #[test]
     fn map_types() {
         let map_str_int = CelType::map(CelType::String, CelType::Int);
-        assert_eq!(map_str_int.map_types(), Some((&CelType::String, &CelType::Int)));
+        assert_eq!(
+            map_str_int.map_types(),
+            Some((&CelType::String, &CelType::Int))
+        );
         assert_eq!(CelType::Int.map_types(), None);
     }
 
@@ -795,11 +794,11 @@ mod tests {
 
     #[test]
     fn unification_context_binds_and_resolves() {
-        use super::UnificationContext;
-
         let mut ctx = UnificationContext::new();
         let tv = CelType::fresh_type_var();
-        let CelType::TypeVar(var_id) = tv else { panic!("expected TypeVar") };
+        let CelType::TypeVar(var_id) = tv else {
+            panic!("expected TypeVar")
+        };
 
         // Initially unbound
         assert!(ctx.resolve(var_id).is_none());
@@ -815,11 +814,11 @@ mod tests {
 
     #[test]
     fn unification_context_resolves_nested() {
-        use super::UnificationContext;
-
         let mut ctx = UnificationContext::new();
         let tv = CelType::fresh_type_var();
-        let CelType::TypeVar(var_id) = tv.clone() else { panic!("expected TypeVar") };
+        let CelType::TypeVar(var_id) = tv.clone() else {
+            panic!("expected TypeVar")
+        };
 
         ctx.bind(var_id, CelType::String);
 

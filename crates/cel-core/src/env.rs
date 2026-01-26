@@ -6,9 +6,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use cel_core_checker::{check, check_with_proto_types, CheckError, CheckResult, FunctionDecl, STANDARD_LIBRARY};
-use cel_core_common::{extensions, CelType, ProtoTypeRegistry, SpannedExpr};
-use cel_core_parser::{ParseError, ParseResult};
+use crate::checker::{check, check_with_proto_types, CheckError, CheckResult, STANDARD_LIBRARY};
+use crate::ext;
+use crate::parser::{self, ParseError, ParseResult};
+use crate::types::{CelType, FunctionDecl, ProtoTypeRegistry, SpannedExpr};
 
 use crate::ast::Ast;
 
@@ -65,7 +66,7 @@ impl std::error::Error for CompileError {}
 ///
 /// ```
 /// use cel_core::Env;
-/// use cel_core_common::CelType;
+/// use cel_core::types::CelType;
 ///
 /// let env = Env::with_standard_library()
 ///     .with_variable("x", CelType::Int);
@@ -138,7 +139,7 @@ impl Env {
     ///
     /// ```
     /// use cel_core::Env;
-    /// use cel_core_common::CelType;
+    /// use cel_core::types::CelType;
     ///
     /// let env = Env::with_standard_library()
     ///     .with_variable("x", CelType::Int)
@@ -212,7 +213,7 @@ impl Env {
     ///
     /// ```
     /// use cel_core::Env;
-    /// use cel_core_common::extensions::string_extension;
+    /// use cel_core::ext::string_extension;
     ///
     /// let env = Env::with_standard_library()
     ///     .with_extension(string_extension());
@@ -242,10 +243,10 @@ impl Env {
     /// ```
     pub fn with_all_extensions(mut self) -> Self {
         self = self
-            .with_extension(extensions::string_extension())
-            .with_extension(extensions::math_extension())
-            .with_extension(extensions::encoders_extension())
-            .with_extension(extensions::optionals_extension());
+            .with_extension(ext::string_extension())
+            .with_extension(ext::math_extension())
+            .with_extension(ext::encoders_extension())
+            .with_extension(ext::optionals_extension());
 
         // Add optional_type type constant for the optionals extension
         self.add_type_constant("optional_type", CelType::optional(CelType::Dyn));
@@ -268,7 +269,7 @@ impl Env {
     /// This delegates to the parser. The returned `ParseResult` may contain
     /// both a partial AST and errors if parsing partially succeeded.
     pub fn parse(&self, source: &str) -> ParseResult {
-        cel_core_parser::parse(source)
+        parser::parse(source)
     }
 
     /// Type-check a parsed expression.
@@ -292,22 +293,20 @@ impl Env {
     /// Parse and type-check a CEL expression, returning a checked Ast.
     ///
     /// This is the primary entry point for compiling CEL expressions.
-    /// Returns a checked `Ast` that can be converted to proto format.
+    /// Returns a checked `Ast` that can be used for evaluation.
     ///
     /// # Example
     ///
     /// ```
     /// use cel_core::Env;
-    /// use cel_core_common::CelType;
+    /// use cel_core::types::CelType;
     ///
     /// let env = Env::with_standard_library()
     ///     .with_variable("x", CelType::Int);
     ///
     /// let ast = env.compile("x + 1").unwrap();
     /// assert!(ast.is_checked());
-    ///
-    /// // Convert to proto format
-    /// let checked_proto = ast.to_checked_expr().unwrap();
+    /// assert_eq!(ast.result_type(), Some(&CelType::Int));
     /// ```
     pub fn compile(&self, source: &str) -> Result<Ast, CompileError> {
         let parse_result = self.parse(source);
@@ -340,9 +339,7 @@ impl Env {
     ///
     /// let ast = env.parse_only("1 + 2").unwrap();
     /// assert!(!ast.is_checked());
-    ///
-    /// // Can still convert to ParsedExpr proto format
-    /// let parsed_proto = ast.to_parsed_expr();
+    /// assert_eq!(ast.to_cel_string(), "1 + 2");
     /// ```
     pub fn parse_only(&self, source: &str) -> Result<Ast, CompileError> {
         let parse_result = self.parse(source);
@@ -365,7 +362,8 @@ impl Default for Env {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cel_core_checker::{CheckErrorKind, OverloadDecl};
+    use crate::checker::CheckErrorKind;
+    use crate::types::OverloadDecl;
 
     #[test]
     fn test_new_env() {
@@ -471,9 +469,7 @@ mod tests {
 
     #[test]
     fn test_with_extension() {
-        use cel_core_common::extensions::string_extension;
-
-        let env = Env::with_standard_library().with_extension(string_extension());
+        let env = Env::with_standard_library().with_extension(ext::string_extension());
 
         // String extension should add charAt function
         assert!(env.functions().contains_key("charAt"));

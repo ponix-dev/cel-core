@@ -16,7 +16,7 @@
 //! - `.or(optional<T>) -> optional<T>` - Return first present optional
 //! - `.orValue(T) -> T` - Return value or default
 
-use crate::{CelType, FunctionDecl, OverloadDecl};
+use crate::types::{CelType, FunctionDecl, OverloadDecl};
 
 /// Returns the optionals extension library function declarations.
 pub fn optionals_extension() -> Vec<FunctionDecl> {

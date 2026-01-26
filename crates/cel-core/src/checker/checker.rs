@@ -10,12 +10,12 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use cel_core_common::{BinaryOp, Expr, FunctionDecl, SpannedExpr, UnaryOp, VariableDecl};
-use cel_core_common::{CelType, CelValue};
-use cel_core_common::{ProtoTypeRegistry, ResolvedProtoType};
-use crate::errors::CheckError;
-use crate::overload::{finalize_type, resolve_overload, substitute_type};
-use crate::scope::ScopeStack;
+use crate::types::{BinaryOp, Expr, FunctionDecl, ListElement, MapEntry, SpannedExpr, StructField, UnaryOp, VariableDecl};
+use crate::types::{CelType, CelValue};
+use crate::types::{ProtoTypeRegistry, ResolvedProtoType};
+use super::errors::CheckError;
+use super::overload::{finalize_type, resolve_overload, substitute_type};
+use super::scope::ScopeStack;
 
 /// Reference information for a resolved identifier or function.
 #[derive(Debug, Clone)]
@@ -253,7 +253,7 @@ impl<'a> Checker<'a> {
     }
 
     /// Check a list literal.
-    fn check_list(&mut self, elements: &[cel_core_common::ListElement], _expr: &SpannedExpr) -> CelType {
+    fn check_list(&mut self, elements: &[ListElement], _expr: &SpannedExpr) -> CelType {
         if elements.is_empty() {
             return CelType::list(CelType::fresh_type_var());
         }
@@ -269,7 +269,7 @@ impl<'a> Checker<'a> {
     }
 
     /// Check a map literal.
-    fn check_map(&mut self, entries: &[cel_core_common::MapEntry], _expr: &SpannedExpr) -> CelType {
+    fn check_map(&mut self, entries: &[MapEntry], _expr: &SpannedExpr) -> CelType {
         if entries.is_empty() {
             return CelType::map(CelType::fresh_type_var(), CelType::fresh_type_var());
         }
@@ -639,7 +639,7 @@ impl<'a> Checker<'a> {
     fn check_struct(
         &mut self,
         type_name: &SpannedExpr,
-        fields: &[cel_core_common::StructField],
+        fields: &[StructField],
         expr: &SpannedExpr,
     ) -> CelType {
         // Get the type name
@@ -844,8 +844,9 @@ fn binary_op_to_function(op: BinaryOp) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::errors::CheckErrorKind;
-    use crate::standard_library::STANDARD_LIBRARY;
+    use super::super::errors::CheckErrorKind;
+    use super::super::standard_library::STANDARD_LIBRARY;
+    use crate::parser::parse;
 
     /// Build the standard library functions map.
     fn standard_functions() -> HashMap<String, FunctionDecl> {
@@ -873,7 +874,7 @@ mod tests {
     }
 
     fn check_expr(source: &str) -> CheckResult {
-        let result = cel_core_parser::parse(source);
+        let result = parse(source);
         let ast = result.ast.expect("parse should succeed");
         let variables = standard_variables();
         let functions = standard_functions();
@@ -881,7 +882,7 @@ mod tests {
     }
 
     fn check_expr_with_var(source: &str, var: &str, cel_type: CelType) -> CheckResult {
-        let result = cel_core_parser::parse(source);
+        let result = parse(source);
         let ast = result.ast.expect("parse should succeed");
         let mut variables = standard_variables();
         variables.insert(var.to_string(), cel_type);

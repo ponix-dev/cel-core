@@ -1,7 +1,7 @@
-//! Bidirectional conversion between cel-parser AST and google/cel-spec protobuf format.
+//! Bidirectional conversion between cel-core AST and google/cel-spec protobuf format.
 //!
 //! This crate enables wire compatibility with other CEL implementations (cel-go, cel-cpp, etc.)
-//! by providing conversion between the internal `cel-parser` AST representation and the official
+//! by providing conversion between the internal `cel-core` AST representation and the official
 //! google/cel-spec protobuf format.
 //!
 //! # Parsing and Checking
@@ -15,13 +15,12 @@
 //!
 //! ```
 //! use cel_core_proto::{to_parsed_expr, to_checked_expr, from_parsed_expr};
-//! use cel_core_checker::{check, STANDARD_LIBRARY};
-//! use cel_core_common::CelType;
+//! use cel_core::{check, STANDARD_LIBRARY, CelType};
 //! use std::collections::HashMap;
 //!
 //! // Parse a CEL expression
 //! let source = "x + 1";
-//! let ast = cel_core_parser::parse(source).ast.unwrap();
+//! let ast = cel_core::parse(source).ast.unwrap();
 //!
 //! // Convert to proto ParsedExpr
 //! let parsed_expr = to_parsed_expr(&ast, source);
@@ -65,8 +64,8 @@ pub use type_conversion::{
 // Re-export proto types for convenience
 pub use gen::cel::expr::{CheckedExpr, Constant, Expr, ParsedExpr, SourceInfo, Type, Value};
 
-use cel_core_common::SpannedExpr;
-use cel_core_parser::MacroCalls;
+use cel_core::parser::MacroCalls;
+use cel_core::SpannedExpr;
 
 /// Convert a cel-parser AST to a proto ParsedExpr.
 ///
@@ -156,12 +155,12 @@ pub fn from_parsed_expr(parsed: &ParsedExpr) -> Result<SpannedExpr, ConversionEr
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cel_core_common::Expr;
+    use cel_core::Expr;
 
     #[test]
     fn test_to_parsed_expr() {
         let source = "x + 1";
-        let result = cel_core_parser::parse(source);
+        let result = cel_core::parse(source);
         let ast = result.ast.unwrap();
 
         let parsed = to_parsed_expr(&ast, source);
@@ -173,7 +172,7 @@ mod tests {
     #[test]
     fn test_from_parsed_expr() {
         let source = "x + 1";
-        let result = cel_core_parser::parse(source);
+        let result = cel_core::parse(source);
         let ast = result.ast.unwrap();
 
         let parsed = to_parsed_expr(&ast, source);
@@ -182,7 +181,7 @@ mod tests {
         // Check the structure matches
         match &roundtripped.node {
             Expr::Binary { op, left, right } => {
-                assert_eq!(*op, cel_core_common::BinaryOp::Add);
+                assert_eq!(*op, cel_core::BinaryOp::Add);
                 assert!(matches!(left.node, Expr::Ident(ref s) if s == "x"));
                 assert!(matches!(right.node, Expr::Int(1)));
             }
@@ -193,7 +192,7 @@ mod tests {
     #[test]
     fn test_roundtrip_complex() {
         let source = "a > 0 && b.contains('x') ? [1, 2, 3] : {'key': value}";
-        let result = cel_core_parser::parse(source);
+        let result = cel_core::parse(source);
         let ast = result.ast.unwrap();
 
         let parsed = to_parsed_expr(&ast, source);

@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use cel_core_common::{CelType, VariableDecl};
+use crate::types::{CelType, VariableDecl};
 
 /// A scope containing variable declarations.
 ///

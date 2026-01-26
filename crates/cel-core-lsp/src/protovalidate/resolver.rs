@@ -3,7 +3,7 @@
 //! This module provides the `ProtovalidateResolver` which defines the variables
 //! and functions available in protovalidate CEL expressions.
 
-use cel_core_common::CelType;
+use cel_core::CelType;
 
 use crate::types::{
     is_builtin, is_method_only, is_standalone_only, Arity, ArityCheck, FunctionKind,

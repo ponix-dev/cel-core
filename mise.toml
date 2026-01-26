@@ -63,8 +63,8 @@ run = "cog bump --auto --dry-run"
 description = "Publish crates to crates.io in dependency order"
 depends = ["test"]
 run = """
-echo "Publishing cel-core-parser..."
-cargo publish -p cel-core-parser || echo "cel-core-parser already published, skipping..."
+echo "Publishing cel-core..."
+cargo publish -p cel-core || echo "cel-core already published, skipping..."
 
 echo "Waiting for crates.io to index..."
 sleep 10
@@ -72,8 +72,8 @@ sleep 10
 echo "Publishing cel-core-proto..."
 cargo publish -p cel-core-proto || echo "cel-core-proto already published, skipping..."
 
-echo "Publishing cel-core-lsp..."
-cargo publish -p cel-core-lsp || echo "cel-core-lsp already published, skipping..."
+echo ""
+echo "Note: cel-core-lsp is a binary tool, install with: cargo install --path crates/cel-core-lsp"
 """
 
 [tasks.release]

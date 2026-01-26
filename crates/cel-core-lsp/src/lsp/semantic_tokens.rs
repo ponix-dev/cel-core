@@ -1,6 +1,6 @@
 //! Semantic tokens for CEL syntax highlighting.
 
-use cel_core_common::{BinaryOp, Expr, SpannedExpr, UnaryOp};
+use cel_core::{types::{BinaryOp, Expr, UnaryOp}, SpannedExpr};
 use tower_lsp::lsp_types::{
     SemanticToken, SemanticTokenModifier, SemanticTokenType, SemanticTokensLegend,
 };
@@ -502,6 +502,7 @@ fn encode_tokens(tokens: &[RawToken], line_index: &LineIndex) -> Vec<SemanticTok
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cel_core::parse;
 
     #[test]
     fn legend_has_expected_types() {
@@ -515,7 +516,7 @@ mod tests {
     #[test]
     fn tokens_for_simple_expression() {
         let source = "1 + 2";
-        let result = cel_core_parser::parse(source);
+        let result = parse(source);
         let ast = result.ast.unwrap();
         let line_index = LineIndex::new(source.to_string());
 
@@ -527,7 +528,7 @@ mod tests {
     #[test]
     fn tokens_for_function_call() {
         let source = "size(x)";
-        let result = cel_core_parser::parse(source);
+        let result = parse(source);
         let ast = result.ast.unwrap();
         let line_index = LineIndex::new(source.to_string());
 
@@ -544,7 +545,7 @@ mod tests {
     #[test]
     fn tokens_for_list() {
         let source = "[1, 2]";
-        let result = cel_core_parser::parse(source);
+        let result = parse(source);
         let ast = result.ast.unwrap();
         let line_index = LineIndex::new(source.to_string());
 
@@ -558,7 +559,7 @@ mod tests {
     #[test]
     fn tokens_for_ternary() {
         let source = "a ? b : c";
-        let result = cel_core_parser::parse(source);
+        let result = parse(source);
         let ast = result.ast.unwrap();
         let line_index = LineIndex::new(source.to_string());
 

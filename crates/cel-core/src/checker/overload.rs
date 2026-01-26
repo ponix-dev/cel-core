@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use cel_core_common::{CelType, FunctionDecl};
+use crate::types::{CelType, FunctionDecl};
 
 /// Result of overload resolution.
 #[derive(Debug)]
@@ -261,7 +261,7 @@ pub fn finalize_type(ty: &CelType) -> CelType {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cel_core_common::OverloadDecl;
+    use crate::types::OverloadDecl;
 
     #[test]
     fn test_resolve_simple_overload() {

@@ -5,7 +5,7 @@
 //! - `FunctionKind` - distinguishes standalone functions from methods
 //! - `FunctionDef` - complete function definition with documentation
 
-use cel_core_common::CelType;
+use cel_core::CelType;
 
 /// Expected number of arguments for a function.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

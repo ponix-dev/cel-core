@@ -9,7 +9,7 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
-use cel_core_common::CelType;
+use cel_core::CelType;
 
 use crate::types::{Arity, FunctionDef, FunctionKind};
 
