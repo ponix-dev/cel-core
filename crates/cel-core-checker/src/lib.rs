@@ -33,13 +33,14 @@
 //! ```
 
 mod checker;
-mod decls;
 mod errors;
 mod overload;
 mod scope;
 mod standard_library;
 
 pub use checker::{check, CheckResult, Checker, ReferenceInfo};
-pub use decls::{FunctionDecl, OverloadDecl, VariableDecl};
 pub use errors::{CheckError, CheckErrorKind};
 pub use standard_library::STANDARD_LIBRARY;
+
+// Re-export declaration types from cel-core-common for backwards compatibility
+pub use cel_core_common::{FunctionDecl, OverloadDecl, VariableDecl};

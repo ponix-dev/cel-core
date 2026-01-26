@@ -1,9 +1,10 @@
 //! Declaration types for variables, functions, and overloads.
 //!
-//! These types mirror cel-go's `checker/decls.go` and define the type environment
+//! These types are shared between the checker (type checking) and evaluator (runtime).
+//! They mirror cel-go's `checker/decls.go` and define the type environment
 //! for CEL expressions.
 
-use cel_core_common::{CelType, CelValue};
+use crate::{CelType, CelValue};
 
 /// Variable declaration (mirrors cel-go `decls.VariableDecl`).
 ///
@@ -58,11 +59,7 @@ pub struct OverloadDecl {
 
 impl OverloadDecl {
     /// Create a new standalone function overload.
-    pub fn function(
-        id: impl Into<String>,
-        params: Vec<CelType>,
-        result: CelType,
-    ) -> Self {
+    pub fn function(id: impl Into<String>, params: Vec<CelType>, result: CelType) -> Self {
         Self {
             id: id.into(),
             params,
@@ -75,11 +72,7 @@ impl OverloadDecl {
     /// Create a new member function overload.
     ///
     /// The first parameter in `params` is the receiver type.
-    pub fn method(
-        id: impl Into<String>,
-        params: Vec<CelType>,
-        result: CelType,
-    ) -> Self {
+    pub fn method(id: impl Into<String>, params: Vec<CelType>, result: CelType) -> Self {
         Self {
             id: id.into(),
             params,
@@ -172,11 +165,8 @@ mod tests {
 
     #[test]
     fn test_overload_decl_function() {
-        let overload = OverloadDecl::function(
-            "add_int64_int64",
-            vec![CelType::Int, CelType::Int],
-            CelType::Int,
-        );
+        let overload =
+            OverloadDecl::function("add_int64_int64", vec![CelType::Int, CelType::Int], CelType::Int);
         assert_eq!(overload.id, "add_int64_int64");
         assert!(!overload.is_member);
         assert!(overload.receiver_type().is_none());
@@ -199,16 +189,8 @@ mod tests {
     #[test]
     fn test_function_decl() {
         let func = FunctionDecl::new("size")
-            .with_overload(OverloadDecl::function(
-                "size_string",
-                vec![CelType::String],
-                CelType::Int,
-            ))
-            .with_overload(OverloadDecl::method(
-                "string_size",
-                vec![CelType::String],
-                CelType::Int,
-            ));
+            .with_overload(OverloadDecl::function("size_string", vec![CelType::String], CelType::Int))
+            .with_overload(OverloadDecl::method("string_size", vec![CelType::String], CelType::Int));
 
         assert_eq!(func.name, "size");
         assert_eq!(func.overloads.len(), 2);

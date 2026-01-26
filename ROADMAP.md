@@ -142,7 +142,7 @@ cel-go uses a central `Env` struct that coordinates all phases. This is the reco
 | `env.Compile()` | `env.compile()` | ✅ Complete |
 | `env.Program()` | None | ❌ Missing |
 | `program.Eval()` | None | ❌ Missing |
-| Extension libraries | None | ❌ Missing |
+| Extension libraries | `with_extension()`, `with_all_extensions()` | ✅ Complete |
 
 ### Proposed Unified Env
 
@@ -603,10 +603,12 @@ let result = program.eval(&[("name", Value::String("test123".into()))])?;
 
 ### Milestone 3: Unified Env + Extensions
 - [x] Create `cel-core` crate with unified `Env`
-- [ ] Extension library infrastructure
-- [ ] `string_ext` - `charAt`, `indexOf`, `substring`, `format`
-- [ ] `math_ext` - `math.greatest`, `math.least`
-- [ ] `optional_ext` - `optional.of`, `optional.none`
+- [x] Extension library infrastructure (`with_extension()`, `with_all_extensions()`)
+- [x] `string_ext` - `charAt`, `indexOf`, `lastIndexOf`, `substring`, `replace`, `split`, `join`, `trim`, `lowerAscii`, `upperAscii`, `reverse`, `strings.quote`
+- [x] `math_ext` - `math.greatest`, `math.least`, `math.abs`, `math.ceil`, `math.floor`, `math.round`, `math.sign`, `math.isNaN`, `math.isInf`, `math.isFinite`, `math.bitAnd`, `math.bitOr`, `math.bitXor`, `math.bitNot`, `math.bitShiftLeft`, `math.bitShiftRight`
+- [x] `encoders_ext` - `base64.encode`, `base64.decode`
+- [x] `optional_ext` - `optional.of`, `optional.none`, `optional.ofNonZeroValue`, `hasValue`, `value`, `or`, `orValue`
+- [x] Moved `decls.rs` to `cel-core-common` for shared use
 - [ ] Conformance tests: 25/30 files passing
 
 ### Milestone 4: Evaluation

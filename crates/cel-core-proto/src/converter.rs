@@ -258,6 +258,42 @@ impl AstConverter {
                 field: field.clone(),
                 test_only: true,
             }))),
+            // cel.bind(var, init, body) is represented as a comprehension:
+            // The variable is bound via the accumulator, and the body is evaluated as the result.
+            Expr::Bind { var_name, init, body } => {
+                // Create a synthetic list with just the init value to iterate over once
+                let init_list = crate::gen::cel::expr::Expr {
+                    id: 0,
+                    expr_kind: Some(ExprKind::ListExpr(CreateList {
+                        elements: vec![self.ast_to_expr(init)],
+                        optional_indices: vec![],
+                    })),
+                };
+                // loop_condition = false (stop immediately, we only need the accumulator bound)
+                let loop_false = crate::gen::cel::expr::Expr {
+                    id: 0,
+                    expr_kind: Some(ExprKind::ConstExpr(Constant {
+                        constant_kind: Some(ConstantKind::BoolValue(false)),
+                    })),
+                };
+                // loop_step just returns the accu (identity)
+                let accu_ident = crate::gen::cel::expr::Expr {
+                    id: 0,
+                    expr_kind: Some(ExprKind::IdentExpr(Ident {
+                        name: var_name.clone(),
+                    })),
+                };
+                Some(ExprKind::ComprehensionExpr(Box::new(Comprehension {
+                    iter_var: "#unused".to_string(),
+                    iter_var2: String::new(),
+                    iter_range: Some(Box::new(init_list)),
+                    accu_var: var_name.clone(),
+                    accu_init: Some(Box::new(self.ast_to_expr(init))),
+                    loop_condition: Some(Box::new(loop_false)),
+                    loop_step: Some(Box::new(accu_ident)),
+                    result: Some(Box::new(self.ast_to_expr(body))),
+                })))
+            }
             Expr::Error => None,
         };
 

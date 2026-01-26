@@ -430,6 +430,30 @@ pub static STANDARD_MACROS: &[Macro] = &[
         expand_transform_map_4arg,
         "Transforms map entries with key, value, and filter",
     ),
+    // cel.bind - global, 3 args
+    Macro::with_description(
+        "cel.bind",
+        MacroStyle::Global,
+        ArgCount::Exact(3),
+        expand_bind,
+        "Binds a variable to a value for use in an expression",
+    ),
+    // optMap - receiver, 2 args
+    Macro::with_description(
+        "optMap",
+        MacroStyle::Receiver,
+        ArgCount::Exact(2),
+        expand_opt_map,
+        "Transforms an optional value if present",
+    ),
+    // optFlatMap - receiver, 2 args
+    Macro::with_description(
+        "optFlatMap",
+        MacroStyle::Receiver,
+        ArgCount::Exact(2),
+        expand_opt_flat_map,
+        "Chains optional operations",
+    ),
 ];
 
 // === Helper Functions ===
@@ -1198,6 +1222,261 @@ fn expand_transform_map_impl(
     ))
 }
 
+// === cel.bind() Macro ===
+
+/// Expand `cel.bind(var, init, body)` to `Expr::Bind`.
+///
+/// This macro binds a variable to a value for use within a scoped expression.
+/// The variable is only visible within the body expression.
+///
+/// # Example
+/// `cel.bind(msg, "hello", msg + msg)` evaluates to `"hellohello"`
+fn expand_bind(
+    ctx: &mut MacroContext,
+    span: Span,
+    _receiver: Option<SpannedExpr>,
+    args: Vec<SpannedExpr>,
+) -> MacroExpansion {
+    if args.len() != 3 {
+        return MacroExpansion::Error(format!(
+            "cel.bind() requires 3 arguments, got {}",
+            args.len()
+        ));
+    }
+
+    // First argument must be an identifier (the variable name)
+    let var_name = match &args[0].node {
+        Expr::Ident(name) => name.clone(),
+        _ => {
+            return MacroExpansion::Error(
+                "cel.bind() first argument must be an identifier".to_string(),
+            )
+        }
+    };
+
+    // Second argument is the initializer expression
+    let init = args[1].clone();
+
+    // Third argument is the body expression
+    let body = args[2].clone();
+
+    let call_id = ctx.next_id();
+    ctx.store_macro_call(call_id, &span, &args[0], "cel.bind", &args);
+
+    MacroExpansion::Expanded(Spanned::new(
+        call_id,
+        Expr::Bind {
+            var_name,
+            init: Box::new(init),
+            body: Box::new(body),
+        },
+        span,
+    ))
+}
+
+// === optMap() and optFlatMap() Helper Functions ===
+
+/// Build a method call: receiver.method(args)
+fn build_method_call(
+    ctx: &mut MacroContext,
+    span: &Span,
+    receiver: SpannedExpr,
+    method: &str,
+    args: Vec<SpannedExpr>,
+) -> SpannedExpr {
+    let member = synthetic(
+        ctx,
+        Expr::Member {
+            expr: Box::new(receiver),
+            field: method.to_string(),
+            optional: false,
+        },
+        span.clone(),
+    );
+
+    synthetic(
+        ctx,
+        Expr::Call {
+            expr: Box::new(member),
+            args,
+        },
+        span.clone(),
+    )
+}
+
+/// Build: optional.of(expr)
+fn build_optional_of(ctx: &mut MacroContext, span: &Span, expr: SpannedExpr) -> SpannedExpr {
+    let optional_ident = synthetic(ctx, Expr::Ident("optional".to_string()), span.clone());
+    let optional_of_member = synthetic(
+        ctx,
+        Expr::Member {
+            expr: Box::new(optional_ident),
+            field: "of".to_string(),
+            optional: false,
+        },
+        span.clone(),
+    );
+
+    synthetic(
+        ctx,
+        Expr::Call {
+            expr: Box::new(optional_of_member),
+            args: vec![expr],
+        },
+        span.clone(),
+    )
+}
+
+/// Build: optional.none()
+fn build_optional_none(ctx: &mut MacroContext, span: &Span) -> SpannedExpr {
+    let optional_ident = synthetic(ctx, Expr::Ident("optional".to_string()), span.clone());
+    let optional_none_member = synthetic(
+        ctx,
+        Expr::Member {
+            expr: Box::new(optional_ident),
+            field: "none".to_string(),
+            optional: false,
+        },
+        span.clone(),
+    );
+
+    synthetic(
+        ctx,
+        Expr::Call {
+            expr: Box::new(optional_none_member),
+            args: vec![],
+        },
+        span.clone(),
+    )
+}
+
+// === optMap() Macro ===
+
+/// Expand `optional.optMap(var, expr)` to:
+/// ```
+/// receiver.hasValue()
+///     ? cel.bind(var, receiver.value(), optional.of(expr))
+///     : optional.none()
+/// ```
+fn expand_opt_map(
+    ctx: &mut MacroContext,
+    span: Span,
+    receiver: Option<SpannedExpr>,
+    args: Vec<SpannedExpr>,
+) -> MacroExpansion {
+    let receiver = match receiver {
+        Some(r) => r,
+        None => return MacroExpansion::Error("optMap() requires a receiver".to_string()),
+    };
+
+    let iter_var = match extract_iter_var(ctx, &args[0]) {
+        Some(v) => v,
+        None => return MacroExpansion::Error("first argument must be an identifier".to_string()),
+    };
+    let transform = args[1].clone();
+
+    let call_id = ctx.next_id();
+    ctx.store_macro_call(call_id, &span, &receiver, "optMap", &args);
+
+    // Build: receiver.hasValue()
+    let has_value_call = build_method_call(ctx, &span, receiver.clone(), "hasValue", vec![]);
+
+    // Build: receiver.value()
+    let value_call = build_method_call(ctx, &span, receiver, "value", vec![]);
+
+    // Build: optional.of(transform)
+    let wrapped_result = build_optional_of(ctx, &span, transform);
+
+    // Build: cel.bind(var, receiver.value(), optional.of(transform))
+    let bind_expr = synthetic(
+        ctx,
+        Expr::Bind {
+            var_name: iter_var,
+            init: Box::new(value_call),
+            body: Box::new(wrapped_result),
+        },
+        span.clone(),
+    );
+
+    // Build: optional.none()
+    let none_call = build_optional_none(ctx, &span);
+
+    // Build ternary: hasValue ? bind : none
+    MacroExpansion::Expanded(Spanned::new(
+        call_id,
+        Expr::Ternary {
+            cond: Box::new(has_value_call),
+            then_expr: Box::new(bind_expr),
+            else_expr: Box::new(none_call),
+        },
+        span,
+    ))
+}
+
+// === optFlatMap() Macro ===
+
+/// Expand `optional.optFlatMap(var, expr)` to:
+/// ```
+/// receiver.hasValue()
+///     ? cel.bind(var, receiver.value(), expr)
+///     : optional.none()
+/// ```
+///
+/// Note: Unlike optMap, this does NOT wrap the result in optional.of()
+/// since expr is expected to already return an optional.
+fn expand_opt_flat_map(
+    ctx: &mut MacroContext,
+    span: Span,
+    receiver: Option<SpannedExpr>,
+    args: Vec<SpannedExpr>,
+) -> MacroExpansion {
+    let receiver = match receiver {
+        Some(r) => r,
+        None => return MacroExpansion::Error("optFlatMap() requires a receiver".to_string()),
+    };
+
+    let iter_var = match extract_iter_var(ctx, &args[0]) {
+        Some(v) => v,
+        None => return MacroExpansion::Error("first argument must be an identifier".to_string()),
+    };
+    let transform = args[1].clone();
+
+    let call_id = ctx.next_id();
+    ctx.store_macro_call(call_id, &span, &receiver, "optFlatMap", &args);
+
+    // Build: receiver.hasValue()
+    let has_value_call = build_method_call(ctx, &span, receiver.clone(), "hasValue", vec![]);
+
+    // Build: receiver.value()
+    let value_call = build_method_call(ctx, &span, receiver, "value", vec![]);
+
+    // Build: cel.bind(var, receiver.value(), transform)
+    // Note: transform is NOT wrapped in optional.of()
+    let bind_expr = synthetic(
+        ctx,
+        Expr::Bind {
+            var_name: iter_var,
+            init: Box::new(value_call),
+            body: Box::new(transform),
+        },
+        span.clone(),
+    );
+
+    // Build: optional.none()
+    let none_call = build_optional_none(ctx, &span);
+
+    // Build ternary: hasValue ? bind : none
+    MacroExpansion::Expanded(Spanned::new(
+        call_id,
+        Expr::Ternary {
+            cond: Box::new(has_value_call),
+            then_expr: Box::new(bind_expr),
+            else_expr: Box::new(none_call),
+        },
+        span,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1285,6 +1564,46 @@ mod tests {
         let registry = MacroRegistry::standard();
         assert!(registry.contains("has"));
         assert!(registry.contains("all"));
+        assert!(registry.contains("cel.bind"));
         assert!(!registry.contains("nonexistent"));
+    }
+
+    #[test]
+    fn test_cel_bind_macro_registered() {
+        let registry = MacroRegistry::standard();
+        assert!(registry.lookup("cel.bind", 3, false).is_some());
+        // cel.bind is global, not a receiver macro
+        assert!(registry.lookup("cel.bind", 3, true).is_none());
+    }
+
+    #[test]
+    fn test_opt_map_macro_registered() {
+        let registry = MacroRegistry::standard();
+        // optMap is a receiver macro with 2 args
+        assert!(registry.lookup("optMap", 2, true).is_some());
+        // Should not be found as global
+        assert!(registry.lookup("optMap", 2, false).is_none());
+        // Should not match wrong arg count
+        assert!(registry.lookup("optMap", 1, true).is_none());
+        assert!(registry.lookup("optMap", 3, true).is_none());
+    }
+
+    #[test]
+    fn test_opt_flat_map_macro_registered() {
+        let registry = MacroRegistry::standard();
+        // optFlatMap is a receiver macro with 2 args
+        assert!(registry.lookup("optFlatMap", 2, true).is_some());
+        // Should not be found as global
+        assert!(registry.lookup("optFlatMap", 2, false).is_none());
+        // Should not match wrong arg count
+        assert!(registry.lookup("optFlatMap", 1, true).is_none());
+        assert!(registry.lookup("optFlatMap", 3, true).is_none());
+    }
+
+    #[test]
+    fn test_registry_contains_opt_macros() {
+        let registry = MacroRegistry::standard();
+        assert!(registry.contains("optMap"));
+        assert!(registry.contains("optFlatMap"));
     }
 }
