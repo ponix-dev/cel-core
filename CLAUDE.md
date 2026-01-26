@@ -17,7 +17,7 @@ cargo build
 cargo build --release
 
 # Build specific crate
-cargo build -p cel-core-parser
+cargo build -p cel-core
 ```
 
 ### Testing
@@ -72,18 +72,22 @@ This fetches the google/cel-spec repository required for running official confor
 
 This is a multi-crate Cargo workspace:
 
-- **`cel-core-parser`**: Core CEL expression parser
-  - Lexer using `logos` crate
-  - Hand-written recursive descent parser
-  - AST types with span tracking for diagnostics
-  - Error recovery with partial AST construction
+- **`cel-core`**: Main CEL library (primary public API)
+  - Unified `Env` builder for configuring CEL environments
+  - `Ast` wrapper for parsed/checked expressions
+  - Internal modules:
+    - `types/` - CelType, CelValue, AST types, declarations
+    - `parser/` - Lexer (using `logos`), recursive descent parser, macro expansion
+    - `checker/` - Type checker, overload resolution, standard library
+    - `ext/` - Extension libraries (strings, math, encoders, optionals)
+  - Re-exports common types for convenience
 
-- **`cel-core-proto`**: Protobuf types and conversion
+- **`cel-core-proto`**: Protobuf types and conversion (optional)
   - Generated protobuf types from cel-spec
-  - Bidirectional conversion between parser AST and proto format
-  - Wire compatibility with other CEL implementations
+  - Bidirectional conversion between AST and proto format
+  - Wire compatibility with other CEL implementations (cel-go, cel-cpp)
 
-- **`cel-core-lsp`**: Language Server Protocol implementation
+- **`cel-core-lsp`**: Language Server Protocol implementation (binary)
   - Uses `tower-lsp` for LSP protocol
   - Internal module structure:
     - `document/` - Document state management and text utilities
@@ -129,14 +133,47 @@ mise run proto:generate
 
 This generates code into `crates/cel-core-proto/src/gen/`.
 
-## Parser API
+## CEL API
 
-The parser provides a simple API:
+### High-level API (Recommended)
 
 ```rust
-use cel_core_parser::{parse, ParseResult, Expr, SpannedExpr};
+use cel_core::{Env, CelType};
 
-let result: ParseResult = cel_core_parser::parse("x + y > 10");
+// Create environment with standard library
+let env = Env::with_standard_library()
+    .with_variable("x", CelType::Int)
+    .with_variable("name", CelType::String);
+
+// Parse and type-check
+let ast = env.compile("x > 10 && name.startsWith('test')")?;
+
+// Access type information
+assert_eq!(ast.result_type(), Some(&CelType::Bool));
+```
+
+### Proto Conversion (for interop with cel-go/cel-cpp)
+
+```rust
+use cel_core::{Env, CelType};
+use cel_core_proto::{to_parsed_expr, to_checked_expr};
+
+let env = Env::with_standard_library()
+    .with_variable("x", CelType::Int);
+
+let ast = env.compile("x + 1")?;
+
+// Convert to proto format for wire compatibility
+let parsed = to_parsed_expr(ast.expr(), ast.source());
+let checked = to_checked_expr(ast.type_info().unwrap(), &parsed);
+```
+
+### Low-level Parser API
+
+```rust
+use cel_core::{parse, ParseResult, types::Expr, SpannedExpr};
+
+let result: ParseResult = parse("x + y > 10");
 
 // Check for errors
 if result.is_err() {
@@ -167,6 +204,8 @@ if let Some(ast) = result.ast {
 - Errors include span information for diagnostic display
 
 ### Testing
-- Parser tests in `crates/cel-core-parser/tests/`
-- Use `assert_parses()` helper for successful parse tests
-- Use `assert_parse_error()` helper for error case tests
+- Unit tests in each crate's `src/` directory
+- Integration tests in `crates/cel-core/tests/`
+- Conformance tests in `crates/cel-core-conformance/`
+- Run `mise run test` for all tests (excluding conformance)
+- Run `mise run conformance:test` for CEL spec conformance tests

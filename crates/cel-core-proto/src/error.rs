@@ -20,4 +20,8 @@ pub enum ConversionError {
     /// A constant value is invalid or malformed.
     #[error("expr {expr_id}: invalid constant: {message}")]
     InvalidConstant { expr_id: i64, message: String },
+
+    /// The AST has not been type-checked, but a checked conversion was requested.
+    #[error("AST has not been type-checked")]
+    NotChecked,
 }

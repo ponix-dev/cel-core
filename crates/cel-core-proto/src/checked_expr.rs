@@ -5,8 +5,8 @@
 
 use std::collections::HashMap;
 
-use cel_core_checker::{CheckResult, ReferenceInfo};
-use cel_core_common::{CelType, SpannedExpr};
+use cel_core::checker::{CheckResult, ReferenceInfo};
+use cel_core::types::{CelType, SpannedExpr};
 
 use crate::error::ConversionError;
 use crate::gen::cel::expr::{CheckedExpr, ParsedExpr, Reference};
@@ -30,12 +30,11 @@ use crate::type_conversion::{cel_type_from_proto, cel_type_to_proto, cel_value_f
 ///
 /// ```
 /// use cel_core_proto::{to_parsed_expr, to_checked_expr};
-/// use cel_core_checker::{check, STANDARD_LIBRARY};
-/// use cel_core_common::CelType;
+/// use cel_core::{check, STANDARD_LIBRARY, CelType};
 /// use std::collections::HashMap;
 ///
 /// let source = "x + 1";
-/// let ast = cel_core_parser::parse(source).ast.unwrap();
+/// let ast = cel_core::parse(source).ast.unwrap();
 /// let parsed = to_parsed_expr(&ast, source);
 ///
 /// let mut variables = HashMap::new();
@@ -95,12 +94,11 @@ pub fn to_checked_expr(check_result: &CheckResult, parsed_expr: &ParsedExpr) -> 
 ///
 /// ```
 /// use cel_core_proto::to_checked_expr_from_ast;
-/// use cel_core_checker::{check, STANDARD_LIBRARY};
-/// use cel_core_common::CelType;
+/// use cel_core::{check, STANDARD_LIBRARY, CelType};
 /// use std::collections::HashMap;
 ///
 /// let source = "x + 1";
-/// let ast = cel_core_parser::parse(source).ast.unwrap();
+/// let ast = cel_core::parse(source).ast.unwrap();
 ///
 /// let mut variables = HashMap::new();
 /// variables.insert("x".to_string(), CelType::Int);
@@ -181,9 +179,9 @@ fn reference_info_from_proto(r: &Reference) -> ReferenceInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cel_core_checker::{check, STANDARD_LIBRARY};
+    use cel_core::{check, FunctionDecl, STANDARD_LIBRARY};
 
-    fn standard_functions() -> HashMap<String, cel_core_common::FunctionDecl> {
+    fn standard_functions() -> HashMap<String, FunctionDecl> {
         STANDARD_LIBRARY
             .iter()
             .map(|f| (f.name.clone(), f.clone()))
@@ -193,7 +191,7 @@ mod tests {
     #[test]
     fn test_to_checked_expr_simple() {
         let source = "1 + 2";
-        let ast = cel_core_parser::parse(source).ast.unwrap();
+        let ast = cel_core::parse(source).ast.unwrap();
         let parsed = crate::to_parsed_expr(&ast, source);
 
         let variables = HashMap::new();
@@ -215,7 +213,7 @@ mod tests {
     #[test]
     fn test_to_checked_expr_with_variable() {
         let source = "x + 1";
-        let ast = cel_core_parser::parse(source).ast.unwrap();
+        let ast = cel_core::parse(source).ast.unwrap();
         let parsed = crate::to_parsed_expr(&ast, source);
 
         let mut variables = HashMap::new();
@@ -234,7 +232,7 @@ mod tests {
     #[test]
     fn test_to_checked_expr_from_ast() {
         let source = "true && false";
-        let ast = cel_core_parser::parse(source).ast.unwrap();
+        let ast = cel_core::parse(source).ast.unwrap();
 
         let variables = HashMap::new();
         let functions = standard_functions();
@@ -250,7 +248,7 @@ mod tests {
     fn test_dyn_types_omitted() {
         // When a type is Dyn, it should be omitted from the type_map
         let source = "x";
-        let ast = cel_core_parser::parse(source).ast.unwrap();
+        let ast = cel_core::parse(source).ast.unwrap();
         let parsed = crate::to_parsed_expr(&ast, source);
 
         // Don't declare x - it will have type Error or Dyn

@@ -8,14 +8,14 @@
 //!
 //! ```
 //! use cel_core::unparser::ast_to_string;
-//! use cel_core_parser::parse;
+//! use cel_core::parser::parse;
 //!
 //! let ast = parse("x + 1").ast.unwrap();
 //! let source = ast_to_string(&ast);
 //! assert_eq!(source, "x + 1");
 //! ```
 
-use cel_core_common::{BinaryOp, Expr, SpannedExpr, UnaryOp};
+use crate::types::{BinaryOp, Expr, ListElement, MapEntry, SpannedExpr, StructField, UnaryOp};
 
 /// Convert a CEL AST to source text.
 ///
@@ -183,7 +183,7 @@ fn escape_bytes(bytes: &[u8]) -> String {
 }
 
 /// Unparse a list expression.
-fn unparse_list(elements: &[cel_core_common::ListElement]) -> String {
+fn unparse_list(elements: &[ListElement]) -> String {
     let items: Vec<String> = elements
         .iter()
         .map(|elem| {
@@ -198,7 +198,7 @@ fn unparse_list(elements: &[cel_core_common::ListElement]) -> String {
 }
 
 /// Unparse a map expression.
-fn unparse_map(entries: &[cel_core_common::MapEntry]) -> String {
+fn unparse_map(entries: &[MapEntry]) -> String {
     let items: Vec<String> = entries
         .iter()
         .map(|entry| {
@@ -294,7 +294,7 @@ fn unparse_call(expr: &SpannedExpr, args: &[SpannedExpr]) -> String {
 }
 
 /// Unparse a struct literal.
-fn unparse_struct(type_name: &SpannedExpr, fields: &[cel_core_common::StructField]) -> String {
+fn unparse_struct(type_name: &SpannedExpr, fields: &[StructField]) -> String {
     let type_str = unparse(&type_name.node);
     let fields_str: Vec<String> = fields
         .iter()
@@ -415,7 +415,7 @@ fn unparse_comprehension(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cel_core_parser::parse;
+    use crate::parser::parse;
 
     fn roundtrip(source: &str) -> String {
         let ast = parse(source).ast.expect("parse failed");

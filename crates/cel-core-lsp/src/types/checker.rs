@@ -1,6 +1,6 @@
 //! Type checking utilities for CEL expressions.
 
-use cel_core_common::{CelType, Expr, ListElement, MapEntry};
+use cel_core::types::{CelType, Expr, ListElement, MapEntry};
 
 use super::builtins::get_builtin;
 use super::function::{Arity, FunctionKind};
@@ -266,6 +266,7 @@ pub fn get_allowed_receiver_types(name: &str) -> Option<&'static [CelType]> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cel_core::SpannedExpr;
 
     #[test]
     fn infer_literal_types() {
@@ -293,8 +294,7 @@ mod tests {
 
     #[test]
     fn infer_homogeneous_list_type() {
-        use cel_core_common::SpannedExpr;
-
+        
         let items = vec![
             ListElement {
                 expr: SpannedExpr { id: 1, node: Expr::Int(1), span: 0..1 },
@@ -315,8 +315,7 @@ mod tests {
 
     #[test]
     fn infer_heterogeneous_list_type() {
-        use cel_core_common::SpannedExpr;
-
+        
         let items = vec![
             ListElement {
                 expr: SpannedExpr { id: 1, node: Expr::Int(1), span: 0..1 },
@@ -340,8 +339,7 @@ mod tests {
 
     #[test]
     fn infer_homogeneous_map_type() {
-        use cel_core_common::SpannedExpr;
-
+        
         let entries = vec![
             MapEntry {
                 key: SpannedExpr { id: 1, node: Expr::String("a".to_string()), span: 0..1 },

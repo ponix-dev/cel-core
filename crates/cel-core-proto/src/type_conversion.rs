@@ -1,8 +1,8 @@
 //! Conversion between CEL native types and proto types.
 //!
 //! This module provides bidirectional conversion between:
-//! - `cel_core_common::CelType` and proto `Type`
-//! - `cel_core_common::CelValue` and proto `Constant`
+//! - `cel_core::CelType` and proto `Type`
+//! - `cel_core::CelValue` and proto `Constant`
 //!
 //! ## Proto Round-Trip Limitations
 //!
@@ -24,7 +24,7 @@ use crate::gen::cel::expr::r#type::{
     TypeKind as ProtoTypeKind, WellKnownType as ProtoWellKnownType,
 };
 use crate::gen::cel::expr::{Constant as ProtoConstant, Type as ProtoType};
-use cel_core_common::{CelType, CelValue};
+use cel_core::types::{CelType, CelValue};
 use std::sync::Arc;
 
 /// Convert a proto Type to a CelType.

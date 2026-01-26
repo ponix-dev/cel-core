@@ -6,7 +6,7 @@
 use prost_reflect::prost::Message;
 use prost_reflect::{DescriptorPool, EnumDescriptor, FieldDescriptor, Kind, MessageDescriptor};
 
-use crate::CelType;
+use crate::types::CelType;
 
 /// Registry for protobuf type information.
 ///
@@ -65,7 +65,10 @@ impl ProtoTypeRegistry {
     ///
     /// The bytes should be serialized `FileDescriptorSet` proto.
     /// Any duplicates of files already in the pool will be skipped.
-    pub fn add_file_descriptor_set(&mut self, bytes: &[u8]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub fn add_file_descriptor_set(
+        &mut self,
+        bytes: &[u8],
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let fds = prost_reflect::prost_types::FileDescriptorSet::decode(bytes)?;
         self.pool.add_file_descriptor_set(fds)?;
         Ok(())
@@ -153,7 +156,11 @@ impl ProtoTypeRegistry {
                 enum_candidates.push(format!("{}.{}", container, enum_parts.join(".")));
                 let mut container_parts: Vec<&str> = container.split('.').collect();
                 while !container_parts.is_empty() {
-                    enum_candidates.push(format!("{}.{}", container_parts.join("."), enum_parts.join(".")));
+                    enum_candidates.push(format!(
+                        "{}.{}",
+                        container_parts.join("."),
+                        enum_parts.join(".")
+                    ));
                     container_parts.pop();
                 }
             }
@@ -234,9 +241,12 @@ impl ProtoTypeRegistry {
     fn kind_to_cel_type(&self, kind: Kind) -> CelType {
         match kind {
             Kind::Bool => CelType::Bool,
-            Kind::Int32 | Kind::Sint32 | Kind::Sfixed32 | Kind::Int64 | Kind::Sint64 | Kind::Sfixed64 => {
-                CelType::Int
-            }
+            Kind::Int32
+            | Kind::Sint32
+            | Kind::Sfixed32
+            | Kind::Int64
+            | Kind::Sint64
+            | Kind::Sfixed64 => CelType::Int,
             Kind::Uint32 | Kind::Fixed32 | Kind::Uint64 | Kind::Fixed64 => CelType::UInt,
             Kind::Float | Kind::Double => CelType::Double,
             Kind::String => CelType::String,

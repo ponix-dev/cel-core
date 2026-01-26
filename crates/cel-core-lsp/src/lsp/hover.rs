@@ -1,6 +1,6 @@
 //! Hover information for CEL expressions.
 
-use cel_core_common::{Expr, SpannedExpr};
+use cel_core::{types::Expr, SpannedExpr};
 use tower_lsp::lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position};
 
 use crate::document::{LineIndex, ProtoDocumentState};
@@ -257,11 +257,12 @@ pub fn hover_at_position_proto(state: &ProtoDocumentState, position: Position) -
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cel_core::parse;
 
     #[test]
     fn no_hover_for_number() {
         let source = "42";
-        let result = cel_core_parser::parse(source);
+        let result = parse(source);
         let ast = result.ast.unwrap();
         let line_index = LineIndex::new(source.to_string());
 
@@ -272,7 +273,7 @@ mod tests {
     #[test]
     fn hover_for_function_call() {
         let source = "size(x)";
-        let result = cel_core_parser::parse(source);
+        let result = parse(source);
         let ast = result.ast.unwrap();
         let line_index = LineIndex::new(source.to_string());
 
@@ -290,7 +291,7 @@ mod tests {
     #[test]
     fn hover_for_undefined_variable() {
         let source = "x";
-        let result = cel_core_parser::parse(source);
+        let result = parse(source);
         let ast = result.ast.unwrap();
         let line_index = LineIndex::new(source.to_string());
         let validation_errors = vec![ValidationError {

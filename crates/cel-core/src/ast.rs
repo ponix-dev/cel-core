@@ -10,51 +10,52 @@
 //! use cel_core::{Env, Ast};
 //!
 //! let env = Env::with_standard_library()
-//!     .with_variable("x", cel_core_common::CelType::Int);
+//!     .with_variable("x", cel_core::CelType::Int);
 //!
 //! // Compile returns a checked Ast
 //! let ast = env.compile("x + 1").unwrap();
 //! assert!(ast.is_checked());
 //!
-//! // Convert to proto format
-//! let checked_proto = ast.to_checked_expr().unwrap();
-//! let parsed_proto = ast.to_parsed_expr();
+//! // Convert to CEL string
+//! let cel_string = ast.to_cel_string();
+//! ```
 //!
-//! // Roundtrip from proto
-//! let from_proto = Ast::from_checked_expr(&checked_proto).unwrap();
-//! assert!(from_proto.is_checked());
+//! # Proto Conversion
+//!
+//! For proto wire format conversion (interop with cel-go, cel-cpp), use the
+//! `cel-core-proto` crate:
+//!
+//! ```ignore
+//! use cel_core_proto::AstToProto;
+//!
+//! let parsed_expr = ast.to_parsed_expr();
+//! let checked_expr = ast.to_checked_expr()?;
 //! ```
 
 use std::sync::Arc;
 
-use cel_core_checker::CheckResult;
-use cel_core_common::{CelType, SpannedExpr};
+use crate::checker::CheckResult;
+use crate::types::{CelType, SpannedExpr};
 
 /// Error type for Ast operations.
 #[derive(Debug, Clone)]
 pub enum AstError {
     /// The AST has not been type-checked, but a checked operation was requested.
     NotChecked,
-    /// Error converting to/from proto format.
-    Conversion(String),
+    /// Error during conversion or other operations.
+    Other(String),
 }
 
 impl std::fmt::Display for AstError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             AstError::NotChecked => write!(f, "AST has not been type-checked"),
-            AstError::Conversion(msg) => write!(f, "conversion error: {}", msg),
+            AstError::Other(msg) => write!(f, "{}", msg),
         }
     }
 }
 
 impl std::error::Error for AstError {}
-
-impl From<cel_core_proto::ConversionError> for AstError {
-    fn from(err: cel_core_proto::ConversionError) -> Self {
-        AstError::Conversion(err.to_string())
-    }
-}
 
 /// Unified AST representation matching cel-go's Ast type.
 ///
@@ -65,15 +66,10 @@ impl From<cel_core_proto::ConversionError> for AstError {
 ///
 /// - Use `Env::compile()` to get a checked `Ast`
 /// - Use `Env::parse_only()` to get an unchecked `Ast`
-/// - Use `Ast::from_checked_expr()` or `Ast::from_parsed_expr()` to create from proto
 ///
 /// # Proto Conversion
 ///
-/// The `Ast` provides cel-go style methods for proto conversion:
-/// - `to_checked_expr()` - Convert to proto CheckedExpr (requires checked)
-/// - `to_parsed_expr()` - Convert to proto ParsedExpr (works for both)
-/// - `from_checked_expr()` - Create from proto CheckedExpr
-/// - `from_parsed_expr()` - Create from proto ParsedExpr
+/// For proto wire format conversion, use the `cel-core-proto` crate directly.
 #[derive(Debug, Clone)]
 pub struct Ast {
     /// The expression tree.
@@ -155,123 +151,6 @@ impl Ast {
     pub fn to_cel_string(&self) -> String {
         crate::unparser::ast_to_string(&self.expr)
     }
-
-    // ==================== Proto Conversion ====================
-
-    /// Convert to proto CheckedExpr.
-    ///
-    /// Returns an error if the AST has not been type-checked.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use cel_core::Env;
-    ///
-    /// let env = Env::with_standard_library();
-    /// let ast = env.compile("1 + 2").unwrap();
-    /// let checked_proto = ast.to_checked_expr().unwrap();
-    /// ```
-    pub fn to_checked_expr(&self) -> Result<cel_core_proto::CheckedExpr, AstError> {
-        let type_info = self.type_info.as_ref().ok_or(AstError::NotChecked)?;
-        let parsed = cel_core_proto::to_parsed_expr(&self.expr, &self.source);
-        Ok(cel_core_proto::to_checked_expr(type_info, &parsed))
-    }
-
-    /// Convert to proto ParsedExpr.
-    ///
-    /// Works for both checked and unchecked ASTs.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use cel_core::Env;
-    ///
-    /// let env = Env::with_standard_library();
-    /// let ast = env.compile("1 + 2").unwrap();
-    /// let parsed_proto = ast.to_parsed_expr();
-    /// ```
-    pub fn to_parsed_expr(&self) -> cel_core_proto::ParsedExpr {
-        cel_core_proto::to_parsed_expr(&self.expr, &self.source)
-    }
-
-    /// Create Ast from proto CheckedExpr.
-    ///
-    /// The resulting Ast will be checked (is_checked() returns true).
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use cel_core::{Env, Ast};
-    ///
-    /// let env = Env::with_standard_library();
-    /// let ast = env.compile("1 + 2").unwrap();
-    /// let checked_proto = ast.to_checked_expr().unwrap();
-    ///
-    /// let roundtripped = Ast::from_checked_expr(&checked_proto).unwrap();
-    /// assert!(roundtripped.is_checked());
-    /// ```
-    pub fn from_checked_expr(
-        checked: &cel_core_proto::CheckedExpr,
-    ) -> Result<Self, AstError> {
-        // Extract expression from CheckedExpr
-        let parsed = cel_core_proto::ParsedExpr {
-            expr: checked.expr.clone(),
-            source_info: checked.source_info.clone(),
-        };
-        let expr = cel_core_proto::from_parsed_expr(&parsed)?;
-
-        // Reconstruct CheckResult from type_map and reference_map
-        let check_result = cel_core_proto::check_result_from_proto(checked)?;
-
-        // Reconstruct source from source_info
-        let source = reconstruct_source(checked.source_info.as_ref());
-
-        Ok(Self {
-            expr,
-            source: source.into(),
-            type_info: Some(check_result),
-        })
-    }
-
-    /// Create Ast from proto ParsedExpr.
-    ///
-    /// The resulting Ast will be unchecked (is_checked() returns false).
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use cel_core::{Env, Ast};
-    ///
-    /// let env = Env::with_standard_library();
-    /// let ast = env.compile("1 + 2").unwrap();
-    /// let parsed_proto = ast.to_parsed_expr();
-    ///
-    /// let roundtripped = Ast::from_parsed_expr(&parsed_proto).unwrap();
-    /// assert!(!roundtripped.is_checked());
-    /// ```
-    pub fn from_parsed_expr(
-        parsed: &cel_core_proto::ParsedExpr,
-    ) -> Result<Self, AstError> {
-        let expr = cel_core_proto::from_parsed_expr(parsed)?;
-        let source = reconstruct_source(parsed.source_info.as_ref());
-
-        Ok(Self {
-            expr,
-            source: source.into(),
-            type_info: None,
-        })
-    }
-}
-
-/// Reconstruct source text from SourceInfo.
-///
-/// The proto SourceInfo contains line_offsets but not the actual source text.
-/// We return an empty string since the original source is not preserved in the proto format.
-fn reconstruct_source(source_info: Option<&cel_core_proto::SourceInfo>) -> String {
-    // SourceInfo doesn't contain the original source text, only line_offsets.
-    // Return empty string - the source is not recoverable from proto.
-    let _ = source_info;
-    String::new()
 }
 
 #[cfg(test)]
@@ -301,73 +180,6 @@ mod tests {
 
         let unchecked = env.parse_only("x + 1").unwrap();
         assert!(unchecked.result_type().is_none());
-    }
-
-    #[test]
-    fn test_ast_to_checked_expr() {
-        let env = Env::with_standard_library()
-            .with_variable("x", CelType::Int);
-
-        let ast = env.compile("x + 1").unwrap();
-        let checked_proto = ast.to_checked_expr().unwrap();
-
-        assert!(checked_proto.expr.is_some());
-        assert!(!checked_proto.type_map.is_empty());
-        assert!(!checked_proto.reference_map.is_empty());
-    }
-
-    #[test]
-    fn test_ast_to_checked_expr_fails_if_unchecked() {
-        let env = Env::with_standard_library();
-
-        let ast = env.parse_only("1 + 2").unwrap();
-        let result = ast.to_checked_expr();
-
-        assert!(matches!(result, Err(AstError::NotChecked)));
-    }
-
-    #[test]
-    fn test_ast_to_parsed_expr() {
-        let env = Env::with_standard_library()
-            .with_variable("x", CelType::Int);
-
-        let ast = env.compile("x + 1").unwrap();
-        let parsed_proto = ast.to_parsed_expr();
-
-        assert!(parsed_proto.expr.is_some());
-        assert!(parsed_proto.source_info.is_some());
-
-        // Also works for unchecked
-        let unchecked = env.parse_only("x + 1").unwrap();
-        let parsed_proto = unchecked.to_parsed_expr();
-        assert!(parsed_proto.expr.is_some());
-    }
-
-    #[test]
-    fn test_ast_roundtrip_checked() {
-        let env = Env::with_standard_library()
-            .with_variable("x", CelType::Int);
-
-        let ast = env.compile("x + 1").unwrap();
-        let checked_proto = ast.to_checked_expr().unwrap();
-
-        let roundtripped = Ast::from_checked_expr(&checked_proto).unwrap();
-        assert!(roundtripped.is_checked());
-
-        // Type info should be preserved
-        assert!(roundtripped.type_info().is_some());
-        assert!(!roundtripped.type_info().unwrap().type_map.is_empty());
-    }
-
-    #[test]
-    fn test_ast_roundtrip_parsed() {
-        let env = Env::with_standard_library();
-
-        let ast = env.parse_only("1 + 2").unwrap();
-        let parsed_proto = ast.to_parsed_expr();
-
-        let roundtripped = Ast::from_parsed_expr(&parsed_proto).unwrap();
-        assert!(!roundtripped.is_checked());
     }
 
     #[test]

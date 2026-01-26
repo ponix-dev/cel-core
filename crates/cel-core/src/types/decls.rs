@@ -4,7 +4,7 @@
 //! They mirror cel-go's `checker/decls.go` and define the type environment
 //! for CEL expressions.
 
-use crate::{CelType, CelValue};
+use crate::types::{CelType, CelValue};
 
 /// Variable declaration (mirrors cel-go `decls.VariableDecl`).
 ///
@@ -165,8 +165,11 @@ mod tests {
 
     #[test]
     fn test_overload_decl_function() {
-        let overload =
-            OverloadDecl::function("add_int64_int64", vec![CelType::Int, CelType::Int], CelType::Int);
+        let overload = OverloadDecl::function(
+            "add_int64_int64",
+            vec![CelType::Int, CelType::Int],
+            CelType::Int,
+        );
         assert_eq!(overload.id, "add_int64_int64");
         assert!(!overload.is_member);
         assert!(overload.receiver_type().is_none());
@@ -189,8 +192,16 @@ mod tests {
     #[test]
     fn test_function_decl() {
         let func = FunctionDecl::new("size")
-            .with_overload(OverloadDecl::function("size_string", vec![CelType::String], CelType::Int))
-            .with_overload(OverloadDecl::method("string_size", vec![CelType::String], CelType::Int));
+            .with_overload(OverloadDecl::function(
+                "size_string",
+                vec![CelType::String],
+                CelType::Int,
+            ))
+            .with_overload(OverloadDecl::method(
+                "string_size",
+                vec![CelType::String],
+                CelType::Int,
+            ));
 
         assert_eq!(func.name, "size");
         assert_eq!(func.overloads.len(), 2);

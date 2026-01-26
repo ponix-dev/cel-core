@@ -8,7 +8,7 @@
 //! - `base64.encode(bytes) -> string` - Encodes bytes to base64 string
 //! - `base64.decode(string) -> bytes` - Decodes base64 string to bytes
 
-use crate::{CelType, FunctionDecl, OverloadDecl};
+use crate::types::{CelType, FunctionDecl, OverloadDecl};
 
 /// Returns the encoders extension library function declarations.
 pub fn encoders_extension() -> Vec<FunctionDecl> {

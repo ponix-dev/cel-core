@@ -7,7 +7,7 @@
 //!
 //! ```
 //! use cel_core::Env;
-//! use cel_core_common::CelType;
+//! use cel_core::CelType;
 //!
 //! // Create an environment with standard library and a variable
 //! let env = Env::with_standard_library()
@@ -26,33 +26,42 @@
 //! - **Variables**: User-defined variable declarations
 //! - **Functions**: Standard library + custom function declarations
 //!
-//! # Re-exports
+//! # Modules
 //!
-//! This crate re-exports commonly used types from the underlying crates:
-//! - `FunctionDecl`, `OverloadDecl`, `VariableDecl` from `cel-core-checker`
-//! - `CelType`, `SpannedExpr` from `cel-core-common`
-//! - `ParseResult` from `cel-core-parser`
-//! - `CheckedExpr`, `ParsedExpr` from `cel-core-proto`
+//! - `types`: Core type system, AST, and declarations
+//! - `parser`: Lexer, parser, and macro expansion
+//! - `checker`: Type checking and overload resolution
+//! - `ext`: Extension libraries (strings, math, encoders, optionals)
+//!
+//! # Proto Conversion
+//!
+//! For proto wire format conversion (interop with cel-go, cel-cpp), use the
+//! `cel-core-proto` crate which provides `CheckedExpr` and `ParsedExpr` types.
 
 mod ast;
 mod env;
 pub mod unparser;
 
+// Core modules
+pub mod checker;
+pub mod ext;
+pub mod parser;
+pub mod types;
+
 pub use ast::{Ast, AstError};
 pub use env::{CompileError, Env};
 pub use unparser::ast_to_string;
 
-// Re-export from checker
-pub use cel_core_checker::{
-    check, CheckError, CheckErrorKind, CheckResult, FunctionDecl, OverloadDecl, ReferenceInfo,
-    VariableDecl, STANDARD_LIBRARY,
+// Re-export from checker module
+pub use checker::{
+    check, CheckError, CheckErrorKind, CheckResult, ReferenceInfo, STANDARD_LIBRARY,
 };
 
-// Re-export from parser
-pub use cel_core_parser::ParseResult;
+// Re-export from parser module
+pub use parser::{parse, ParseError, ParseOptions, ParseResult};
 
-// Re-export from common
-pub use cel_core_common::{CelType, SpannedExpr};
-
-// Re-export proto types for convenience (like cel-go does)
-pub use cel_core_proto::{CheckedExpr, ParsedExpr};
+// Re-export from types module
+pub use types::{
+    BinaryOp, CelType, CelValue, Expr, FunctionDecl, ListElement, MapEntry, OverloadDecl, Span,
+    Spanned, SpannedExpr, StructField, UnaryOp, VariableDecl,
+};

@@ -23,7 +23,7 @@
 //! - `math.bitShiftLeft(int, int)` - Left shift
 //! - `math.bitShiftRight(int, int)` - Right shift
 
-use crate::{CelType, FunctionDecl, OverloadDecl};
+use crate::types::{CelType, FunctionDecl, OverloadDecl};
 
 /// Returns the math extension library function declarations.
 pub fn math_extension() -> Vec<FunctionDecl> {

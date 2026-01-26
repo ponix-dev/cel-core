@@ -10,7 +10,6 @@ authors.workspace = true
 
 [dependencies]
 cel-core.workspace = true
-cel-core-common.workspace = true
 cel-core-proto.workspace = true
 prost.workspace = true
 prost-reflect = { version = "0.16", features = ["text-format"] }

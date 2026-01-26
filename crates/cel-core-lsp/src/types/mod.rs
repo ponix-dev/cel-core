@@ -14,7 +14,7 @@ mod function;
 pub mod validation;
 
 pub use builtins::{get_builtin, is_builtin, BUILTINS};
-pub use cel_core_common::CelType;
+pub use cel_core::CelType;
 pub use checker::{
     check_method_arity, check_standalone_arity, get_allowed_receiver_types, infer_literal_type,
     is_method_only, is_standalone_only, is_valid_method_call, ArityCheck,

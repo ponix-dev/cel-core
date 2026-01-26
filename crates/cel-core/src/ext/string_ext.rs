@@ -19,7 +19,7 @@
 //! - `join()` / `join(separator)` - Join list of strings (method on list<string>)
 //! - `strings.quote(string)` - Quote a string with escapes
 
-use crate::{CelType, FunctionDecl, OverloadDecl};
+use crate::types::{CelType, FunctionDecl, OverloadDecl};
 
 /// Returns the string extension library function declarations.
 pub fn string_extension() -> Vec<FunctionDecl> {

@@ -4,9 +4,12 @@ mod lexer;
 pub mod macros;
 mod parser;
 
-use cel_core_common::{Span, SpannedExpr};
+use crate::types::{Span, SpannedExpr};
 
-pub use macros::{ArgCount, Macro, MacroExpander, MacroExpansion, MacroRegistry, MacroStyle, MacroContext};
+pub use lexer::{lex, LexError, SpannedToken, Token};
+pub use macros::{
+    ArgCount, Macro, MacroContext, MacroExpander, MacroExpansion, MacroRegistry, MacroStyle,
+};
 pub use parser::MacroCalls;
 
 /// A parse error with source location.

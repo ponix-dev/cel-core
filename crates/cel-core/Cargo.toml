@@ -8,7 +8,6 @@ authors.workspace = true
 description = "High-level API for the Common Expression Language (CEL)"
 
 [dependencies]
-cel-core-parser.workspace = true
-cel-core-common.workspace = true
-cel-core-checker.workspace = true
-cel-core-proto.workspace = true
+logos.workspace = true
+prost-reflect.workspace = true
+prost.workspace = true
