@@ -1,18 +1,22 @@
 //! CEL conformance integration tests.
 //!
-//! These tests run the cel-parser and cel-checker against official CEL conformance
+//! These tests run the cel-parser, cel-checker, and cel-eval against official CEL conformance
 //! test files from the cel-spec repository.
 //!
 //! - Parse tests: Verify expressions parse successfully
 //! - Check tests: Verify type checker produces expected types
+//! - Eval tests: Verify evaluation produces expected results
 
 use cel_core_conformance::{
-    load_test_file, CelConformanceService, ConformanceService, SimpleTest, TypeDecl,
+    load_test_file, Binding, CelConformanceService, ConformanceService, SimpleTest, TypeDecl,
 };
 use cel_core_proto::gen::cel::expr::conformance::test::simple_test::ResultMatcher;
+use cel_core_proto::gen::cel::expr::conformance::test::{ErrorSetMatcher, UnknownSetMatcher};
 use cel_core_proto::gen::cel::expr::decl::DeclKind;
 use cel_core_proto::gen::cel::expr::r#type::TypeKind;
+use cel_core_proto::gen::cel::expr::value::Kind as ValueKind;
 use cel_core_proto::gen::cel::expr::Type as ProtoType;
+use cel_core_proto::gen::cel::expr::{expr_value, ErrorSet, ExprValue, UnknownSet, Value as ProtoValue};
 use cel_core_proto::cel_type_from_proto;
 use std::path::Path;
 
@@ -115,6 +119,329 @@ fn types_equivalent(actual: &ProtoType, expected: &ProtoType) -> bool {
     }
 }
 
+/// Compare two proto Values for equivalence.
+///
+/// Handles:
+/// - Primitives: null, bool, int64, uint64, double, string, bytes
+/// - Float NaN: Both NaN should match
+/// - Lists: Same length, recursive element comparison
+/// - Maps: Same keys, recursive value comparison (order-agnostic)
+/// - Type values: Compare type names
+fn values_equivalent(actual: &ProtoValue, expected: &ProtoValue) -> bool {
+    match (&actual.kind, &expected.kind) {
+        // Null values
+        (Some(ValueKind::NullValue(_)), Some(ValueKind::NullValue(_))) => true,
+
+        // Boolean values
+        (Some(ValueKind::BoolValue(a)), Some(ValueKind::BoolValue(e))) => a == e,
+
+        // Integer values
+        (Some(ValueKind::Int64Value(a)), Some(ValueKind::Int64Value(e))) => a == e,
+
+        // Unsigned integer values
+        (Some(ValueKind::Uint64Value(a)), Some(ValueKind::Uint64Value(e))) => a == e,
+
+        // Double values - special case for NaN
+        (Some(ValueKind::DoubleValue(a)), Some(ValueKind::DoubleValue(e))) => {
+            if a.is_nan() && e.is_nan() {
+                true
+            } else {
+                a == e
+            }
+        }
+
+        // String values
+        (Some(ValueKind::StringValue(a)), Some(ValueKind::StringValue(e))) => a == e,
+
+        // Bytes values
+        (Some(ValueKind::BytesValue(a)), Some(ValueKind::BytesValue(e))) => a == e,
+
+        // List values - compare element by element
+        (Some(ValueKind::ListValue(a)), Some(ValueKind::ListValue(e))) => {
+            if a.values.len() != e.values.len() {
+                return false;
+            }
+            a.values
+                .iter()
+                .zip(e.values.iter())
+                .all(|(a_val, e_val)| values_equivalent(a_val, e_val))
+        }
+
+        // Map values - order-agnostic comparison
+        (Some(ValueKind::MapValue(a)), Some(ValueKind::MapValue(e))) => {
+            if a.entries.len() != e.entries.len() {
+                return false;
+            }
+            // For each entry in expected, find a matching entry in actual
+            for e_entry in &e.entries {
+                let e_key = match &e_entry.key {
+                    Some(k) => k,
+                    None => return false,
+                };
+                let e_value = match &e_entry.value {
+                    Some(v) => v,
+                    None => return false,
+                };
+
+                // Find matching entry in actual
+                let found = a.entries.iter().any(|a_entry| {
+                    let a_key = match &a_entry.key {
+                        Some(k) => k,
+                        None => return false,
+                    };
+                    let a_value = match &a_entry.value {
+                        Some(v) => v,
+                        None => return false,
+                    };
+                    values_equivalent(a_key, e_key) && values_equivalent(a_value, e_value)
+                });
+
+                if !found {
+                    return false;
+                }
+            }
+            true
+        }
+
+        // Type values
+        (Some(ValueKind::TypeValue(a)), Some(ValueKind::TypeValue(e))) => a == e,
+
+        // Enum values
+        (Some(ValueKind::EnumValue(a)), Some(ValueKind::EnumValue(e))) => {
+            a.r#type == e.r#type && a.value == e.value
+        }
+
+        // Object values (proto messages) - compare Any type URLs and values
+        (Some(ValueKind::ObjectValue(a)), Some(ValueKind::ObjectValue(e))) => {
+            a.type_url == e.type_url && a.value == e.value
+        }
+
+        // None cases
+        (None, None) => true,
+
+        // Anything else doesn't match
+        _ => false,
+    }
+}
+
+/// Check if actual result matches expected error.
+/// For now, any error matches any expected error (CEL spec doesn't require exact message matching).
+fn matches_eval_error(actual: &ExprValue, _expected: &ErrorSet) -> bool {
+    matches!(&actual.kind, Some(expr_value::Kind::Error(_)))
+}
+
+/// Check if actual result matches any of the expected errors.
+fn matches_any_eval_errors(actual: &ExprValue, expected: &ErrorSetMatcher) -> bool {
+    // If actual is an error, it matches if there's at least one expected error set
+    if matches!(&actual.kind, Some(expr_value::Kind::Error(_))) {
+        // Any error matches any expected error set
+        !expected.errors.is_empty()
+    } else {
+        false
+    }
+}
+
+/// A failure in an eval conformance test.
+#[derive(Debug)]
+struct EvalTestFailure {
+    test_name: String,
+    expr: String,
+    reason: String,
+}
+
+/// Convert bindings from test data (ExprValue map) to Binding vec.
+fn convert_bindings(
+    bindings: &std::collections::HashMap<String, ExprValue>,
+) -> Result<Vec<Binding>, String> {
+    let mut result = Vec::new();
+    for (name, expr_value) in bindings {
+        match &expr_value.kind {
+            Some(expr_value::Kind::Value(value)) => {
+                result.push(Binding {
+                    name: name.clone(),
+                    value: value.clone(),
+                });
+            }
+            Some(expr_value::Kind::Error(_)) => {
+                return Err(format!("binding '{}' is an error value", name));
+            }
+            Some(expr_value::Kind::Unknown(_)) => {
+                return Err(format!("binding '{}' is an unknown value", name));
+            }
+            None => {
+                return Err(format!("binding '{}' has no value", name));
+            }
+        }
+    }
+    Ok(result)
+}
+
+/// Run evaluation tests in a file and collect failures.
+fn run_eval_conformance_file(filename: &str) -> (usize, Vec<EvalTestFailure>) {
+    let path = Path::new(TESTDATA_PATH).join(filename);
+    let file = load_test_file(&path).expect(&format!("Failed to load {}", filename));
+
+    let service = CelConformanceService::new();
+    let mut failures = Vec::new();
+    let mut total_tests = 0;
+
+    for section in &file.section {
+        for test in &section.test {
+            let test_name = format!("{}/{}", section.name, test.name);
+
+            // Skip only if check_only is true (evaluation explicitly disabled by test)
+            if test.check_only {
+                continue;
+            }
+
+            total_tests += 1;
+
+            // Determine expected result type
+            let expected_result = match &test.result_matcher {
+                Some(ResultMatcher::Value(v)) => ExpectedResult::Value(v.clone()),
+                Some(ResultMatcher::TypedResult(tr)) => {
+                    // For typed_result, compare the value part if present
+                    match &tr.result {
+                        Some(v) => ExpectedResult::Value(v.clone()),
+                        None => {
+                            // typed_result with no value defaults to true
+                            ExpectedResult::Value(ProtoValue {
+                                kind: Some(ValueKind::BoolValue(true)),
+                            })
+                        }
+                    }
+                }
+                Some(ResultMatcher::EvalError(e)) => ExpectedResult::Error(e.clone()),
+                Some(ResultMatcher::AnyEvalErrors(e)) => ExpectedResult::AnyErrors(e.clone()),
+                Some(ResultMatcher::Unknown(u)) => ExpectedResult::Unknown(u.clone()),
+                Some(ResultMatcher::AnyUnknowns(u)) => ExpectedResult::AnyUnknowns(u.clone()),
+                None => {
+                    // Default is true boolean value
+                    ExpectedResult::Value(ProtoValue {
+                        kind: Some(ValueKind::BoolValue(true)),
+                    })
+                }
+            };
+
+            // Parse the expression
+            let parse_result = service.parse(&test.expr);
+            if !parse_result.is_ok() {
+                failures.push(EvalTestFailure {
+                    test_name: test_name.clone(),
+                    expr: test.expr.clone(),
+                    reason: format!(
+                        "parse failed: {}",
+                        parse_result
+                            .issues
+                            .iter()
+                            .map(|i| i.message.clone())
+                            .collect::<Vec<_>>()
+                            .join("; ")
+                    ),
+                });
+                continue;
+            }
+            let parsed_expr = parse_result.parsed_expr.unwrap();
+
+            // Convert bindings
+            let bindings = match convert_bindings(&test.bindings) {
+                Ok(b) => b,
+                Err(e) => {
+                    failures.push(EvalTestFailure {
+                        test_name: test_name.clone(),
+                        expr: test.expr.clone(),
+                        reason: format!("binding conversion failed: {}", e),
+                    });
+                    continue;
+                }
+            };
+
+            // Evaluate - always get a result to compare
+            let eval_result = service.eval(&parsed_expr, &bindings);
+            let actual_result = match &eval_result.result {
+                Some(r) => r,
+                None => {
+                    failures.push(EvalTestFailure {
+                        test_name: test_name.clone(),
+                        expr: test.expr.clone(),
+                        reason: format!(
+                            "eval returned no result: {}",
+                            eval_result
+                                .issues
+                                .iter()
+                                .map(|i| i.message.clone())
+                                .collect::<Vec<_>>()
+                                .join("; ")
+                        ),
+                    });
+                    continue;
+                }
+            };
+
+            // Compare results based on expected type
+            let matches = match &expected_result {
+                ExpectedResult::Value(expected) => {
+                    match &actual_result.kind {
+                        Some(expr_value::Kind::Value(actual)) => {
+                            values_equivalent(actual, expected)
+                        }
+                        Some(expr_value::Kind::Error(_)) => false,
+                        Some(expr_value::Kind::Unknown(_)) => false,
+                        None => false,
+                    }
+                }
+                ExpectedResult::Error(expected) => {
+                    matches_eval_error(actual_result, expected)
+                }
+                ExpectedResult::AnyErrors(expected) => {
+                    matches_any_eval_errors(actual_result, expected)
+                }
+                ExpectedResult::Unknown(_expected) => {
+                    // Check if actual is an unknown
+                    matches!(&actual_result.kind, Some(expr_value::Kind::Unknown(_)))
+                }
+                ExpectedResult::AnyUnknowns(_expected) => {
+                    // Check if actual is an unknown
+                    matches!(&actual_result.kind, Some(expr_value::Kind::Unknown(_)))
+                }
+            };
+
+            if !matches {
+                let actual_desc = match &actual_result.kind {
+                    Some(expr_value::Kind::Value(v)) => format!("Value({:?})", v.kind),
+                    Some(expr_value::Kind::Error(e)) => format!("Error({:?})", e),
+                    Some(expr_value::Kind::Unknown(u)) => format!("Unknown({:?})", u),
+                    None => "None".to_string(),
+                };
+                let expected_desc = match &expected_result {
+                    ExpectedResult::Value(v) => format!("Value({:?})", v.kind),
+                    ExpectedResult::Error(e) => format!("Error({:?})", e),
+                    ExpectedResult::AnyErrors(e) => format!("AnyErrors({:?})", e),
+                    ExpectedResult::Unknown(u) => format!("Unknown({:?})", u),
+                    ExpectedResult::AnyUnknowns(u) => format!("AnyUnknowns({:?})", u),
+                };
+                failures.push(EvalTestFailure {
+                    test_name: test_name.clone(),
+                    expr: test.expr.clone(),
+                    reason: format!("expected {} but got {}", expected_desc, actual_desc),
+                });
+            }
+        }
+    }
+
+    (total_tests, failures)
+}
+
+/// Expected result type for evaluation tests.
+#[derive(Clone, Debug)]
+enum ExpectedResult {
+    Value(ProtoValue),
+    Error(ErrorSet),
+    AnyErrors(ErrorSetMatcher),
+    Unknown(UnknownSet),
+    AnyUnknowns(UnknownSetMatcher),
+}
+
 /// Build type declarations from test's type_env
 fn build_type_decls(test: &SimpleTest) -> Vec<TypeDecl> {
     let mut decls = Vec::new();
@@ -153,27 +480,16 @@ fn run_check_conformance_file(filename: &str) -> (usize, Vec<String>) {
         for test in &section.test {
             let test_name = format!("{}/{}", section.name, test.name);
 
-            // Skip if disable_check is true
+            // Skip only if disable_check is true (CEL spec flag)
             if test.disable_check {
                 continue;
             }
 
-            // Only process tests with typed_result
+            // Get expected type if this is a typed_result test
             let expected_type = match &test.result_matcher {
-                Some(ResultMatcher::TypedResult(tr)) => match &tr.deduced_type {
-                    Some(ty) => ty,
-                    None => continue, // No deduced_type to check
-                },
-                _ => continue, // Not a typed_result test
+                Some(ResultMatcher::TypedResult(tr)) => tr.deduced_type.as_ref(),
+                _ => None,
             };
-
-            // Skip tests with function declarations (not yet supported)
-            let has_function_decl = test.type_env.iter().any(|d| {
-                matches!(&d.decl_kind, Some(DeclKind::Function(_)))
-            });
-            if has_function_decl {
-                continue;
-            }
 
             total_tests += 1;
 
@@ -195,6 +511,12 @@ fn run_check_conformance_file(filename: &str) -> (usize, Vec<String>) {
                 failures.push(format!("{}: check failed: {}", test_name, errors.join("; ")));
                 continue;
             }
+
+            // If no expected type, we're done (just verified check succeeded)
+            let expected_type = match expected_type {
+                Some(ty) => ty,
+                None => continue,
+            };
 
             let checked_expr = check_result.checked_expr.unwrap();
 
@@ -358,3 +680,60 @@ macro_rules! check_conformance_test {
 }
 
 check_conformance_test!(test_type_deduction_check, "type_deduction.textproto");
+
+// Evaluation conformance tests
+macro_rules! eval_conformance_test {
+    ($name:ident, $file:expr) => {
+        #[test]
+        fn $name() {
+            let (total, failures) = run_eval_conformance_file($file);
+            let passed = total - failures.len();
+
+            if !failures.is_empty() {
+                let failure_details: Vec<String> = failures
+                    .iter()
+                    .map(|f| format!("  {}: {} - {}", f.test_name, f.expr, f.reason))
+                    .collect();
+                panic!(
+                    "{}: {}/{} eval tests passed, {} failures:\n{}",
+                    $file,
+                    passed,
+                    total,
+                    failures.len(),
+                    failure_details.join("\n")
+                );
+            }
+        }
+    };
+}
+
+// Evaluation conformance tests - run ALL test files
+eval_conformance_test!(test_basic_eval, "basic.textproto");
+eval_conformance_test!(test_bindings_ext_eval, "bindings_ext.textproto");
+eval_conformance_test!(test_block_ext_eval, "block_ext.textproto");
+eval_conformance_test!(test_comparisons_eval, "comparisons.textproto");
+eval_conformance_test!(test_conversions_eval, "conversions.textproto");
+eval_conformance_test!(test_dynamic_eval, "dynamic.textproto");
+eval_conformance_test!(test_encoders_ext_eval, "encoders_ext.textproto");
+eval_conformance_test!(test_enums_eval, "enums.textproto");
+eval_conformance_test!(test_fields_eval, "fields.textproto");
+eval_conformance_test!(test_fp_math_eval, "fp_math.textproto");
+eval_conformance_test!(test_integer_math_eval, "integer_math.textproto");
+eval_conformance_test!(test_lists_eval, "lists.textproto");
+eval_conformance_test!(test_logic_eval, "logic.textproto");
+eval_conformance_test!(test_macros_eval, "macros.textproto");
+eval_conformance_test!(test_macros2_eval, "macros2.textproto");
+eval_conformance_test!(test_math_ext_eval, "math_ext.textproto");
+eval_conformance_test!(test_namespace_eval, "namespace.textproto");
+eval_conformance_test!(test_optionals_eval, "optionals.textproto");
+eval_conformance_test!(test_parse_eval, "parse.textproto");
+eval_conformance_test!(test_plumbing_eval, "plumbing.textproto");
+eval_conformance_test!(test_proto2_ext_eval, "proto2_ext.textproto");
+eval_conformance_test!(test_proto2_eval, "proto2.textproto");
+eval_conformance_test!(test_proto3_eval, "proto3.textproto");
+eval_conformance_test!(test_string_ext_eval, "string_ext.textproto");
+eval_conformance_test!(test_string_eval, "string.textproto");
+eval_conformance_test!(test_timestamps_eval, "timestamps.textproto");
+eval_conformance_test!(test_type_deduction_eval, "type_deduction.textproto");
+eval_conformance_test!(test_unknowns_eval, "unknowns.textproto");
+eval_conformance_test!(test_wrappers_eval, "wrappers.textproto");

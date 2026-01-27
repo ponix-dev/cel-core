@@ -4,7 +4,17 @@
 //! They mirror cel-go's `checker/decls.go` and define the type environment
 //! for CEL expressions.
 
+use std::sync::Arc;
+
 use crate::types::{CelType, CelValue};
+
+/// A function implementation that takes arguments and returns a value.
+///
+/// The implementation receives a slice of already-evaluated argument values
+/// (including the receiver for member functions as the first argument).
+///
+/// This is a type alias to the same type used in the eval module for consistency.
+pub type FunctionImpl = Arc<dyn Fn(&[crate::eval::Value]) -> crate::eval::Value + Send + Sync>;
 
 /// Variable declaration (mirrors cel-go `decls.VariableDecl`).
 ///
@@ -42,8 +52,8 @@ impl VariableDecl {
 /// Function overload declaration (mirrors cel-go `decls.OverloadDecl`).
 ///
 /// Represents a single signature for a function. Functions can have multiple
-/// overloads with different parameter types.
-#[derive(Debug, Clone)]
+/// overloads with different parameter types. Contains both type information
+/// (for checking) and an optional implementation (for evaluation).
 pub struct OverloadDecl {
     /// Unique identifier for this overload (e.g., "add_int64_int64").
     pub id: String,
@@ -55,6 +65,34 @@ pub struct OverloadDecl {
     pub is_member: bool,
     /// Type parameters for generic functions (e.g., ["T", "K", "V"]).
     pub type_params: Vec<String>,
+    /// Optional implementation function for evaluation.
+    pub implementation: Option<FunctionImpl>,
+}
+
+impl std::fmt::Debug for OverloadDecl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OverloadDecl")
+            .field("id", &self.id)
+            .field("params", &self.params)
+            .field("result", &self.result)
+            .field("is_member", &self.is_member)
+            .field("type_params", &self.type_params)
+            .field("has_impl", &self.implementation.is_some())
+            .finish()
+    }
+}
+
+impl Clone for OverloadDecl {
+    fn clone(&self) -> Self {
+        Self {
+            id: self.id.clone(),
+            params: self.params.clone(),
+            result: self.result.clone(),
+            is_member: self.is_member,
+            type_params: self.type_params.clone(),
+            implementation: self.implementation.clone(),
+        }
+    }
 }
 
 impl OverloadDecl {
@@ -66,6 +104,7 @@ impl OverloadDecl {
             result,
             is_member: false,
             type_params: Vec::new(),
+            implementation: None,
         }
     }
 
@@ -79,12 +118,22 @@ impl OverloadDecl {
             result,
             is_member: true,
             type_params: Vec::new(),
+            implementation: None,
         }
     }
 
     /// Add type parameters for generic functions.
     pub fn with_type_params(mut self, params: Vec<String>) -> Self {
         self.type_params = params;
+        self
+    }
+
+    /// Add an implementation function to this overload.
+    pub fn with_impl<F>(mut self, f: F) -> Self
+    where
+        F: Fn(&[crate::eval::Value]) -> crate::eval::Value + Send + Sync + 'static,
+    {
+        self.implementation = Some(Arc::new(f));
         self
     }
 

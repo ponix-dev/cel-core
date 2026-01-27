@@ -13,5 +13,6 @@ authors = ["ponix-dev"]
 logos = "0.14"
 prost = "0.14"
 prost-reflect = "0.16"
+regex = "1.10"
 cel-core = { path = "crates/cel-core", version = "0.2.0" }
 cel-core-proto = { path = "crates/cel-core-proto", version = "0.2.0" }

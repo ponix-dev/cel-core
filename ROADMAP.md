@@ -616,14 +616,14 @@ let result = program.eval(&[("name", Value::String("test123".into()))])?;
 - [x] Conformance tests: 24/30 files passing
 
 ### Milestone 4: Evaluation
-- [ ] `Value` type with all CEL values
-- [ ] `Program` compilation from `CheckedExpr`
-- [ ] `Activation` for variable bindings
-- [ ] Arithmetic, comparison, logical operators
-- [ ] Short-circuit evaluation (`&&`, `||`, ternary)
-- [ ] Comprehension evaluation
-- [ ] String function implementations
-- [ ] Conformance tests: evaluation verification
+- [x] `Value` type with all CEL values (Int, UInt, Double, String, Bytes, Bool, Null, List, Map, Timestamp, Duration, Type, Optional, Error)
+- [x] `Program` compilation from `CheckedExpr`
+- [x] `Activation` trait for variable bindings (`MapActivation`, `HierarchicalActivation`, `SharedActivation`)
+- [x] Arithmetic, comparison, logical operators
+- [x] Short-circuit evaluation (`&&`, `||`, ternary)
+- [x] Comprehension evaluation (`all`, `exists`, `exists_one`, `map`, `filter`)
+- [x] String function implementations (standard library)
+- [x] Conformance tests: evaluation verification
 
 ### Milestone 5: Full Conformance
 - [ ] Timestamp and duration support
