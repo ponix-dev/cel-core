@@ -61,7 +61,7 @@ pub use checker::{
 // Re-export from eval module
 pub use eval::{
     Activation, EmptyActivation, EvalError, EvalErrorKind, Evaluator, FunctionRegistry,
-    HierarchicalActivation, MapActivation, Program, Value,
+    HierarchicalActivation, MapActivation, Program, Value, ValueError,
 };
 
 // Re-export from parser module

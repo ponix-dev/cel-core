@@ -1311,7 +1311,7 @@ mod tests {
         assert_eq!(eval_expr("42"), Value::Int(42));
         assert_eq!(eval_expr("42u"), Value::UInt(42));
         assert_eq!(eval_expr("3.14"), Value::Double(3.14));
-        assert_eq!(eval_expr("\"hello\""), Value::string("hello"));
+        assert_eq!(eval_expr("\"hello\""), "hello".into());
     }
 
     #[test]
@@ -1358,7 +1358,7 @@ mod tests {
 
     #[test]
     fn test_string_operations() {
-        assert_eq!(eval_expr("\"hello\" + \" world\""), Value::string("hello world"));
+        assert_eq!(eval_expr("\"hello\" + \" world\""), "hello world".into());
         assert_eq!(eval_expr("size(\"hello\")"), Value::Int(5));
         assert_eq!(
             eval_expr("\"hello\".contains(\"ell\")"),
@@ -1407,7 +1407,7 @@ mod tests {
     fn test_type_conversions() {
         assert_eq!(eval_expr("int(3.7)"), Value::Int(3));
         assert_eq!(eval_expr("double(42)"), Value::Double(42.0));
-        assert_eq!(eval_expr("string(42)"), Value::string("42"));
+        assert_eq!(eval_expr("string(42)"), "42".into());
         assert_eq!(eval_expr("int(\"42\")"), Value::Int(42));
     }
 

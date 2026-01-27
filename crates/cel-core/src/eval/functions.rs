@@ -177,20 +177,6 @@ impl FunctionRegistry {
     }
 }
 
-/// Helper trait for creating function implementations.
-pub trait IntoFunctionImpl {
-    fn into_impl(self) -> FunctionImpl;
-}
-
-impl<F> IntoFunctionImpl for F
-where
-    F: Fn(&[Value]) -> Value + Send + Sync + 'static,
-{
-    fn into_impl(self) -> FunctionImpl {
-        Arc::new(self)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
