@@ -48,8 +48,8 @@ impl MapActivation {
     }
 
     /// Insert a binding.
-    pub fn insert(&mut self, name: impl Into<String>, value: Value) {
-        self.bindings.insert(name.into(), value);
+    pub fn insert(&mut self, name: impl Into<String>, value: impl Into<Value>) {
+        self.bindings.insert(name.into(), value.into());
     }
 
     /// Remove a binding.
@@ -97,14 +97,14 @@ impl<'a> HierarchicalActivation<'a> {
     }
 
     /// Add a local binding that shadows the parent.
-    pub fn with_binding(mut self, name: impl Into<String>, value: Value) -> Self {
-        self.local.insert(name.into(), value);
+    pub fn with_binding(mut self, name: impl Into<String>, value: impl Into<Value>) -> Self {
+        self.local.insert(name.into(), value.into());
         self
     }
 
     /// Insert a local binding.
-    pub fn insert(&mut self, name: impl Into<String>, value: Value) {
-        self.local.insert(name.into(), value);
+    pub fn insert(&mut self, name: impl Into<String>, value: impl Into<Value>) {
+        self.local.insert(name.into(), value.into());
     }
 
     /// Remove a local binding.
@@ -218,11 +218,11 @@ mod tests {
     #[test]
     fn test_map_activation() {
         let mut activation = MapActivation::new();
-        activation.insert("x", Value::Int(42));
-        activation.insert("name", Value::string("hello"));
+        activation.insert("x", 42i64);
+        activation.insert("name", "hello");
 
         assert_eq!(activation.resolve("x"), Some(Value::Int(42)));
-        assert_eq!(activation.resolve("name"), Some(Value::string("hello")));
+        assert_eq!(activation.resolve("name"), Some(Value::from("hello")));
         assert_eq!(activation.resolve("unknown"), None);
 
         assert!(activation.has("x"));
@@ -236,7 +236,7 @@ mod tests {
             ("y".to_string(), Value::Int(2)),
         ]);
 
-        let child = HierarchicalActivation::new(&parent).with_binding("x", Value::Int(10));
+        let child = HierarchicalActivation::new(&parent).with_binding("x", 10i64);
 
         // Local binding shadows parent
         assert_eq!(child.resolve("x"), Some(Value::Int(10)));
@@ -251,5 +251,20 @@ mod tests {
         let activation = EmptyActivation::new();
         assert_eq!(activation.resolve("anything"), None);
         assert!(!activation.has("anything"));
+    }
+
+    #[test]
+    fn test_activation_insert_without_suffix() {
+        // This is the ergonomic improvement - no i64 suffix needed
+        let mut activation = MapActivation::new();
+        activation.insert("count", 42); // i32 default works now
+        activation.insert("small", 5i8);
+        activation.insert("medium", 1000i16);
+        activation.insert("len", vec![1u8, 2, 3].len()); // usize from .len()
+
+        assert_eq!(activation.resolve("count"), Some(Value::Int(42)));
+        assert_eq!(activation.resolve("small"), Some(Value::Int(5)));
+        assert_eq!(activation.resolve("medium"), Some(Value::Int(1000)));
+        assert_eq!(activation.resolve("len"), Some(Value::UInt(3)));
     }
 }

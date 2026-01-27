@@ -2,6 +2,61 @@
 //!
 //! `Value` represents all CEL values at runtime, including primitive types,
 //! collections, timestamps, durations, and special values like errors and optionals.
+//!
+//! # Creating Values
+//!
+//! Use Rust's standard `Into` trait to create values from native types:
+//!
+//! ```rust
+//! use cel_core::Value;
+//!
+//! // Primitives - integer types automatically widen to i64/u64
+//! let v: Value = 42.into();      // i32 -> Value::Int(i64)
+//! let v: Value = 42i64.into();   // i64 -> Value::Int(i64)
+//! let v: Value = 42u32.into();   // u32 -> Value::UInt(u64)
+//! let v: Value = true.into();
+//! let v: Value = "hello".into();
+//!
+//! // Collections
+//! let list: Value = vec![Value::Int(1), Value::Int(2)].into();
+//!
+//! // From compile-time constants
+//! use cel_core::CelValue;
+//! let cv = CelValue::Int(42);
+//! let v: Value = cv.into();
+//! ```
+//!
+//! # Extracting Values
+//!
+//! Use `TryFrom` to extract native types from values:
+//!
+//! ```rust
+//! use cel_core::eval::{Value, Timestamp, Duration, ValueMap, OptionalValue, MapKey};
+//! use std::convert::TryFrom;
+//!
+//! // Primitive types
+//! let v = Value::Int(42);
+//! let i: i64 = i64::try_from(&v).unwrap();
+//!
+//! // Timestamp and Duration (Copy types - both owned and borrowed work)
+//! let v = Value::Timestamp(Timestamp::new(1234567890, 0));
+//! let t: Timestamp = Timestamp::try_from(&v).unwrap();
+//!
+//! let v = Value::Duration(Duration::new(60, 0));
+//! let d: Duration = Duration::try_from(&v).unwrap();
+//!
+//! // Collections (borrowed references)
+//! let v: Value = vec![Value::Int(1), Value::Int(2)].into();
+//! let list: &[Value] = <&[Value]>::try_from(&v).unwrap();
+//!
+//! // Maps
+//! let v = Value::map([(MapKey::String("key".into()), Value::Int(42))]);
+//! let map: &ValueMap = <&ValueMap>::try_from(&v).unwrap();
+//!
+//! // Optionals
+//! let v = Value::optional_some(Value::Int(42));
+//! let opt: &OptionalValue = <&OptionalValue>::try_from(&v).unwrap();
+//! ```
 
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
@@ -9,7 +64,24 @@ use std::fmt;
 use std::sync::Arc;
 
 use super::EvalError;
-use crate::types::CelType;
+use crate::types::{CelType, CelValue};
+
+/// Error returned when converting from Value to a specific type fails.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ValueError {
+    /// The expected type name.
+    pub expected: &'static str,
+    /// The actual type name found.
+    pub found: String,
+}
+
+impl std::fmt::Display for ValueError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "expected {}, found {}", self.expected, self.found)
+    }
+}
+
+impl std::error::Error for ValueError {}
 
 /// A CEL runtime value.
 ///
@@ -256,6 +328,54 @@ impl MapKey {
     }
 }
 
+impl From<&str> for MapKey {
+    fn from(s: &str) -> Self {
+        MapKey::String(Arc::from(s))
+    }
+}
+
+impl From<String> for MapKey {
+    fn from(s: String) -> Self {
+        MapKey::String(Arc::from(s))
+    }
+}
+
+impl From<Arc<str>> for MapKey {
+    fn from(s: Arc<str>) -> Self {
+        MapKey::String(s)
+    }
+}
+
+impl From<bool> for MapKey {
+    fn from(b: bool) -> Self {
+        MapKey::Bool(b)
+    }
+}
+
+impl From<i64> for MapKey {
+    fn from(i: i64) -> Self {
+        MapKey::Int(i)
+    }
+}
+
+impl From<u64> for MapKey {
+    fn from(u: u64) -> Self {
+        MapKey::UInt(u)
+    }
+}
+
+impl From<i32> for MapKey {
+    fn from(i: i32) -> Self {
+        MapKey::Int(i as i64)
+    }
+}
+
+impl From<u32> for MapKey {
+    fn from(u: u32) -> Self {
+        MapKey::UInt(u as u64)
+    }
+}
+
 impl ValueMap {
     /// Create a new empty map.
     pub fn new() -> Self {
@@ -315,24 +435,58 @@ impl ValueMap {
 // ==================== Value Constructors ====================
 
 impl Value {
-    /// Create a string value.
-    pub fn string(s: impl Into<Arc<str>>) -> Self {
-        Value::String(s.into())
+    /// Create a map value from key-value pairs.
+    ///
+    /// Keys and values are automatically converted using `Into<MapKey>` and `Into<Value>`.
+    ///
+    /// ```
+    /// use cel_core::Value;
+    ///
+    /// // String keys and values
+    /// let map = Value::map([("host", "localhost"), ("port", "8080")]);
+    ///
+    /// // Integer keys
+    /// let map = Value::map([(1i64, "one"), (2i64, "two")]);
+    ///
+    /// // Mixed value types require explicit Value construction
+    /// let map = Value::map([
+    ///     ("name", Value::from("Alice")),
+    ///     ("age", Value::from(30i64)),
+    /// ]);
+    /// ```
+    pub fn map<K, V>(entries: impl IntoIterator<Item = (K, V)>) -> Self
+    where
+        K: Into<MapKey>,
+        V: Into<Value>,
+    {
+        Value::Map(Arc::new(ValueMap::from_entries(
+            entries.into_iter().map(|(k, v)| (k.into(), v.into())),
+        )))
     }
 
-    /// Create a bytes value.
-    pub fn bytes(b: impl Into<Arc<[u8]>>) -> Self {
-        Value::Bytes(b.into())
-    }
-
-    /// Create a list value.
-    pub fn list(elements: impl Into<Arc<[Value]>>) -> Self {
-        Value::List(elements.into())
-    }
-
-    /// Create a map value.
-    pub fn map(entries: impl IntoIterator<Item = (MapKey, Value)>) -> Self {
-        Value::Map(Arc::new(ValueMap::from_entries(entries)))
+    /// Create a list value from items.
+    ///
+    /// Items are automatically converted using `Into<Value>`.
+    ///
+    /// ```
+    /// use cel_core::Value;
+    ///
+    /// // Integer list (no i64 suffix needed)
+    /// let list = Value::list([1, 2, 3]);
+    ///
+    /// // String list
+    /// let list = Value::list(["a", "b", "c"]);
+    ///
+    /// // Mixed types require explicit Value construction
+    /// let list = Value::list([Value::from(1), Value::from("two")]);
+    /// ```
+    pub fn list<T>(items: impl IntoIterator<Item = T>) -> Self
+    where
+        T: Into<Value>,
+    {
+        Value::List(Arc::from(
+            items.into_iter().map(Into::into).collect::<Vec<_>>(),
+        ))
     }
 
     /// Create a timestamp value.
@@ -360,9 +514,435 @@ impl Value {
         Value::Optional(OptionalValue::some(value))
     }
 
+    /// Convert an Option<T> to a CEL optional value.
+    ///
+    /// Unlike `From<Option<T>>` which maps `None` to `Value::Null`,
+    /// this preserves CEL optional semantics.
+    ///
+    /// ```
+    /// use cel_core::Value;
+    ///
+    /// let some_val = Value::from_option(Some(42));  // optional.of(42)
+    /// let none_val = Value::from_option(None::<i32>);  // optional.none()
+    /// ```
+    pub fn from_option<T: Into<Value>>(opt: Option<T>) -> Self {
+        match opt {
+            Some(v) => Value::optional_some(v.into()),
+            None => Value::optional_none(),
+        }
+    }
+
     /// Create an error value.
     pub fn error(err: impl Into<EvalError>) -> Self {
         Value::Error(Arc::new(err.into()))
+    }
+}
+
+// ==================== From Implementations ====================
+
+impl From<bool> for Value {
+    fn from(b: bool) -> Self {
+        Value::Bool(b)
+    }
+}
+
+impl From<i64> for Value {
+    fn from(i: i64) -> Self {
+        Value::Int(i)
+    }
+}
+
+impl From<u64> for Value {
+    fn from(u: u64) -> Self {
+        Value::UInt(u)
+    }
+}
+
+// Signed integer widening conversions
+impl From<i8> for Value {
+    fn from(i: i8) -> Self {
+        Value::Int(i as i64)
+    }
+}
+
+impl From<i16> for Value {
+    fn from(i: i16) -> Self {
+        Value::Int(i as i64)
+    }
+}
+
+impl From<i32> for Value {
+    fn from(i: i32) -> Self {
+        Value::Int(i as i64)
+    }
+}
+
+impl From<isize> for Value {
+    fn from(i: isize) -> Self {
+        Value::Int(i as i64)
+    }
+}
+
+// Unsigned integer widening conversions
+impl From<u8> for Value {
+    fn from(u: u8) -> Self {
+        Value::UInt(u as u64)
+    }
+}
+
+impl From<u16> for Value {
+    fn from(u: u16) -> Self {
+        Value::UInt(u as u64)
+    }
+}
+
+impl From<u32> for Value {
+    fn from(u: u32) -> Self {
+        Value::UInt(u as u64)
+    }
+}
+
+impl From<usize> for Value {
+    fn from(u: usize) -> Self {
+        Value::UInt(u as u64)
+    }
+}
+
+impl From<f64> for Value {
+    fn from(d: f64) -> Self {
+        Value::Double(d)
+    }
+}
+
+impl From<&str> for Value {
+    fn from(s: &str) -> Self {
+        Value::String(Arc::from(s))
+    }
+}
+
+impl From<String> for Value {
+    fn from(s: String) -> Self {
+        Value::String(Arc::from(s))
+    }
+}
+
+impl From<Arc<str>> for Value {
+    fn from(s: Arc<str>) -> Self {
+        Value::String(s)
+    }
+}
+
+impl From<&[u8]> for Value {
+    fn from(b: &[u8]) -> Self {
+        Value::Bytes(Arc::from(b))
+    }
+}
+
+impl From<Vec<u8>> for Value {
+    fn from(b: Vec<u8>) -> Self {
+        Value::Bytes(Arc::from(b))
+    }
+}
+
+impl From<Arc<[u8]>> for Value {
+    fn from(b: Arc<[u8]>) -> Self {
+        Value::Bytes(b)
+    }
+}
+
+impl From<Vec<Value>> for Value {
+    fn from(v: Vec<Value>) -> Self {
+        Value::List(Arc::from(v))
+    }
+}
+
+impl From<Timestamp> for Value {
+    fn from(t: Timestamp) -> Self {
+        Value::Timestamp(t)
+    }
+}
+
+impl From<Duration> for Value {
+    fn from(d: Duration) -> Self {
+        Value::Duration(d)
+    }
+}
+
+impl From<EvalError> for Value {
+    fn from(e: EvalError) -> Self {
+        Value::Error(Arc::new(e))
+    }
+}
+
+impl From<CelValue> for Value {
+    fn from(cv: CelValue) -> Self {
+        match cv {
+            CelValue::Null => Value::Null,
+            CelValue::Bool(b) => Value::Bool(b),
+            CelValue::Int(i) => Value::Int(i),
+            CelValue::UInt(u) => Value::UInt(u),
+            CelValue::Double(d) => Value::Double(d),
+            CelValue::String(s) => Value::String(Arc::from(s)),
+            CelValue::Bytes(b) => Value::Bytes(Arc::from(b)),
+        }
+    }
+}
+
+impl<T: Into<Value>> From<Option<T>> for Value {
+    fn from(opt: Option<T>) -> Self {
+        match opt {
+            Some(v) => v.into(),
+            None => Value::Null,
+        }
+    }
+}
+
+// ==================== TryFrom Implementations ====================
+
+impl TryFrom<Value> for bool {
+    type Error = ValueError;
+    fn try_from(v: Value) -> Result<Self, Self::Error> {
+        match v {
+            Value::Bool(b) => Ok(b),
+            other => Err(ValueError {
+                expected: "bool",
+                found: other.type_value().name.to_string(),
+            }),
+        }
+    }
+}
+
+impl TryFrom<&Value> for bool {
+    type Error = ValueError;
+    fn try_from(v: &Value) -> Result<Self, Self::Error> {
+        match v {
+            Value::Bool(b) => Ok(*b),
+            other => Err(ValueError {
+                expected: "bool",
+                found: other.type_value().name.to_string(),
+            }),
+        }
+    }
+}
+
+impl TryFrom<Value> for i64 {
+    type Error = ValueError;
+    fn try_from(v: Value) -> Result<Self, Self::Error> {
+        match v {
+            Value::Int(i) => Ok(i),
+            other => Err(ValueError {
+                expected: "int",
+                found: other.type_value().name.to_string(),
+            }),
+        }
+    }
+}
+
+impl TryFrom<&Value> for i64 {
+    type Error = ValueError;
+    fn try_from(v: &Value) -> Result<Self, Self::Error> {
+        match v {
+            Value::Int(i) => Ok(*i),
+            other => Err(ValueError {
+                expected: "int",
+                found: other.type_value().name.to_string(),
+            }),
+        }
+    }
+}
+
+impl TryFrom<Value> for u64 {
+    type Error = ValueError;
+    fn try_from(v: Value) -> Result<Self, Self::Error> {
+        match v {
+            Value::UInt(u) => Ok(u),
+            other => Err(ValueError {
+                expected: "uint",
+                found: other.type_value().name.to_string(),
+            }),
+        }
+    }
+}
+
+impl TryFrom<&Value> for u64 {
+    type Error = ValueError;
+    fn try_from(v: &Value) -> Result<Self, Self::Error> {
+        match v {
+            Value::UInt(u) => Ok(*u),
+            other => Err(ValueError {
+                expected: "uint",
+                found: other.type_value().name.to_string(),
+            }),
+        }
+    }
+}
+
+impl TryFrom<Value> for f64 {
+    type Error = ValueError;
+    fn try_from(v: Value) -> Result<Self, Self::Error> {
+        match v {
+            Value::Double(d) => Ok(d),
+            other => Err(ValueError {
+                expected: "double",
+                found: other.type_value().name.to_string(),
+            }),
+        }
+    }
+}
+
+impl TryFrom<&Value> for f64 {
+    type Error = ValueError;
+    fn try_from(v: &Value) -> Result<Self, Self::Error> {
+        match v {
+            Value::Double(d) => Ok(*d),
+            other => Err(ValueError {
+                expected: "double",
+                found: other.type_value().name.to_string(),
+            }),
+        }
+    }
+}
+
+impl TryFrom<Value> for String {
+    type Error = ValueError;
+    fn try_from(v: Value) -> Result<Self, Self::Error> {
+        match v {
+            Value::String(s) => Ok(s.to_string()),
+            other => Err(ValueError {
+                expected: "string",
+                found: other.type_value().name.to_string(),
+            }),
+        }
+    }
+}
+
+impl<'a> TryFrom<&'a Value> for &'a str {
+    type Error = ValueError;
+    fn try_from(v: &'a Value) -> Result<Self, Self::Error> {
+        match v {
+            Value::String(s) => Ok(s),
+            other => Err(ValueError {
+                expected: "string",
+                found: other.type_value().name.to_string(),
+            }),
+        }
+    }
+}
+
+impl<'a> TryFrom<&'a Value> for &'a [u8] {
+    type Error = ValueError;
+    fn try_from(v: &'a Value) -> Result<Self, Self::Error> {
+        match v {
+            Value::Bytes(b) => Ok(b),
+            other => Err(ValueError {
+                expected: "bytes",
+                found: other.type_value().name.to_string(),
+            }),
+        }
+    }
+}
+
+impl TryFrom<Value> for Timestamp {
+    type Error = ValueError;
+    fn try_from(v: Value) -> Result<Self, Self::Error> {
+        match v {
+            Value::Timestamp(t) => Ok(t),
+            other => Err(ValueError {
+                expected: "timestamp",
+                found: other.type_value().name.to_string(),
+            }),
+        }
+    }
+}
+
+impl TryFrom<&Value> for Timestamp {
+    type Error = ValueError;
+    fn try_from(v: &Value) -> Result<Self, Self::Error> {
+        match v {
+            Value::Timestamp(t) => Ok(*t),
+            other => Err(ValueError {
+                expected: "timestamp",
+                found: other.type_value().name.to_string(),
+            }),
+        }
+    }
+}
+
+impl TryFrom<Value> for Duration {
+    type Error = ValueError;
+    fn try_from(v: Value) -> Result<Self, Self::Error> {
+        match v {
+            Value::Duration(d) => Ok(d),
+            other => Err(ValueError {
+                expected: "duration",
+                found: other.type_value().name.to_string(),
+            }),
+        }
+    }
+}
+
+impl TryFrom<&Value> for Duration {
+    type Error = ValueError;
+    fn try_from(v: &Value) -> Result<Self, Self::Error> {
+        match v {
+            Value::Duration(d) => Ok(*d),
+            other => Err(ValueError {
+                expected: "duration",
+                found: other.type_value().name.to_string(),
+            }),
+        }
+    }
+}
+
+impl<'a> TryFrom<&'a Value> for &'a [Value] {
+    type Error = ValueError;
+    fn try_from(v: &'a Value) -> Result<Self, Self::Error> {
+        match v {
+            Value::List(l) => Ok(l),
+            other => Err(ValueError {
+                expected: "list",
+                found: other.type_value().name.to_string(),
+            }),
+        }
+    }
+}
+
+impl<'a> TryFrom<&'a Value> for &'a ValueMap {
+    type Error = ValueError;
+    fn try_from(v: &'a Value) -> Result<Self, Self::Error> {
+        match v {
+            Value::Map(m) => Ok(m.as_ref()),
+            other => Err(ValueError {
+                expected: "map",
+                found: other.type_value().name.to_string(),
+            }),
+        }
+    }
+}
+
+impl<'a> TryFrom<&'a Value> for &'a OptionalValue {
+    type Error = ValueError;
+    fn try_from(v: &'a Value) -> Result<Self, Self::Error> {
+        match v {
+            Value::Optional(o) => Ok(o),
+            other => Err(ValueError {
+                expected: "optional",
+                found: other.type_value().name.to_string(),
+            }),
+        }
+    }
+}
+
+impl<'a> TryFrom<&'a Value> for &'a EvalError {
+    type Error = ValueError;
+    fn try_from(v: &'a Value) -> Result<Self, Self::Error> {
+        match v {
+            Value::Error(e) => Ok(e.as_ref()),
+            other => Err(ValueError {
+                expected: "error",
+                found: other.type_value().name.to_string(),
+            }),
+        }
     }
 }
 
@@ -426,106 +1006,6 @@ impl Value {
     pub fn is_truthy(&self) -> Option<bool> {
         match self {
             Value::Bool(b) => Some(*b),
-            _ => None,
-        }
-    }
-}
-
-// ==================== Value Conversions ====================
-
-impl Value {
-    /// Try to convert to bool.
-    pub fn as_bool(&self) -> Option<bool> {
-        match self {
-            Value::Bool(b) => Some(*b),
-            _ => None,
-        }
-    }
-
-    /// Try to convert to i64.
-    pub fn as_int(&self) -> Option<i64> {
-        match self {
-            Value::Int(i) => Some(*i),
-            _ => None,
-        }
-    }
-
-    /// Try to convert to u64.
-    pub fn as_uint(&self) -> Option<u64> {
-        match self {
-            Value::UInt(u) => Some(*u),
-            _ => None,
-        }
-    }
-
-    /// Try to convert to f64.
-    pub fn as_double(&self) -> Option<f64> {
-        match self {
-            Value::Double(d) => Some(*d),
-            _ => None,
-        }
-    }
-
-    /// Try to convert to string slice.
-    pub fn as_string(&self) -> Option<&str> {
-        match self {
-            Value::String(s) => Some(s),
-            _ => None,
-        }
-    }
-
-    /// Try to convert to bytes slice.
-    pub fn as_bytes(&self) -> Option<&[u8]> {
-        match self {
-            Value::Bytes(b) => Some(b),
-            _ => None,
-        }
-    }
-
-    /// Try to convert to list.
-    pub fn as_list(&self) -> Option<&[Value]> {
-        match self {
-            Value::List(l) => Some(l),
-            _ => None,
-        }
-    }
-
-    /// Try to convert to map.
-    pub fn as_map(&self) -> Option<&ValueMap> {
-        match self {
-            Value::Map(m) => Some(m),
-            _ => None,
-        }
-    }
-
-    /// Try to convert to timestamp.
-    pub fn as_timestamp(&self) -> Option<Timestamp> {
-        match self {
-            Value::Timestamp(t) => Some(*t),
-            _ => None,
-        }
-    }
-
-    /// Try to convert to duration.
-    pub fn as_duration(&self) -> Option<Duration> {
-        match self {
-            Value::Duration(d) => Some(*d),
-            _ => None,
-        }
-    }
-
-    /// Try to convert to optional.
-    pub fn as_optional(&self) -> Option<&OptionalValue> {
-        match self {
-            Value::Optional(o) => Some(o),
-            _ => None,
-        }
-    }
-
-    /// Try to get the error.
-    pub fn as_error(&self) -> Option<&EvalError> {
-        match self {
-            Value::Error(e) => Some(e),
             _ => None,
         }
     }
@@ -684,7 +1164,8 @@ mod tests {
         assert_eq!(Value::Int(42), Value::Int(42));
         assert_ne!(Value::Int(42), Value::Int(43));
         assert_ne!(Value::Int(42), Value::UInt(42));
-        assert_eq!(Value::string("hello"), Value::string("hello"));
+        let hello: Value = "hello".into();
+        assert_eq!(hello, "hello".into());
     }
 
     #[test]
@@ -716,6 +1197,63 @@ mod tests {
         );
         assert!(map.contains_key(&MapKey::String(Arc::from("key"))));
         assert!(!map.contains_key(&MapKey::String(Arc::from("other"))));
+    }
+
+    #[test]
+    fn test_map_key_from() {
+        // From &str
+        let key: MapKey = "hello".into();
+        assert_eq!(key, MapKey::String(Arc::from("hello")));
+
+        // From String
+        let key: MapKey = String::from("world").into();
+        assert_eq!(key, MapKey::String(Arc::from("world")));
+
+        // From i64
+        let key: MapKey = 42i64.into();
+        assert_eq!(key, MapKey::Int(42));
+
+        // From u64
+        let key: MapKey = 42u64.into();
+        assert_eq!(key, MapKey::UInt(42));
+
+        // From bool
+        let key: MapKey = true.into();
+        assert_eq!(key, MapKey::Bool(true));
+    }
+
+    #[test]
+    fn test_value_map_ergonomic() {
+        // Homogeneous string keys and values
+        let map = Value::map([("a", "1"), ("b", "2")]);
+        if let Value::Map(m) = &map {
+            assert_eq!(m.len(), 2);
+            assert_eq!(
+                m.get(&MapKey::String(Arc::from("a"))),
+                Some(&Value::String(Arc::from("1")))
+            );
+        } else {
+            panic!("expected map");
+        }
+
+        // Integer keys
+        let map = Value::map([(1i64, "one"), (2i64, "two")]);
+        if let Value::Map(m) = &map {
+            assert_eq!(m.get(&MapKey::Int(1)), Some(&Value::String(Arc::from("one"))));
+        } else {
+            panic!("expected map");
+        }
+
+        // Mixed value types with explicit Value::from
+        let map = Value::map([
+            ("name", Value::from("Alice")),
+            ("age", Value::from(30i64)),
+        ]);
+        if let Value::Map(m) = &map {
+            assert_eq!(m.len(), 2);
+        } else {
+            panic!("expected map");
+        }
     }
 
     #[test]
@@ -751,11 +1289,10 @@ mod tests {
     #[test]
     fn test_cel_type() {
         assert_eq!(Value::Int(42).cel_type(), CelType::Int);
-        assert_eq!(Value::string("hello").cel_type(), CelType::String);
-        assert_eq!(
-            Value::list(vec![Value::Int(1)]).cel_type(),
-            CelType::list(CelType::Dyn)
-        );
+        let hello: Value = "hello".into();
+        assert_eq!(hello.cel_type(), CelType::String);
+        let list: Value = vec![Value::Int(1)].into();
+        assert_eq!(list.cel_type(), CelType::list(CelType::Dyn));
     }
 
     #[test]
@@ -763,7 +1300,284 @@ mod tests {
         assert_eq!(format!("{}", Value::Null), "null");
         assert_eq!(format!("{}", Value::Int(42)), "42");
         assert_eq!(format!("{}", Value::UInt(42)), "42u");
-        assert_eq!(format!("{}", Value::string("hello")), "\"hello\"");
+        let hello: Value = "hello".into();
+        assert_eq!(format!("{}", hello), "\"hello\"");
         assert_eq!(format!("{}", Value::Bool(true)), "true");
+    }
+
+    #[test]
+    fn test_from_primitives() {
+        let v: Value = true.into();
+        assert_eq!(v, Value::Bool(true));
+
+        let v: Value = 42i64.into();
+        assert_eq!(v, Value::Int(42));
+
+        let v: Value = 42u64.into();
+        assert_eq!(v, Value::UInt(42));
+
+        let v: Value = 3.14f64.into();
+        assert_eq!(v, Value::Double(3.14));
+
+        let v: Value = "hello".into();
+        assert_eq!(v, Value::String(Arc::from("hello")));
+
+        let v: Value = String::from("world").into();
+        assert_eq!(v, Value::String(Arc::from("world")));
+    }
+
+    #[test]
+    fn test_from_collections() {
+        let v: Value = vec![Value::Int(1), Value::Int(2)].into();
+        assert!(matches!(v, Value::List(_)));
+
+        let v: Value = vec![1u8, 2, 3].into();
+        assert!(matches!(v, Value::Bytes(_)));
+    }
+
+    #[test]
+    fn test_try_from_success() {
+        let v = Value::Int(42);
+        let i: i64 = (&v).try_into().unwrap();
+        assert_eq!(i, 42);
+
+        let v: Value = "hello".into();
+        let s: &str = (&v).try_into().unwrap();
+        assert_eq!(s, "hello");
+
+        let v = Value::Bool(true);
+        let b: bool = (&v).try_into().unwrap();
+        assert!(b);
+
+        let v = Value::UInt(100);
+        let u: u64 = (&v).try_into().unwrap();
+        assert_eq!(u, 100);
+
+        let v = Value::Double(3.14);
+        let d: f64 = (&v).try_into().unwrap();
+        assert_eq!(d, 3.14);
+    }
+
+    #[test]
+    fn test_try_from_error() {
+        let v: Value = "hello".into();
+        let result: Result<i64, ValueError> = (&v).try_into();
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.expected, "int");
+        assert_eq!(err.found, "string");
+    }
+
+    #[test]
+    fn test_cel_value_to_value() {
+        use crate::types::CelValue;
+
+        let cv = CelValue::String("test".to_string());
+        let v: Value = cv.into();
+        let s: &str = (&v).try_into().unwrap();
+        assert_eq!(s, "test");
+
+        let cv = CelValue::Int(42);
+        let v: Value = cv.into();
+        assert_eq!(v, Value::Int(42));
+
+        let cv = CelValue::Null;
+        let v: Value = cv.into();
+        assert_eq!(v, Value::Null);
+    }
+
+    #[test]
+    fn test_try_from_timestamp() {
+        let v = Value::Timestamp(Timestamp::new(1234567890, 0));
+        let t: Timestamp = (&v).try_into().unwrap();
+        assert_eq!(t.seconds, 1234567890);
+
+        // Owned conversion
+        let v = Value::Timestamp(Timestamp::new(1234567890, 500));
+        let t: Timestamp = v.try_into().unwrap();
+        assert_eq!(t.nanos, 500);
+
+        let v: Value = "not a timestamp".into();
+        let result: Result<Timestamp, ValueError> = (&v).try_into();
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.expected, "timestamp");
+        assert_eq!(err.found, "string");
+    }
+
+    #[test]
+    fn test_try_from_duration() {
+        let v = Value::Duration(Duration::new(60, 0));
+        let d: Duration = (&v).try_into().unwrap();
+        assert_eq!(d.seconds, 60);
+
+        // Owned conversion
+        let v = Value::Duration(Duration::new(120, 500));
+        let d: Duration = v.try_into().unwrap();
+        assert_eq!(d.seconds, 120);
+        assert_eq!(d.nanos, 500);
+
+        let v = Value::Int(42);
+        let result: Result<Duration, ValueError> = (&v).try_into();
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.expected, "duration");
+        assert_eq!(err.found, "int");
+    }
+
+    #[test]
+    fn test_try_from_list() {
+        let v: Value = vec![Value::Int(1), Value::Int(2)].into();
+        let list: &[Value] = (&v).try_into().unwrap();
+        assert_eq!(list.len(), 2);
+        assert_eq!(list[0], Value::Int(1));
+        assert_eq!(list[1], Value::Int(2));
+
+        let v: Value = "not a list".into();
+        let result: Result<&[Value], ValueError> = (&v).try_into();
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.expected, "list");
+        assert_eq!(err.found, "string");
+    }
+
+    #[test]
+    fn test_try_from_map() {
+        let v = Value::map([(MapKey::String("key".into()), Value::Int(42))]);
+        let map: &ValueMap = (&v).try_into().unwrap();
+        assert_eq!(map.len(), 1);
+        assert_eq!(
+            map.get(&MapKey::String("key".into())),
+            Some(&Value::Int(42))
+        );
+
+        let v: Value = "not a map".into();
+        let result: Result<&ValueMap, ValueError> = (&v).try_into();
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.expected, "map");
+        assert_eq!(err.found, "string");
+    }
+
+    #[test]
+    fn test_try_from_optional() {
+        let v = Value::optional_some(Value::Int(42));
+        let opt: &OptionalValue = (&v).try_into().unwrap();
+        assert!(opt.is_present());
+        assert_eq!(opt.as_value(), Some(&Value::Int(42)));
+
+        let v = Value::optional_none();
+        let opt: &OptionalValue = (&v).try_into().unwrap();
+        assert!(!opt.is_present());
+
+        let v = Value::Int(42);
+        let result: Result<&OptionalValue, ValueError> = (&v).try_into();
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.expected, "optional");
+        assert_eq!(err.found, "int");
+    }
+
+    #[test]
+    fn test_try_from_eval_error() {
+        let v = Value::error(EvalError::division_by_zero());
+        let err: &EvalError = (&v).try_into().unwrap();
+        assert_eq!(err.message, "division by zero");
+
+        let v = Value::Int(42);
+        let result: Result<&EvalError, ValueError> = (&v).try_into();
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.expected, "error");
+        assert_eq!(err.found, "int");
+    }
+
+    #[test]
+    fn test_from_integer_widening() {
+        // Signed integers widen to Value::Int
+        let v: Value = 42i8.into();
+        assert_eq!(v, Value::Int(42));
+
+        let v: Value = 42i16.into();
+        assert_eq!(v, Value::Int(42));
+
+        let v: Value = 42i32.into();
+        assert_eq!(v, Value::Int(42));
+
+        let v: Value = (42isize).into();
+        assert_eq!(v, Value::Int(42));
+
+        // Unsigned integers widen to Value::UInt
+        let v: Value = 42u8.into();
+        assert_eq!(v, Value::UInt(42));
+
+        let v: Value = 42u16.into();
+        assert_eq!(v, Value::UInt(42));
+
+        let v: Value = 42u32.into();
+        assert_eq!(v, Value::UInt(42));
+
+        let v: Value = (42usize).into();
+        assert_eq!(v, Value::UInt(42));
+    }
+
+    #[test]
+    fn test_map_key_from_i32_u32() {
+        // From i32
+        let key: MapKey = 42i32.into();
+        assert_eq!(key, MapKey::Int(42));
+
+        // From u32
+        let key: MapKey = 42u32.into();
+        assert_eq!(key, MapKey::UInt(42));
+    }
+
+    #[test]
+    fn test_from_option() {
+        // Some values convert to inner value
+        let v: Value = Some(42).into();
+        assert_eq!(v, Value::Int(42));
+
+        let v: Value = Some("hello").into();
+        assert_eq!(v, Value::String(Arc::from("hello")));
+
+        // None converts to Null
+        let v: Value = None::<i32>.into();
+        assert_eq!(v, Value::Null);
+
+        let v: Value = None::<String>.into();
+        assert_eq!(v, Value::Null);
+
+        // Nested options
+        let v: Value = Some(Some(42)).into();
+        assert_eq!(v, Value::Int(42));
+    }
+
+    #[test]
+    fn test_from_option_in_map() {
+        let email: Option<String> = None;
+        let name: Option<&str> = Some("Alice");
+
+        let user = Value::map([("email", Value::from(email)), ("name", Value::from(name))]);
+
+        if let Value::Map(m) = user {
+            assert_eq!(m.get(&MapKey::from("email")), Some(&Value::Null));
+            assert_eq!(
+                m.get(&MapKey::from("name")),
+                Some(&Value::String(Arc::from("Alice")))
+            );
+        } else {
+            panic!("expected map");
+        }
+    }
+
+    #[test]
+    fn test_value_from_option_cel_optional() {
+        // from_option preserves CEL optional semantics
+        let v = Value::from_option(Some(42));
+        assert!(matches!(v, Value::Optional(OptionalValue::Some(_))));
+
+        let v = Value::from_option(None::<i32>);
+        assert!(matches!(v, Value::Optional(OptionalValue::None)));
     }
 }

@@ -57,15 +57,47 @@ let program = env.program(&ast)?;
 
 // 4. Set up variable bindings for evaluation
 let mut activation = MapActivation::new();
-activation.insert("user", Value::String("admin_alice".into()));
-activation.insert("age", Value::Int(25));
+activation.insert("user", "admin_alice".into());  // &str converts to Value
+activation.insert("age", 25i64.into());           // i64 converts to Value
 
 // 5. Evaluate the expression
 let result = program.eval(&activation);
 assert_eq!(result, Value::Bool(true));
 ```
 
-### Working with Different Value Types
+### Working with Values
+
+`Value` implements `From` and `TryFrom` traits for idiomatic Rust conversions:
+
+```rust
+use cel_core::Value;
+
+// Create values using Into trait
+let v: Value = 42i64.into();          // Value::Int(42)
+let v: Value = true.into();           // Value::Bool(true)
+let v: Value = "hello".into();        // Value::String(...)
+let v: Value = vec![1u8, 2, 3].into(); // Value::Bytes(...)
+
+// Create lists from Vec<Value>
+let list: Value = vec![Value::Int(1), Value::Int(2)].into();
+
+// Extract values using TryFrom trait
+use std::convert::TryFrom;
+
+let v = Value::Int(42);
+let i: i64 = i64::try_from(&v).unwrap();  // 42
+
+let v: Value = "hello".into();
+let s: &str = <&str>::try_from(&v).unwrap();  // "hello"
+
+// Handle extraction errors
+use cel_core::ValueError;
+let v: Value = "not a number".into();
+let result: Result<i64, ValueError> = i64::try_from(&v);
+assert!(result.is_err());
+```
+
+### Working with Collections
 
 ```rust
 use cel_core::{Env, CelType, Value, MapActivation};
@@ -80,12 +112,12 @@ let program = env.program(&ast)?;
 
 let mut activation = MapActivation::new();
 
-// List values
-activation.insert("numbers", Value::List(Arc::from(vec![
+// List values - use Vec<Value>.into()
+activation.insert("numbers", vec![
     Value::Int(1),
     Value::Int(2),
     Value::Int(3),
-])));
+].into());
 
 // Map values
 use cel_core::eval::{ValueMap, MapKey};
@@ -111,11 +143,11 @@ let ast = env.compile("math.greatest(values)")?;
 let program = env.program(&ast)?;
 
 let mut activation = MapActivation::new();
-activation.insert("values", Value::List(std::sync::Arc::from(vec![
+activation.insert("values", vec![
     Value::Int(10),
     Value::Int(42),
     Value::Int(7),
-])));
+].into());
 
 let result = program.eval(&activation);
 assert_eq!(result, Value::Int(42));
@@ -133,7 +165,7 @@ let ast = env.compile("10 / x")?;
 let program = env.program(&ast)?;
 
 let mut activation = MapActivation::new();
-activation.insert("x", Value::Int(0));
+activation.insert("x", 0i64.into());
 
 let result = program.eval(&activation);
 
