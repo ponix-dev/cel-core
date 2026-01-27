@@ -12,6 +12,7 @@
 use std::sync::Arc;
 
 use super::{
+    time::{self, TimestampComponent},
     Activation, EvalError, FunctionRegistry, HierarchicalActivation, MapKey, OptionalValue,
     TypeValue, Value, ValueMap,
 };
@@ -389,31 +390,72 @@ impl<'a> Evaluator<'a> {
                 Value::List(Arc::from(result))
             }
             (Value::Timestamp(t), Value::Duration(d)) => {
+                // Normalize: timestamp nanos are always 0..999_999_999
+                // Duration nanos can be negative for negative durations
                 let nanos = t.nanos as i64 + d.nanos as i64;
-                let extra_secs = nanos / 1_000_000_000;
-                let nanos = (nanos % 1_000_000_000) as i32;
-                Value::Timestamp(super::Timestamp::new(
-                    t.seconds.saturating_add(d.seconds).saturating_add(extra_secs),
-                    nanos,
-                ))
+                let (extra_secs, nanos) = normalize_nanos(nanos);
+
+                match t
+                    .seconds
+                    .checked_add(d.seconds)
+                    .and_then(|s| s.checked_add(extra_secs))
+                {
+                    Some(seconds) => {
+                        let ts = super::Timestamp::new(seconds, nanos);
+                        if ts.is_valid() {
+                            Value::Timestamp(ts)
+                        } else {
+                            Value::error(EvalError::range_error(
+                                "timestamp out of range: must be between year 0001 and 9999",
+                            ))
+                        }
+                    }
+                    None => Value::error(EvalError::overflow("timestamp addition overflow")),
+                }
             }
             (Value::Duration(d), Value::Timestamp(t)) => {
                 let nanos = t.nanos as i64 + d.nanos as i64;
-                let extra_secs = nanos / 1_000_000_000;
-                let nanos = (nanos % 1_000_000_000) as i32;
-                Value::Timestamp(super::Timestamp::new(
-                    t.seconds.saturating_add(d.seconds).saturating_add(extra_secs),
-                    nanos,
-                ))
+                let (extra_secs, nanos) = normalize_nanos(nanos);
+
+                match t
+                    .seconds
+                    .checked_add(d.seconds)
+                    .and_then(|s| s.checked_add(extra_secs))
+                {
+                    Some(seconds) => {
+                        let ts = super::Timestamp::new(seconds, nanos);
+                        if ts.is_valid() {
+                            Value::Timestamp(ts)
+                        } else {
+                            Value::error(EvalError::range_error(
+                                "timestamp out of range: must be between year 0001 and 9999",
+                            ))
+                        }
+                    }
+                    None => Value::error(EvalError::overflow("timestamp addition overflow")),
+                }
             }
             (Value::Duration(a), Value::Duration(b)) => {
                 let nanos = a.nanos as i64 + b.nanos as i64;
-                let extra_secs = nanos / 1_000_000_000;
-                let nanos = (nanos % 1_000_000_000) as i32;
-                Value::Duration(super::Duration::new(
-                    a.seconds.saturating_add(b.seconds).saturating_add(extra_secs),
-                    nanos,
-                ))
+                let (extra_secs, nanos) = normalize_nanos(nanos);
+
+                match a
+                    .seconds
+                    .checked_add(b.seconds)
+                    .and_then(|s| s.checked_add(extra_secs))
+                {
+                    Some(seconds) => {
+                        let d = super::Duration::new(seconds, nanos);
+                        if d.is_valid() {
+                            Value::Duration(d)
+                        } else {
+                            Value::error(EvalError::range_error(
+                                "duration out of range: must be within approximately 10000 years",
+                            ))
+                        }
+                    }
+                    None => Value::error(EvalError::overflow("duration addition overflow")),
+                }
             }
             _ => Value::error(EvalError::no_matching_overload("_+_")),
         }
@@ -430,45 +472,69 @@ impl<'a> Evaluator<'a> {
             (Value::Double(a), Value::Double(b)) => Value::Double(a - b),
             (Value::Timestamp(a), Value::Timestamp(b)) => {
                 let nanos = a.nanos as i64 - b.nanos as i64;
-                let mut extra_secs = 0i64;
-                let nanos = if nanos < 0 {
-                    extra_secs = -1;
-                    (nanos + 1_000_000_000) as i32
-                } else {
-                    nanos as i32
-                };
-                Value::Duration(super::Duration::new(
-                    a.seconds.saturating_sub(b.seconds).saturating_add(extra_secs),
-                    nanos,
-                ))
+                let (extra_secs, nanos) = normalize_nanos(nanos);
+
+                match a
+                    .seconds
+                    .checked_sub(b.seconds)
+                    .and_then(|s| s.checked_add(extra_secs))
+                {
+                    Some(seconds) => {
+                        let d = super::Duration::new(seconds, nanos);
+                        if d.is_valid() {
+                            Value::Duration(d)
+                        } else {
+                            Value::error(EvalError::range_error(
+                                "duration out of range: must be within approximately 10000 years",
+                            ))
+                        }
+                    }
+                    None => Value::error(EvalError::overflow("timestamp subtraction overflow")),
+                }
             }
             (Value::Timestamp(t), Value::Duration(d)) => {
                 let nanos = t.nanos as i64 - d.nanos as i64;
-                let mut extra_secs = 0i64;
-                let nanos = if nanos < 0 {
-                    extra_secs = -1;
-                    (nanos + 1_000_000_000) as i32
-                } else {
-                    nanos as i32
-                };
-                Value::Timestamp(super::Timestamp::new(
-                    t.seconds.saturating_sub(d.seconds).saturating_add(extra_secs),
-                    nanos,
-                ))
+                let (extra_secs, nanos) = normalize_nanos(nanos);
+
+                match t
+                    .seconds
+                    .checked_sub(d.seconds)
+                    .and_then(|s| s.checked_add(extra_secs))
+                {
+                    Some(seconds) => {
+                        let ts = super::Timestamp::new(seconds, nanos);
+                        if ts.is_valid() {
+                            Value::Timestamp(ts)
+                        } else {
+                            Value::error(EvalError::range_error(
+                                "timestamp out of range: must be between year 0001 and 9999",
+                            ))
+                        }
+                    }
+                    None => Value::error(EvalError::overflow("timestamp subtraction overflow")),
+                }
             }
             (Value::Duration(a), Value::Duration(b)) => {
                 let nanos = a.nanos as i64 - b.nanos as i64;
-                let mut extra_secs = 0i64;
-                let nanos = if nanos < 0 {
-                    extra_secs = -1;
-                    (nanos + 1_000_000_000) as i32
-                } else {
-                    nanos as i32
-                };
-                Value::Duration(super::Duration::new(
-                    a.seconds.saturating_sub(b.seconds).saturating_add(extra_secs),
-                    nanos,
-                ))
+                let (extra_secs, nanos) = normalize_nanos(nanos);
+
+                match a
+                    .seconds
+                    .checked_sub(b.seconds)
+                    .and_then(|s| s.checked_add(extra_secs))
+                {
+                    Some(seconds) => {
+                        let d = super::Duration::new(seconds, nanos);
+                        if d.is_valid() {
+                            Value::Duration(d)
+                        } else {
+                            Value::error(EvalError::range_error(
+                                "duration out of range: must be within approximately 10000 years",
+                            ))
+                        }
+                    }
+                    None => Value::error(EvalError::overflow("duration subtraction overflow")),
+                }
             }
             _ => Value::error(EvalError::no_matching_overload("_-_")),
         }
@@ -895,6 +961,8 @@ impl<'a> Evaluator<'a> {
             "bool" => Some(self.convert_to_bool(arg)),
             "type" => Some(Value::Type(arg.type_value())),
             "dyn" => Some(arg.clone()),
+            "timestamp" => Some(self.convert_to_timestamp(arg)),
+            "duration" => Some(self.convert_to_duration(arg)),
             _ => None,
         }
     }
@@ -977,13 +1045,13 @@ impl<'a> Evaluator<'a> {
                 Err(_) => Value::error(EvalError::invalid_conversion("bytes", "string")),
             },
             Value::Timestamp(t) => {
-                // Format as RFC 3339
-                Value::String(Arc::from(format!(
-                    "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
-                    1970, 1, 1, 0, 0, t.seconds
-                )))
+                // Format as RFC 3339 with nanoseconds
+                Value::String(Arc::from(time::format_timestamp(t)))
             }
-            Value::Duration(d) => Value::String(Arc::from(format!("{}s", d.seconds))),
+            Value::Duration(d) => {
+                // Format as CEL duration string
+                Value::String(Arc::from(time::format_duration(d)))
+            }
             _ => Value::error(EvalError::invalid_conversion(
                 &value.cel_type().display_name(),
                 "string",
@@ -1013,6 +1081,54 @@ impl<'a> Evaluator<'a> {
             _ => Value::error(EvalError::invalid_conversion(
                 &value.cel_type().display_name(),
                 "bool",
+            )),
+        }
+    }
+
+    fn convert_to_timestamp(&self, value: &Value) -> Value {
+        match value {
+            Value::Timestamp(t) => Value::Timestamp(*t),
+            Value::String(s) => match time::parse_timestamp(s) {
+                Ok(ts) => Value::Timestamp(ts),
+                Err(e) => Value::error(EvalError::invalid_argument(e)),
+            },
+            Value::Int(i) => {
+                let ts = super::Timestamp::from_seconds(*i);
+                if ts.is_valid() {
+                    Value::Timestamp(ts)
+                } else {
+                    Value::error(EvalError::range_error(
+                        "timestamp out of range: must be between year 0001 and 9999",
+                    ))
+                }
+            }
+            _ => Value::error(EvalError::invalid_conversion(
+                &value.cel_type().display_name(),
+                "timestamp",
+            )),
+        }
+    }
+
+    fn convert_to_duration(&self, value: &Value) -> Value {
+        match value {
+            Value::Duration(d) => Value::Duration(*d),
+            Value::String(s) => match time::parse_duration(s) {
+                Ok(d) => Value::Duration(d),
+                Err(e) => Value::error(EvalError::invalid_argument(e)),
+            },
+            Value::Int(i) => {
+                let d = super::Duration::from_seconds(*i);
+                if d.is_valid() {
+                    Value::Duration(d)
+                } else {
+                    Value::error(EvalError::range_error(
+                        "duration out of range: must be within approximately 10000 years",
+                    ))
+                }
+            }
+            _ => Value::error(EvalError::invalid_conversion(
+                &value.cel_type().display_name(),
+                "duration",
             )),
         }
     }
@@ -1049,7 +1165,211 @@ impl<'a> Evaluator<'a> {
                 }
                 Some(self.builtin_matches(&args[0], &args[1]))
             }
+            // Timestamp accessors
+            "getFullYear" => Some(self.timestamp_accessor(args, TimestampComponent::FullYear)),
+            "getMonth" => Some(self.timestamp_accessor(args, TimestampComponent::Month)),
+            "getDate" => Some(self.timestamp_accessor(args, TimestampComponent::Date)),
+            "getDayOfMonth" => Some(self.timestamp_accessor(args, TimestampComponent::DayOfMonth)),
+            "getDayOfWeek" => Some(self.timestamp_accessor(args, TimestampComponent::DayOfWeek)),
+            "getDayOfYear" => Some(self.timestamp_accessor(args, TimestampComponent::DayOfYear)),
+            "getHours" => Some(self.time_accessor_hours(args)),
+            "getMinutes" => Some(self.time_accessor_minutes(args)),
+            "getSeconds" => Some(self.time_accessor_seconds(args)),
+            "getMilliseconds" => Some(self.time_accessor_milliseconds(args)),
             _ => None,
+        }
+    }
+
+    /// Handle timestamp accessor functions that can take either:
+    /// - 1 arg: timestamp (UTC)
+    /// - 2 args: timestamp, timezone string
+    fn timestamp_accessor(&self, args: &[Value], component: TimestampComponent) -> Value {
+        match args.len() {
+            1 => {
+                // UTC version
+                match &args[0] {
+                    Value::Timestamp(ts) => {
+                        if let Some(dt) = ts.to_datetime_utc() {
+                            Value::Int(component.extract(&dt))
+                        } else {
+                            Value::error(EvalError::range_error("invalid timestamp"))
+                        }
+                    }
+                    _ => Value::error(EvalError::no_matching_overload(&format!(
+                        "get{}",
+                        component_name(component)
+                    ))),
+                }
+            }
+            2 => {
+                // Timezone version
+                match (&args[0], &args[1]) {
+                    (Value::Timestamp(ts), Value::String(tz_str)) => {
+                        match time::parse_timezone(tz_str) {
+                            Ok(tz_info) => {
+                                if let Some(dt) = tz_info.datetime_from_timestamp(ts) {
+                                    Value::Int(component.extract(&dt))
+                                } else {
+                                    Value::error(EvalError::range_error("invalid timestamp"))
+                                }
+                            }
+                            Err(e) => Value::error(EvalError::invalid_argument(e)),
+                        }
+                    }
+                    _ => Value::error(EvalError::no_matching_overload(&format!(
+                        "get{}",
+                        component_name(component)
+                    ))),
+                }
+            }
+            _ => Value::error(EvalError::no_matching_overload(&format!(
+                "get{}",
+                component_name(component)
+            ))),
+        }
+    }
+
+    /// Handle getHours - works on both Timestamp and Duration
+    fn time_accessor_hours(&self, args: &[Value]) -> Value {
+        match args.len() {
+            1 => match &args[0] {
+                Value::Timestamp(ts) => {
+                    if let Some(dt) = ts.to_datetime_utc() {
+                        Value::Int(TimestampComponent::Hours.extract(&dt))
+                    } else {
+                        Value::error(EvalError::range_error("invalid timestamp"))
+                    }
+                }
+                Value::Duration(d) => Value::Int(d.get_hours()),
+                _ => Value::error(EvalError::no_matching_overload("getHours")),
+            },
+            2 => {
+                // Timestamp with timezone
+                match (&args[0], &args[1]) {
+                    (Value::Timestamp(ts), Value::String(tz_str)) => {
+                        match time::parse_timezone(tz_str) {
+                            Ok(tz_info) => {
+                                if let Some(dt) = tz_info.datetime_from_timestamp(ts) {
+                                    Value::Int(TimestampComponent::Hours.extract(&dt))
+                                } else {
+                                    Value::error(EvalError::range_error("invalid timestamp"))
+                                }
+                            }
+                            Err(e) => Value::error(EvalError::invalid_argument(e)),
+                        }
+                    }
+                    _ => Value::error(EvalError::no_matching_overload("getHours")),
+                }
+            }
+            _ => Value::error(EvalError::no_matching_overload("getHours")),
+        }
+    }
+
+    /// Handle getMinutes - works on both Timestamp and Duration
+    fn time_accessor_minutes(&self, args: &[Value]) -> Value {
+        match args.len() {
+            1 => match &args[0] {
+                Value::Timestamp(ts) => {
+                    if let Some(dt) = ts.to_datetime_utc() {
+                        Value::Int(TimestampComponent::Minutes.extract(&dt))
+                    } else {
+                        Value::error(EvalError::range_error("invalid timestamp"))
+                    }
+                }
+                Value::Duration(d) => Value::Int(d.get_minutes()),
+                _ => Value::error(EvalError::no_matching_overload("getMinutes")),
+            },
+            2 => {
+                // Timestamp with timezone
+                match (&args[0], &args[1]) {
+                    (Value::Timestamp(ts), Value::String(tz_str)) => {
+                        match time::parse_timezone(tz_str) {
+                            Ok(tz_info) => {
+                                if let Some(dt) = tz_info.datetime_from_timestamp(ts) {
+                                    Value::Int(TimestampComponent::Minutes.extract(&dt))
+                                } else {
+                                    Value::error(EvalError::range_error("invalid timestamp"))
+                                }
+                            }
+                            Err(e) => Value::error(EvalError::invalid_argument(e)),
+                        }
+                    }
+                    _ => Value::error(EvalError::no_matching_overload("getMinutes")),
+                }
+            }
+            _ => Value::error(EvalError::no_matching_overload("getMinutes")),
+        }
+    }
+
+    /// Handle getSeconds - works on both Timestamp and Duration
+    fn time_accessor_seconds(&self, args: &[Value]) -> Value {
+        match args.len() {
+            1 => match &args[0] {
+                Value::Timestamp(ts) => {
+                    if let Some(dt) = ts.to_datetime_utc() {
+                        Value::Int(TimestampComponent::Seconds.extract(&dt))
+                    } else {
+                        Value::error(EvalError::range_error("invalid timestamp"))
+                    }
+                }
+                Value::Duration(d) => Value::Int(d.total_seconds()),
+                _ => Value::error(EvalError::no_matching_overload("getSeconds")),
+            },
+            2 => {
+                // Timestamp with timezone
+                match (&args[0], &args[1]) {
+                    (Value::Timestamp(ts), Value::String(tz_str)) => {
+                        match time::parse_timezone(tz_str) {
+                            Ok(tz_info) => {
+                                if let Some(dt) = tz_info.datetime_from_timestamp(ts) {
+                                    Value::Int(TimestampComponent::Seconds.extract(&dt))
+                                } else {
+                                    Value::error(EvalError::range_error("invalid timestamp"))
+                                }
+                            }
+                            Err(e) => Value::error(EvalError::invalid_argument(e)),
+                        }
+                    }
+                    _ => Value::error(EvalError::no_matching_overload("getSeconds")),
+                }
+            }
+            _ => Value::error(EvalError::no_matching_overload("getSeconds")),
+        }
+    }
+
+    /// Handle getMilliseconds - works on both Timestamp and Duration
+    fn time_accessor_milliseconds(&self, args: &[Value]) -> Value {
+        match args.len() {
+            1 => match &args[0] {
+                Value::Timestamp(ts) => {
+                    if let Some(dt) = ts.to_datetime_utc() {
+                        Value::Int(TimestampComponent::Milliseconds.extract(&dt))
+                    } else {
+                        Value::error(EvalError::range_error("invalid timestamp"))
+                    }
+                }
+                Value::Duration(d) => Value::Int(d.get_milliseconds()),
+                _ => Value::error(EvalError::no_matching_overload("getMilliseconds")),
+            },
+            2 => {
+                // Timestamp with timezone
+                match (&args[0], &args[1]) {
+                    (Value::Timestamp(ts), Value::String(tz_str)) => {
+                        match time::parse_timezone(tz_str) {
+                            Ok(tz_info) => {
+                                if let Some(dt) = tz_info.datetime_from_timestamp(ts) {
+                                    Value::Int(TimestampComponent::Milliseconds.extract(&dt))
+                                } else {
+                                    Value::error(EvalError::range_error("invalid timestamp"))
+                                }
+                            }
+                            Err(e) => Value::error(EvalError::invalid_argument(e)),
+                        }
+                    }
+                    _ => Value::error(EvalError::no_matching_overload("getMilliseconds")),
+                }
+            }
+            _ => Value::error(EvalError::no_matching_overload("getMilliseconds")),
         }
     }
 
@@ -1252,6 +1572,41 @@ impl<'a> Evaluator<'a> {
             HierarchicalActivation::new(self.activation).with_binding(var_name, init_val);
         let bind_eval = Evaluator::new(&bind_activation, self.functions);
         bind_eval.eval_expr(body)
+    }
+}
+
+/// Normalize nanoseconds to be in the range 0..999_999_999 for timestamps.
+/// Returns (extra_seconds, normalized_nanos).
+fn normalize_nanos(nanos: i64) -> (i64, i32) {
+    if nanos >= 0 && nanos < 1_000_000_000 {
+        (0, nanos as i32)
+    } else if nanos >= 1_000_000_000 {
+        let extra_secs = nanos / 1_000_000_000;
+        let nanos = (nanos % 1_000_000_000) as i32;
+        (extra_secs, nanos)
+    } else {
+        // Negative nanos - need to borrow from seconds
+        // e.g., -999999998 nanos -> -1 second + 2 nanos
+        let abs_nanos = (-nanos) as i64;
+        let borrow_secs = (abs_nanos + 999_999_999) / 1_000_000_000;
+        let remaining = (borrow_secs * 1_000_000_000 - abs_nanos) as i32;
+        (-borrow_secs, remaining)
+    }
+}
+
+/// Get the name of a timestamp component for error messages.
+fn component_name(component: TimestampComponent) -> &'static str {
+    match component {
+        TimestampComponent::FullYear => "FullYear",
+        TimestampComponent::Month => "Month",
+        TimestampComponent::Date => "Date",
+        TimestampComponent::DayOfMonth => "DayOfMonth",
+        TimestampComponent::DayOfWeek => "DayOfWeek",
+        TimestampComponent::DayOfYear => "DayOfYear",
+        TimestampComponent::Hours => "Hours",
+        TimestampComponent::Minutes => "Minutes",
+        TimestampComponent::Seconds => "Seconds",
+        TimestampComponent::Milliseconds => "Milliseconds",
     }
 }
 

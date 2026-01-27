@@ -32,6 +32,7 @@ mod error;
 mod evaluator;
 mod functions;
 mod program;
+pub mod time;
 mod value;
 
 pub use activation::{

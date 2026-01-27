@@ -626,9 +626,10 @@ let result = program.eval(&[("name", Value::String("test123".into()))])?;
 - [x] Conformance tests: evaluation verification
 
 ### Milestone 5: Full Conformance
-- [ ] Timestamp and duration support
+- [x] Timestamp and duration support
 - [x] Proto message field resolution
 - [ ] Error-as-value semantics
+- [ ] Proto type conformance (type comparison with proto types)
 - [ ] All conformance tests passing
 - [ ] LSP integration with new checker
 

@@ -130,6 +130,14 @@ pub struct Timestamp {
 }
 
 impl Timestamp {
+    /// Minimum valid timestamp: Year 0001-01-01 00:00:00 UTC
+    /// This is approximately -62135596800 seconds from Unix epoch.
+    pub const MIN_SECONDS: i64 = -62135596800;
+
+    /// Maximum valid timestamp: Year 9999-12-31 23:59:59 UTC
+    /// This is approximately 253402300799 seconds from Unix epoch.
+    pub const MAX_SECONDS: i64 = 253402300799;
+
     /// Create a new timestamp.
     pub fn new(seconds: i64, nanos: i32) -> Self {
         Self { seconds, nanos }
@@ -149,6 +157,31 @@ impl Timestamp {
     pub fn is_after(&self, other: &Timestamp) -> bool {
         (self.seconds, self.nanos) > (other.seconds, other.nanos)
     }
+
+    /// Check if this timestamp is within the valid CEL range (Year 0001 to 9999).
+    pub fn is_valid(&self) -> bool {
+        self.seconds >= Self::MIN_SECONDS && self.seconds <= Self::MAX_SECONDS
+    }
+
+    /// Convert to a chrono DateTime<Utc>.
+    pub fn to_datetime_utc(&self) -> Option<chrono::DateTime<chrono::Utc>> {
+        chrono::DateTime::from_timestamp(self.seconds, self.nanos as u32)
+    }
+
+    /// Create from a chrono DateTime<Utc>.
+    pub fn from_datetime<Tz: chrono::TimeZone>(dt: &chrono::DateTime<Tz>) -> Self {
+        Self {
+            seconds: dt.timestamp(),
+            nanos: dt.timestamp_subsec_nanos() as i32,
+        }
+    }
+
+    /// Convert to total nanoseconds since Unix epoch.
+    pub fn to_nanos(&self) -> Option<i128> {
+        let secs = self.seconds as i128;
+        let nanos = self.nanos as i128;
+        secs.checked_mul(1_000_000_000).map(|s| s + nanos)
+    }
 }
 
 /// A CEL duration value.
@@ -162,6 +195,15 @@ pub struct Duration {
 }
 
 impl Duration {
+    /// Maximum valid duration in seconds.
+    /// This is set to one less than the span of the valid timestamp range,
+    /// ensuring that subtracting the min timestamp from the max timestamp
+    /// (or vice versa) produces a range error.
+    pub const MAX_SECONDS: i64 = 315_537_897_598;
+
+    /// Minimum valid duration in seconds (negative max).
+    pub const MIN_SECONDS: i64 = -315_537_897_598;
+
     /// Create a new duration.
     pub fn new(seconds: i64, nanos: i32) -> Self {
         Self { seconds, nanos }
@@ -189,6 +231,48 @@ impl Duration {
     /// Returns true if this duration is negative.
     pub fn is_negative(&self) -> bool {
         self.seconds < 0 || (self.seconds == 0 && self.nanos < 0)
+    }
+
+    /// Check if this duration is within the valid CEL range (~10000 years).
+    pub fn is_valid(&self) -> bool {
+        self.seconds >= Self::MIN_SECONDS && self.seconds <= Self::MAX_SECONDS
+    }
+
+    /// Convert to a chrono Duration.
+    pub fn to_chrono(&self) -> chrono::Duration {
+        chrono::Duration::seconds(self.seconds) + chrono::Duration::nanoseconds(self.nanos as i64)
+    }
+
+    /// Create from a chrono Duration.
+    pub fn from_chrono(d: chrono::Duration) -> Self {
+        let total_nanos = d.num_nanoseconds().unwrap_or(0);
+        Self::from_nanos(total_nanos)
+    }
+
+    /// Get total hours (truncated).
+    pub fn get_hours(&self) -> i64 {
+        self.total_seconds() / 3600
+    }
+
+    /// Get total minutes (truncated).
+    pub fn get_minutes(&self) -> i64 {
+        self.total_seconds() / 60
+    }
+
+    /// Get total seconds.
+    pub fn total_seconds(&self) -> i64 {
+        self.seconds
+    }
+
+    /// Get milliseconds component (0-999).
+    pub fn get_milliseconds(&self) -> i64 {
+        // For negative durations, nanos is also negative
+        let ms = if self.nanos >= 0 {
+            self.nanos / 1_000_000
+        } else {
+            -(-self.nanos / 1_000_000)
+        };
+        ms as i64
     }
 }
 

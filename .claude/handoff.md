@@ -4,75 +4,66 @@
 2026-01-27
 
 ## Just Completed
-- [x] Milestone 4: Evaluation Engine
-  - `Value` type with all CEL values (Int, UInt, Double, String, Bytes, Bool, Null, List, Map, Timestamp, Duration, Type, Optional, Error)
-  - `Program` compilation from checked AST
-  - `Activation` trait with `MapActivation`, `HierarchicalActivation`, `SharedActivation`
-  - Arithmetic, comparison, and logical operators
-  - Short-circuit evaluation (`&&`, `||`, ternary)
-  - Comprehension evaluation (`all`, `exists`, `exists_one`, `map`, `filter`)
-  - Standard library function implementations
-  - Evaluation conformance tests
+- [x] Timestamp and Duration Support (Milestone 5 partial)
+  - Full timestamp parsing from RFC 3339 strings (with timezone offsets)
+  - Full duration parsing from CEL duration strings (e.g., "1h30m15s")
+  - Timestamp/duration arithmetic with proper overflow and range checking
+  - All timestamp accessor methods (getFullYear, getMonth, getDate, etc.)
+  - All duration accessor methods (getHours, getMinutes, getSeconds, getMilliseconds)
+  - Timezone support via IANA names and UTC offset strings
+  - Proper range validation (timestamps: year 0001-9999, durations: ~10000 years)
 
 ### Summary
-Implemented the CEL evaluation engine following the cel-go architecture pattern. The evaluator performs tree-walking evaluation of CEL expressions, supporting all standard operators, functions, and comprehensions. The `Program` type provides a compiled, thread-safe, cacheable representation that can be evaluated multiple times with different variable bindings.
+Implemented comprehensive timestamp and duration support for the CEL evaluator. This includes parsing, formatting, arithmetic operations, and all accessor methods. The implementation follows CEL spec requirements for range validation, ensuring that timestamps stay within the valid range (year 0001 to 9999) and durations don't exceed approximately 10000 years.
 
 ### Key Files Added
-- `crates/cel-core/src/eval/mod.rs` - Module exports and documentation
-- `crates/cel-core/src/eval/value.rs` - `Value` enum with all CEL runtime types
-- `crates/cel-core/src/eval/evaluator.rs` - Tree-walking evaluator (~1400 lines)
-- `crates/cel-core/src/eval/activation.rs` - Variable binding implementations
-- `crates/cel-core/src/eval/program.rs` - Compiled program wrapper
-- `crates/cel-core/src/eval/functions.rs` - Function registry and implementations
-- `crates/cel-core/src/eval/error.rs` - Evaluation error types
+- `crates/cel-core/src/eval/time.rs` - 435 lines of timestamp/duration utilities
+  - `parse_timestamp()` - RFC 3339 parsing with timezone support
+  - `parse_duration()` - CEL duration string parsing (h, m, s, ms, us, ns)
+  - `format_timestamp()` / `format_duration()` - String conversion
+  - `TimestampComponent` enum for accessor methods
+  - `parse_timezone()` for IANA and offset timezone handling
 
 ### Key Files Modified
-- `crates/cel-core/src/lib.rs` - Re-exports eval types
-- `crates/cel-core/src/env.rs` - Added `program()` method for creating Programs
-- `crates/cel-core/Cargo.toml` - Added regex dependency
-- `crates/cel-core-conformance/src/service.rs` - Added `eval()` implementation
-- `crates/cel-core-conformance/tests/conformance.rs` - Added eval conformance tests
-- `crates/cel-core-proto/src/lib.rs` - Added `value_to_proto()` for result conversion
-- `README.md` - Updated with evaluation examples
+- `crates/cel-core/src/eval/value.rs` - Added range constants and validation methods
+  - `Timestamp::MIN_SECONDS` / `MAX_SECONDS` for valid range
+  - `Duration::MIN_SECONDS` / `MAX_SECONDS` for valid range
+  - `is_valid()` methods for range checking
+  - Chrono conversion helpers
+- `crates/cel-core/src/eval/evaluator.rs` - Added timestamp/duration operations
+  - Arithmetic with overflow/range checking
+  - `timestamp()` and `duration()` type conversion functions
+  - All timestamp/duration accessor methods
+- `crates/cel-core/src/eval/error.rs` - Added `range_error()` constructor
+- `crates/cel-core/src/eval/mod.rs` - Exported time module
+- `crates/cel-core/Cargo.toml` - Added chrono and chrono-tz dependencies
 
-### Architecture Decisions
-1. **Tree-walking evaluator**: Simple, maintainable approach matching cel-go
-2. **Error-as-value semantics**: Errors propagate as `Value::Error` rather than Result
-3. **BTreeMap for maps**: Deterministic iteration order for reproducibility
-4. **Arc-based sharing**: Cheap cloning for values, thread-safe program sharing
-5. **Hierarchical activation**: Supports scoped variable bindings for comprehensions
-
-### What the Evaluator Supports
-- All literal types: null, bool, int, uint, double, string, bytes
-- Collections: lists, maps with heterogeneous keys
-- Operators: arithmetic (+, -, *, /, %), comparison (<, <=, ==, !=, >=, >), logical (&&, ||, !)
-- Short-circuit evaluation for &&, ||, and ternary
-- Field access and indexing (with optional variants)
-- Function calls via FunctionRegistry
-- Comprehensions: all, exists, exists_one, map, filter
-- Standard library: size, contains, startsWith, endsWith, matches, type(), in
+### Conformance Test Results
+- **Timestamp tests: 73/76 passing** (up from 71/76)
+- Fixed: Duration range validation for timestamp span calculations
+- Remaining 3 failures require proto type support (not timestamp/duration logic)
 
 ## Next Up
-- [ ] Milestone 5: Full Conformance
-  - Timestamp and duration arithmetic
-  - Extension library runtime implementations (string_ext, math_ext, etc.)
-  - Error-as-value semantics refinement
-  - All conformance tests passing
-  - LSP integration with new checker
+- [ ] Proto type conformance issues
+  - `google.protobuf.Timestamp == type(timestamp(...))` comparison
+  - `google.protobuf.Duration == type(duration(...))` comparison
+  - Proto object value support for `getMilliseconds()` test
 
-### Remaining Conformance Gaps
-1. **block_ext.textproto** - Requires `cel.block` macro support
-2. **enums.textproto** - Requires `proto.getExt`/`proto.hasExt` functions
-3. **macros2.textproto** - Some advanced macro edge cases
-4. **proto2_ext.textproto** - Proto2 extension support
-5. **type_deduction.textproto** - Advanced type parameter inference cases
-6. **Timestamp/duration arithmetic** - Currently parses/checks but not all operations evaluate
+### Why This Is Next
+The remaining timestamp conformance failures are all proto-related:
+1. Type comparison with `google.protobuf.Timestamp` and `google.protobuf.Duration`
+2. Object value handling for proto message inputs
+
+These are the logical next step as they're blocking full timestamp/duration conformance.
+
+### Prerequisites
+- Need to understand how cel-go handles `type()` for proto well-known types
+- May need to special-case Timestamp/Duration type comparisons
 
 ### Potential Challenges
-- Extension function implementations need runtime support (not just type declarations)
-- Timestamp/duration arithmetic requires careful overflow handling
-- Some conformance tests may require proto message construction at runtime
+- Proto type names may need special handling in the type system
+- Object value support requires proto message construction at runtime
 
 ## Open Questions
-- Should extension function implementations be lazy-loaded or bundled?
-- How should proto message construction work at runtime without full protobuf support?
+- Should `type(timestamp(...))` return `google.protobuf.Timestamp` or `timestamp`?
+- How should proto message values be constructed without full protobuf support?
