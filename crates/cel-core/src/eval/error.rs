@@ -20,6 +20,8 @@ pub enum EvalErrorKind {
     ModuloByZero,
     /// Integer overflow.
     Overflow,
+    /// Value out of valid range.
+    RangeError,
     /// Type mismatch at runtime.
     TypeMismatch,
     /// Unknown identifier (variable not found).
@@ -64,6 +66,11 @@ impl EvalError {
     /// Create an overflow error.
     pub fn overflow(message: impl Into<String>) -> Self {
         Self::new(EvalErrorKind::Overflow, message)
+    }
+
+    /// Create a range error (value out of valid range).
+    pub fn range_error(message: impl Into<String>) -> Self {
+        Self::new(EvalErrorKind::RangeError, message)
     }
 
     /// Create a type mismatch error.

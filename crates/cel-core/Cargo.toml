@@ -8,6 +8,8 @@ authors.workspace = true
 description = "High-level API for the Common Expression Language (CEL)"
 
 [dependencies]
+chrono = "0.4"
+chrono-tz = "0.10"
 logos.workspace = true
 prost-reflect.workspace = true
 prost.workspace = true
