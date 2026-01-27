@@ -6,12 +6,12 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::ast::Ast;
 use crate::checker::{check, check_with_proto_types, CheckError, CheckResult, STANDARD_LIBRARY};
+use crate::eval::{Function, FunctionRegistry, Overload, Program};
 use crate::ext;
 use crate::parser::{self, ParseError, ParseResult};
 use crate::types::{CelType, FunctionDecl, ProtoTypeRegistry, SpannedExpr};
-
-use crate::ast::Ast;
 
 /// Error from compiling a CEL expression.
 #[derive(Debug, Clone)]
@@ -350,6 +350,63 @@ impl Env {
 
         let expr = parse_result.ast.ok_or(CompileError::NoAst)?;
         Ok(Ast::new_unchecked(expr, source))
+    }
+
+    /// Create a program from a compiled AST.
+    ///
+    /// The program contains the AST and a function registry with implementations
+    /// for all functions registered in this environment.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use cel_core::{Env, CelType};
+    /// use cel_core::eval::{Value, MapActivation, Activation};
+    ///
+    /// let env = Env::with_standard_library()
+    ///     .with_variable("x", CelType::Int);
+    ///
+    /// let ast = env.compile("x + 1").unwrap();
+    /// let program = env.program(&ast).unwrap();
+    ///
+    /// let mut activation = MapActivation::new();
+    /// activation.insert("x", Value::Int(41));
+    ///
+    /// let result = program.eval(&activation);
+    /// assert_eq!(result, Value::Int(42));
+    /// ```
+    pub fn program(&self, ast: &Ast) -> Result<Program, CompileError> {
+        let registry = self.build_function_registry();
+        Ok(Program::new(Arc::new(ast.clone()), Arc::new(registry)))
+    }
+
+    /// Build the function registry from this environment's function declarations.
+    fn build_function_registry(&self) -> FunctionRegistry {
+        let mut registry = FunctionRegistry::new();
+
+        for func_decl in self.functions.values() {
+            let mut function = Function::new(&func_decl.name);
+
+            for overload_decl in &func_decl.overloads {
+                // Only add overloads that have implementations
+                if let Some(ref impl_fn) = overload_decl.implementation {
+                    let overload = Overload::new(
+                        &overload_decl.id,
+                        overload_decl.is_member,
+                        overload_decl.params.len(),
+                        impl_fn.clone(),
+                    );
+                    function = function.with_overload(overload);
+                }
+            }
+
+            // Only register functions that have at least one implemented overload
+            if !function.overloads.is_empty() {
+                registry.register(function);
+            }
+        }
+
+        registry
     }
 }
 

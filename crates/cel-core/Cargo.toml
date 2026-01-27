@@ -11,3 +11,4 @@ description = "High-level API for the Common Expression Language (CEL)"
 logos.workspace = true
 prost-reflect.workspace = true
 prost.workspace = true
+regex.workspace = true

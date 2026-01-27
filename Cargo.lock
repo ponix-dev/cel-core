@@ -70,6 +70,7 @@ dependencies = [
  "logos 0.14.4",
  "prost",
  "prost-reflect",
+ "regex",
 ]
 
 [[package]]

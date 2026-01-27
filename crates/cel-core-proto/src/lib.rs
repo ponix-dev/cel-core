@@ -334,4 +334,161 @@ mod tests {
             })
         ));
     }
+
+    #[test]
+    fn test_prost_encode_decode_parsed_expr() {
+        use prost::Message;
+
+        let env = Env::with_standard_library().with_variable("x", CelType::Int);
+        let ast = env.compile("x + 1").unwrap();
+
+        let parsed = ast.to_parsed_expr();
+
+        // Encode to bytes
+        let bytes = parsed.encode_to_vec();
+        assert!(!bytes.is_empty());
+
+        // Decode back
+        let decoded = ParsedExpr::decode(bytes.as_slice()).unwrap();
+
+        // Verify structural equality
+        assert_eq!(parsed, decoded);
+    }
+
+    #[test]
+    fn test_prost_encode_decode_checked_expr() {
+        use prost::Message;
+
+        let env = Env::with_standard_library().with_variable("x", CelType::Int);
+        let ast = env.compile("x + 1").unwrap();
+
+        let checked = ast.to_checked_expr().unwrap();
+
+        // Encode to bytes
+        let bytes = checked.encode_to_vec();
+        assert!(!bytes.is_empty());
+
+        // Decode back
+        let decoded = CheckedExpr::decode(bytes.as_slice()).unwrap();
+
+        // Verify structural equality
+        assert_eq!(checked, decoded);
+    }
+
+    #[test]
+    fn test_prost_roundtrip_complex_expression() {
+        use prost::Message;
+
+        let env = Env::with_standard_library()
+            .with_variable("a", CelType::Int)
+            .with_variable("b", CelType::String)
+            .with_variable("value", CelType::Int);
+
+        let ast = env
+            .compile("a > 0 && b.contains('x') ? [1, 2, 3] : {'key': value}")
+            .unwrap();
+
+        // Test ParsedExpr roundtrip
+        let parsed = ast.to_parsed_expr();
+        let parsed_bytes = parsed.encode_to_vec();
+        let decoded_parsed = ParsedExpr::decode(parsed_bytes.as_slice()).unwrap();
+        assert_eq!(parsed, decoded_parsed);
+
+        // Test CheckedExpr roundtrip
+        let checked = ast.to_checked_expr().unwrap();
+        let checked_bytes = checked.encode_to_vec();
+        let decoded_checked = CheckedExpr::decode(checked_bytes.as_slice()).unwrap();
+        assert_eq!(checked, decoded_checked);
+    }
+
+    #[test]
+    fn test_prost_roundtrip_all_expr_kinds() {
+        use prost::Message;
+
+        let env = Env::with_standard_library()
+            .with_variable("x", CelType::Int)
+            .with_variable("s", CelType::String)
+            .with_variable("b", CelType::Bool)
+            .with_variable("list", CelType::list(CelType::Int))
+            .with_variable("map", CelType::map(CelType::String, CelType::Int));
+
+        // Test various expression types
+        let test_cases = [
+            // Literals
+            "42",
+            "3.14",
+            "'hello'",
+            "true",
+            "null",
+            // Identifiers
+            "x",
+            // Unary operators
+            "-x",
+            "!b",
+            // Binary operators
+            "x + 1",
+            "x - 1",
+            "x * 2",
+            "x / 2",
+            "x % 3",
+            "x == 1",
+            "x != 1",
+            "x < 10",
+            "x <= 10",
+            "x > 0",
+            "x >= 0",
+            "b && true",
+            "b || false",
+            // Ternary
+            "b ? 1 : 2",
+            // List construction
+            "[1, 2, 3]",
+            // Map construction
+            "{'a': 1, 'b': 2}",
+            // Member access (select)
+            "list.size()",
+            // Index access
+            "list[0]",
+            "map['key']",
+            // Function calls
+            "size(list)",
+            "int('42')",
+            "string(x)",
+            // Method calls
+            "s.startsWith('a')",
+            "s.endsWith('z')",
+            "s.contains('mid')",
+            // Comprehensions (macros)
+            "list.all(e, e > 0)",
+            "list.exists(e, e == 1)",
+            "list.map(e, e * 2)",
+            "list.filter(e, e > 1)",
+        ];
+
+        for source in test_cases {
+            let ast = env.compile(source).unwrap();
+
+            // ParsedExpr roundtrip
+            let parsed = ast.to_parsed_expr();
+            let parsed_bytes = parsed.encode_to_vec();
+            let decoded_parsed =
+                ParsedExpr::decode(parsed_bytes.as_slice()).expect(&format!("decode {}", source));
+            assert_eq!(
+                parsed, decoded_parsed,
+                "ParsedExpr mismatch for: {}",
+                source
+            );
+
+            // CheckedExpr roundtrip
+            let checked = ast.to_checked_expr().unwrap();
+            let checked_bytes = checked.encode_to_vec();
+            let decoded_checked = CheckedExpr::decode(checked_bytes.as_slice())
+                .expect(&format!("decode checked {}", source));
+            assert_eq!(
+                checked, decoded_checked,
+                "CheckedExpr mismatch for: {}",
+                source
+            );
+        }
+    }
 }

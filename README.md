@@ -13,6 +13,7 @@ Built on top of the core implementation is a Language Server Protocol (LSP) serv
 ### CEL Implementation
 - **Parser** - Full CEL syntax support with error recovery
 - **Type Checker** - Type inference, overload resolution, and validation
+- **Evaluator** - Runtime expression evaluation with variable bindings
 - **Standard Library** - All standard CEL functions and operators
 - **Extensions** - String, math, encoders, and optionals extensions
 - **Proto Types** - Support for protobuf message types in expressions
@@ -38,41 +39,109 @@ cel-core-proto = "0.1"
 
 ## Usage
 
-### Basic Usage with cel-core
+### Full Workflow: Parse, Check, and Evaluate
 
 ```rust
-use cel_core::{Env, CelType};
+use cel_core::{Env, CelType, Value, MapActivation};
 
-// Create an environment with the standard library
+// 1. Create an environment with the standard library and declare variables
 let env = Env::with_standard_library()
-    .with_variable("user_age", CelType::Int)
-    .with_variable("user_name", CelType::String);
+    .with_variable("user", CelType::String)
+    .with_variable("age", CelType::Int);
 
-// Parse and type-check an expression
-let ast = env.compile("user_age >= 18 && user_name.startsWith('admin')")?;
+// 2. Compile the expression (parse + type-check)
+let ast = env.compile("age >= 21 && user.startsWith('admin')")?;
 
-// Access type information
-assert!(ast.is_checked());
-assert_eq!(ast.result_type(), Some(&CelType::Bool));
+// 3. Create a program from the compiled AST
+let program = env.program(&ast)?;
 
-// Convert back to CEL source
-println!("{}", ast.to_cel_string());
+// 4. Set up variable bindings for evaluation
+let mut activation = MapActivation::new();
+activation.insert("user", Value::String("admin_alice".into()));
+activation.insert("age", Value::Int(25));
+
+// 5. Evaluate the expression
+let result = program.eval(&activation);
+assert_eq!(result, Value::Bool(true));
+```
+
+### Working with Different Value Types
+
+```rust
+use cel_core::{Env, CelType, Value, MapActivation};
+use std::sync::Arc;
+
+let env = Env::with_standard_library()
+    .with_variable("numbers", CelType::list(CelType::Int))
+    .with_variable("metadata", CelType::map(CelType::String, CelType::Int));
+
+let ast = env.compile("size(numbers) > 0 && metadata['count'] == 42")?;
+let program = env.program(&ast)?;
+
+let mut activation = MapActivation::new();
+
+// List values
+activation.insert("numbers", Value::List(Arc::from(vec![
+    Value::Int(1),
+    Value::Int(2),
+    Value::Int(3),
+])));
+
+// Map values
+use cel_core::eval::{ValueMap, MapKey};
+let mut map = ValueMap::new();
+map.insert(MapKey::String("count".into()), Value::Int(42));
+activation.insert("metadata", Value::Map(Arc::new(map)));
+
+let result = program.eval(&activation);
+assert_eq!(result, Value::Bool(true));
 ```
 
 ### Extensions
 
 ```rust
-use cel_core::{Env, CelType};
-use cel_core::ext::{StringsExtension, MathExtension};
+use cel_core::{Env, CelType, Value, MapActivation};
 
-// Enable specific extensions
+// Enable all extensions
 let env = Env::with_standard_library()
-    .with_extension(StringsExtension)
-    .with_extension(MathExtension)
+    .with_all_extensions()
     .with_variable("values", CelType::list(CelType::Int));
 
-// Use extension functions
 let ast = env.compile("math.greatest(values)")?;
+let program = env.program(&ast)?;
+
+let mut activation = MapActivation::new();
+activation.insert("values", Value::List(std::sync::Arc::from(vec![
+    Value::Int(10),
+    Value::Int(42),
+    Value::Int(7),
+])));
+
+let result = program.eval(&activation);
+assert_eq!(result, Value::Int(42));
+```
+
+### Error Handling
+
+```rust
+use cel_core::{Env, CelType, Value, MapActivation};
+
+let env = Env::with_standard_library()
+    .with_variable("x", CelType::Int);
+
+let ast = env.compile("10 / x")?;
+let program = env.program(&ast)?;
+
+let mut activation = MapActivation::new();
+activation.insert("x", Value::Int(0));
+
+let result = program.eval(&activation);
+
+// Division by zero returns an error value
+match result {
+    Value::Error(err) => println!("Evaluation error: {}", err),
+    other => println!("Result: {:?}", other),
+}
 ```
 
 ### Proto Wire Format (Interop with cel-go/cel-cpp)
@@ -82,42 +151,25 @@ For wire compatibility with other CEL implementations, use `cel-core-proto`:
 ```rust
 use cel_core::{Env, CelType};
 use cel_core_proto::AstToProto;
+use prost::Message;
 
 let env = Env::with_standard_library()
     .with_variable("x", CelType::Int);
 
 let ast = env.compile("x + 1")?;
 
-// Convert to proto format for serialization/interop
+// Convert to proto format
 let parsed_expr = ast.to_parsed_expr();
 let checked_expr = ast.to_checked_expr()?;
 
-// These can be serialized with prost and sent to cel-go/cel-cpp
-```
+// Serialize to bytes with prost (wire-compatible with cel-go/cel-cpp)
+let parsed_bytes = parsed_expr.encode_to_vec();
+let checked_bytes = checked_expr.encode_to_vec();
 
-### Low-level Parser API
-
-```rust
-use cel_core::{parse, Expr};
-
-let result = parse("x + y > 10");
-
-// Check for errors (parser supports error recovery)
-if !result.errors.is_empty() {
-    for error in &result.errors {
-        println!("Error: {} at {:?}", error.message, error.span);
-    }
-}
-
-// AST may exist even with errors due to error recovery
-if let Some(ast) = result.ast {
-    match &ast.node {
-        Expr::Binary { op, left, right } => {
-            println!("Binary operation: {:?}", op);
-        }
-        _ => {}
-    }
-}
+// Deserialize from bytes
+use cel_core_proto::{ParsedExpr, CheckedExpr};
+let decoded_parsed = ParsedExpr::decode(parsed_bytes.as_slice())?;
+let decoded_checked = CheckedExpr::decode(checked_bytes.as_slice())?;
 ```
 
 ## Crate Structure
@@ -150,18 +202,35 @@ CEL-Core is working toward full CEL implementation parity with cel-go. See [ROAD
 | **Lexer** | Complete | Logos-based, all CEL tokens |
 | **Parser** | Complete | Recursive descent, error recovery, macros |
 | **Type Checker** | Complete | Type inference, overload resolution |
+| **Evaluator** | Partial | Core evaluation working, see conformance status |
 | **Standard Library** | Complete | All standard functions and operators |
-| **Extensions** | Complete | Strings, math, encoders, optionals |
+| **Extensions** | Partial | Strings, math, encoders, optionals (eval in progress) |
 | **Proto Conversion** | Complete | `ParsedExpr` and `CheckedExpr` |
 | **LSP** | Partial | Diagnostics, hover, semantic tokens |
-| **Evaluation** | Not started | No runtime execution yet |
+
+### Conformance Testing
+
+CEL-Core is validated against the official [cel-spec](https://github.com/google/cel-spec) conformance test suite:
+
+| Test Category | Status |
+|--------------|--------|
+| integer_math | ✅ 100% |
+| fp_math | ✅ 100% |
+| basic | 98% |
+| string | 98% |
+| logic | 93% |
+| macros | 95% |
+| comparisons | 76% |
+| lists | 79% |
+| Proto messages | In progress |
+| Timestamps/Durations | In progress |
 
 ### Milestones
 
 1. ~~**Parser** - Full CEL syntax with error recovery~~
 2. ~~**Type Checker** - Type inference and `CheckedExpr` production~~
 3. ~~**Extensions** - String, math, encoder, and optional extensions~~
-4. **Evaluation** - Runtime execution with variable bindings
+4. ~~**Evaluation** - Runtime execution with variable bindings~~
 5. **Full Conformance** - Pass all cel-spec conformance tests
 
 ## Development

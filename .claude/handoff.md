@@ -1,73 +1,78 @@
 # Roadmap Handoff
 
 ## Last Updated
-2026-01-26
+2026-01-27
 
 ## Just Completed
-- [x] Proto type registry for message field resolution
-- [x] Unified `Ast` type with proto roundtrip support
-- [x] AST unparser (to_cel_string)
-- [x] Container support for qualified name resolution
-- [x] Conformance tests: 24/30 files passing (up from 20/30)
+- [x] Milestone 4: Evaluation Engine
+  - `Value` type with all CEL values (Int, UInt, Double, String, Bytes, Bool, Null, List, Map, Timestamp, Duration, Type, Optional, Error)
+  - `Program` compilation from checked AST
+  - `Activation` trait with `MapActivation`, `HierarchicalActivation`, `SharedActivation`
+  - Arithmetic, comparison, and logical operators
+  - Short-circuit evaluation (`&&`, `||`, ternary)
+  - Comprehension evaluation (`all`, `exists`, `exists_one`, `map`, `filter`)
+  - Standard library function implementations
+  - Evaluation conformance tests
 
 ### Summary
-Added proto type support for CEL type checking, enabling resolution of protobuf message fields, enum values, and qualified type names. Also added a unified `Ast` type following the cel-go pattern with proto roundtrip support, and an unparser for converting ASTs back to CEL source text.
+Implemented the CEL evaluation engine following the cel-go architecture pattern. The evaluator performs tree-walking evaluation of CEL expressions, supporting all standard operators, functions, and comprehensions. The `Program` type provides a compiled, thread-safe, cacheable representation that can be evaluated multiple times with different variable bindings.
 
-### Key Files Added/Modified
-- `crates/cel-core-common/src/proto_types.rs` - NEW: `ProtoTypeRegistry` for resolving protobuf types
-- `crates/cel-core/src/ast.rs` - NEW: Unified `Ast` type with `to_checked_expr()`, `from_checked_expr()`, `to_cel_string()`
-- `crates/cel-core/src/unparser.rs` - NEW: Convert AST back to CEL source text
-- `crates/cel-core-proto/src/checked_expr.rs` - NEW: `to_checked_expr()` and `check_result_from_proto()` helpers
-- `crates/cel-core-checker/src/checker.rs` - Added proto type resolution, container support
-- `crates/cel-core/src/env.rs` - Added `CompileError`, `with_proto_types()`, `set_container()`
-- `crates/cel-core-conformance/src/service.rs` - Uses proto registry for conformance tests
+### Key Files Added
+- `crates/cel-core/src/eval/mod.rs` - Module exports and documentation
+- `crates/cel-core/src/eval/value.rs` - `Value` enum with all CEL runtime types
+- `crates/cel-core/src/eval/evaluator.rs` - Tree-walking evaluator (~1400 lines)
+- `crates/cel-core/src/eval/activation.rs` - Variable binding implementations
+- `crates/cel-core/src/eval/program.rs` - Compiled program wrapper
+- `crates/cel-core/src/eval/functions.rs` - Function registry and implementations
+- `crates/cel-core/src/eval/error.rs` - Evaluation error types
 
-### What ProtoTypeRegistry Provides
-- Message field type lookup (`get_field_type`)
-- Enum value resolution (`get_enum_value`)
-- Qualified name resolution with container scoping (`resolve_qualified`)
-- Well-known type mapping (Timestamp -> CelType::Timestamp, Duration -> CelType::Duration, wrappers)
-- Support for nested message/enum types
-
-### What Unified Ast Provides
-- `Ast::is_checked()` - Check if AST has been type-checked
-- `Ast::result_type()` - Get the result type of the expression
-- `Ast::to_checked_expr()` - Convert to proto CheckedExpr
-- `Ast::to_parsed_expr()` - Convert to proto ParsedExpr
-- `Ast::from_checked_expr()` - Create from proto CheckedExpr (roundtrip)
-- `Ast::from_parsed_expr()` - Create from proto ParsedExpr
-- `Ast::to_cel_string()` - Convert back to CEL source text
+### Key Files Modified
+- `crates/cel-core/src/lib.rs` - Re-exports eval types
+- `crates/cel-core/src/env.rs` - Added `program()` method for creating Programs
+- `crates/cel-core/Cargo.toml` - Added regex dependency
+- `crates/cel-core-conformance/src/service.rs` - Added `eval()` implementation
+- `crates/cel-core-conformance/tests/conformance.rs` - Added eval conformance tests
+- `crates/cel-core-proto/src/lib.rs` - Added `value_to_proto()` for result conversion
+- `README.md` - Updated with evaluation examples
 
 ### Architecture Decisions
-1. **ProtoTypeRegistry in cel-core-common**: Placed in common crate for sharing between checker and conformance
-2. **Descriptor pool integration**: Uses prost_reflect::DescriptorPool for efficient proto type lookup
-3. **Container scoping**: Checker tracks container (e.g., "cel.expr.conformance.proto3") for qualified name resolution
-4. **Well-known type mapping**: google.protobuf.Timestamp/Duration map to native CelType variants
+1. **Tree-walking evaluator**: Simple, maintainable approach matching cel-go
+2. **Error-as-value semantics**: Errors propagate as `Value::Error` rather than Result
+3. **BTreeMap for maps**: Deterministic iteration order for reproducibility
+4. **Arc-based sharing**: Cheap cloning for values, thread-safe program sharing
+5. **Hierarchical activation**: Supports scoped variable bindings for comprehensions
+
+### What the Evaluator Supports
+- All literal types: null, bool, int, uint, double, string, bytes
+- Collections: lists, maps with heterogeneous keys
+- Operators: arithmetic (+, -, *, /, %), comparison (<, <=, ==, !=, >=, >), logical (&&, ||, !)
+- Short-circuit evaluation for &&, ||, and ternary
+- Field access and indexing (with optional variants)
+- Function calls via FunctionRegistry
+- Comprehensions: all, exists, exists_one, map, filter
+- Standard library: size, contains, startsWith, endsWith, matches, type(), in
 
 ## Next Up
-- [ ] Milestone 4: Evaluation (`Value` type, `Program`, `Activation`)
-- [ ] Fix remaining conformance failures (6 files: block_ext, enums, macros2, proto2_ext, type_deduction)
+- [ ] Milestone 5: Full Conformance
+  - Timestamp and duration arithmetic
+  - Extension library runtime implementations (string_ext, math_ext, etc.)
+  - Error-as-value semantics refinement
+  - All conformance tests passing
+  - LSP integration with new checker
 
-### Remaining Conformance Failures
+### Remaining Conformance Gaps
 1. **block_ext.textproto** - Requires `cel.block` macro support
 2. **enums.textproto** - Requires `proto.getExt`/`proto.hasExt` functions
 3. **macros2.textproto** - Some advanced macro edge cases
-4. **proto2_ext.textproto** - Proto2 extension support (`proto.getExt`, `proto.hasExt`)
-5. **type_deduction.textproto** - Advanced type parameter inference cases (flexible_type_parameter_assignment, wrappers)
-
-### Prerequisites for Next Steps
-- Evaluation requires `Value` enum and operator implementations
-- `proto.getExt`/`proto.hasExt` need special handling for proto2 extensions
+4. **proto2_ext.textproto** - Proto2 extension support
+5. **type_deduction.textproto** - Advanced type parameter inference cases
+6. **Timestamp/duration arithmetic** - Currently parses/checks but not all operations evaluate
 
 ### Potential Challenges
-- Type deduction failures involve subtle type parameter binding rules
-- Proto2 extensions are a different model than proto3 fields
-- Error-as-value semantics during evaluation
+- Extension function implementations need runtime support (not just type declarations)
+- Timestamp/duration arithmetic requires careful overflow handling
+- Some conformance tests may require proto message construction at runtime
 
 ## Open Questions
-- Should `cel.block` be a macro or a special form?
-- How should proto2 extensions be declared vs proto3 fields?
-
-## Conformance Status
-- 24/30 passing (parse + check tests)
-- Major categories passing: basic, comparisons, conversions, dynamic, fields, fp_math, integer_math, lists, logic, macros, namespace, optionals, parse, plumbing, proto2, proto3, string, timestamps, type_deduction_check (partial), unknowns
+- Should extension function implementations be lazy-loaded or bundled?
+- How should proto message construction work at runtime without full protobuf support?

@@ -44,6 +44,7 @@ pub mod unparser;
 
 // Core modules
 pub mod checker;
+pub mod eval;
 pub mod ext;
 pub mod parser;
 pub mod types;
@@ -55,6 +56,12 @@ pub use unparser::ast_to_string;
 // Re-export from checker module
 pub use checker::{
     check, CheckError, CheckErrorKind, CheckResult, ReferenceInfo, STANDARD_LIBRARY,
+};
+
+// Re-export from eval module
+pub use eval::{
+    Activation, EmptyActivation, EvalError, EvalErrorKind, Evaluator, FunctionRegistry,
+    HierarchicalActivation, MapActivation, Program, Value,
 };
 
 // Re-export from parser module
