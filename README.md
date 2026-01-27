@@ -39,7 +39,7 @@ cel-core-proto = "0.1"
 
 ## Usage
 
-### Full Workflow: Parse, Check, and Evaluate
+### Quick Start
 
 ```rust
 use cel_core::{Env, CelType, Value, MapActivation};
@@ -57,103 +57,145 @@ let program = env.program(&ast)?;
 
 // 4. Set up variable bindings for evaluation
 let mut activation = MapActivation::new();
-activation.insert("user", "admin_alice".into());  // &str converts to Value
-activation.insert("age", 25i64.into());           // i64 converts to Value
+activation.insert("user", "admin_alice");  // &str converts automatically
+activation.insert("age", 25);              // integers widen automatically
 
 // 5. Evaluate the expression
 let result = program.eval(&activation);
 assert_eq!(result, Value::Bool(true));
 ```
 
-### Working with Values
+> See [examples/quickstart.rs](crates/cel-core/examples/quickstart.rs) for the complete example.
 
-`Value` implements `From` and `TryFrom` traits for idiomatic Rust conversions:
+### Creating Values
+
+`Value` implements `From` for idiomatic Rust conversions. Integers automatically widen to CEL's `int` (i64) or `uint` (u64):
 
 ```rust
 use cel_core::Value;
 
-// Create values using Into trait
-let v: Value = 42i64.into();          // Value::Int(42)
+// Primitives - integers widen automatically
+let v: Value = 42.into();             // i32 -> Value::Int(42)
 let v: Value = true.into();           // Value::Bool(true)
 let v: Value = "hello".into();        // Value::String(...)
+let v: Value = 3.14.into();           // Value::Double(3.14)
+
+// Bytes from Vec<u8>
 let v: Value = vec![1u8, 2, 3].into(); // Value::Bytes(...)
 
-// Create lists from Vec<Value>
-let list: Value = vec![Value::Int(1), Value::Int(2)].into();
+// Lists using Value::list() - items convert automatically
+let v = Value::list([1, 2, 3]);        // list of ints
+let v = Value::list(["a", "b", "c"]);  // list of strings
 
-// Extract values using TryFrom trait
-use std::convert::TryFrom;
+// Maps using Value::map() - keys and values convert automatically
+let v = Value::map([("host", "localhost"), ("port", "8080")]);
 
-let v = Value::Int(42);
-let i: i64 = i64::try_from(&v).unwrap();  // 42
-
-let v: Value = "hello".into();
-let s: &str = <&str>::try_from(&v).unwrap();  // "hello"
-
-// Handle extraction errors
-use cel_core::ValueError;
-let v: Value = "not a number".into();
-let result: Result<i64, ValueError> = i64::try_from(&v);
-assert!(result.is_err());
+// Mixed value types require explicit Value::from()
+let v = Value::map([
+    ("name", Value::from("Alice")),
+    ("age", Value::from(30)),
+    ("active", Value::from(true)),
+]);
 ```
 
-### Working with Collections
+### Extracting Values
+
+Use `TryFrom` to extract Rust types from `Value`:
+
+```rust
+use cel_core::{Value, ValueError};
+
+let result = Value::Int(42);
+let n: i64 = (&result).try_into().unwrap();
+
+let result: Value = "hello".into();
+let s: &str = (&result).try_into().unwrap();
+
+// Handle type mismatches
+let result: Value = "not a number".into();
+let attempt: Result<i64, ValueError> = (&result).try_into();
+assert!(attempt.is_err());
+```
+
+> See [examples/extract_values.rs](crates/cel-core/examples/extract_values.rs) for more extraction examples.
+
+### Lists
 
 ```rust
 use cel_core::{Env, CelType, Value, MapActivation};
-use std::sync::Arc;
 
 let env = Env::with_standard_library()
-    .with_variable("numbers", CelType::list(CelType::Int))
-    .with_variable("metadata", CelType::map(CelType::String, CelType::Int));
-
-let ast = env.compile("size(numbers) > 0 && metadata['count'] == 42")?;
-let program = env.program(&ast)?;
+    .with_variable("numbers", CelType::list(CelType::Int));
 
 let mut activation = MapActivation::new();
+activation.insert("numbers", Value::list([1, 5, 3, 8, 2]));
 
-// List values - use Vec<Value>.into()
-activation.insert("numbers", vec![
-    Value::Int(1),
-    Value::Int(2),
-    Value::Int(3),
-].into());
+// Filter, map, exists, all - CEL list macros
+let ast = env.compile("numbers.filter(x, x > 3)").unwrap();
+let program = env.program(&ast).unwrap();
+println!("{}", program.eval(&activation));  // [5, 8]
 
-// Map values
-use cel_core::eval::{ValueMap, MapKey};
-let mut map = ValueMap::new();
-map.insert(MapKey::String("count".into()), Value::Int(42));
-activation.insert("metadata", Value::Map(Arc::new(map)));
-
-let result = program.eval(&activation);
-assert_eq!(result, Value::Bool(true));
+let ast = env.compile("numbers.map(x, x * 2)").unwrap();
+let program = env.program(&ast).unwrap();
+println!("{}", program.eval(&activation));  // [2, 10, 6, 16, 4]
 ```
+
+> See [examples/lists.rs](crates/cel-core/examples/lists.rs) for more list operations.
+
+### Maps
+
+```rust
+use cel_core::{Env, CelType, Value, MapActivation};
+
+let env = Env::with_standard_library()
+    .with_variable("user", CelType::map(CelType::String, CelType::Dyn));
+
+// Mixed value types require explicit Value::from()
+let user = Value::map([
+    ("name", Value::from("Alice")),
+    ("age", Value::from(30)),
+    ("active", Value::from(true)),
+]);
+
+let mut activation = MapActivation::new();
+activation.insert("user", user);
+
+// Field access and index access
+let ast = env.compile("user.name").unwrap();         // "Alice"
+let ast = env.compile(r#"user["age"]"#).unwrap();    // 30
+let ast = env.compile(r#""name" in user"#).unwrap(); // true
+let ast = env.compile("has(user.email)").unwrap();   // false
+```
+
+> See [examples/maps.rs](crates/cel-core/examples/maps.rs) for more map operations.
 
 ### Extensions
 
-```rust
-use cel_core::{Env, CelType, Value, MapActivation};
+Extensions provide additional functions beyond the standard library. Currently, extensions are available for type checking; runtime evaluation is in progress.
 
-// Enable all extensions
+```rust
+use cel_core::{Env, CelType};
+
+// Enable all extensions (strings, math, encoders, optionals)
 let env = Env::with_standard_library()
     .with_all_extensions()
-    .with_variable("values", CelType::list(CelType::Int));
+    .with_variable("values", CelType::list(CelType::Int))
+    .with_variable("text", CelType::String);
 
+// Math extension - type checks correctly
 let ast = env.compile("math.greatest(values)")?;
-let program = env.program(&ast)?;
+let ast = env.compile("math.least(values)")?;
 
-let mut activation = MapActivation::new();
-activation.insert("values", vec![
-    Value::Int(10),
-    Value::Int(42),
-    Value::Int(7),
-].into());
-
-let result = program.eval(&activation);
-assert_eq!(result, Value::Int(42));
+// String extension - type checks correctly
+let ast = env.compile("text.split(' ')")?;
+let ast = env.compile("['a', 'b'].join('-')")?;
 ```
 
+> See [examples/extensions.rs](crates/cel-core/examples/extensions.rs) for more details.
+
 ### Error Handling
+
+CEL returns error values for runtime errors like division by zero or index out of bounds:
 
 ```rust
 use cel_core::{Env, CelType, Value, MapActivation};
@@ -165,16 +207,21 @@ let ast = env.compile("10 / x")?;
 let program = env.program(&ast)?;
 
 let mut activation = MapActivation::new();
-activation.insert("x", 0i64.into());
+activation.insert("x", 0);
 
 let result = program.eval(&activation);
 
 // Division by zero returns an error value
 match result {
-    Value::Error(err) => println!("Evaluation error: {}", err),
-    other => println!("Result: {:?}", other),
+    Value::Error(err) => println!("Error: {}", err),
+    other => println!("Result: {}", other),
 }
+
+// Use has() to safely check field existence before access
+let ast = env.compile("has(config.key) ? config.key : 'default'")?;
 ```
+
+> See [examples/error_handling.rs](crates/cel-core/examples/error_handling.rs) for more error handling patterns.
 
 ### Proto Wire Format (Interop with cel-go/cel-cpp)
 
