@@ -3,9 +3,11 @@
 //! A `Program` combines a parsed/checked AST with a function registry,
 //! providing a convenient interface for evaluating expressions.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use super::{Activation, EmptyActivation, Evaluator, FunctionRegistry, Value};
+use crate::types::ProtoTypeRegistry;
 use crate::Ast;
 
 /// A compiled CEL program ready for evaluation.
@@ -17,12 +19,62 @@ use crate::Ast;
 pub struct Program {
     ast: Arc<Ast>,
     functions: Arc<FunctionRegistry>,
+    proto_types: Option<Arc<ProtoTypeRegistry>>,
+    abbreviations: Option<Arc<HashMap<String, String>>>,
 }
 
 impl Program {
     /// Create a new program from an AST and function registry.
     pub fn new(ast: Arc<Ast>, functions: Arc<FunctionRegistry>) -> Self {
-        Self { ast, functions }
+        Self {
+            ast,
+            functions,
+            proto_types: None,
+            abbreviations: None,
+        }
+    }
+
+    /// Create a new program with proto type registry.
+    pub fn with_proto_types(
+        ast: Arc<Ast>,
+        functions: Arc<FunctionRegistry>,
+        proto_types: Arc<ProtoTypeRegistry>,
+    ) -> Self {
+        Self {
+            ast,
+            functions,
+            proto_types: Some(proto_types),
+            abbreviations: None,
+        }
+    }
+
+    /// Create a new program with abbreviations.
+    pub fn with_abbreviations(
+        ast: Arc<Ast>,
+        functions: Arc<FunctionRegistry>,
+        abbreviations: HashMap<String, String>,
+    ) -> Self {
+        Self {
+            ast,
+            functions,
+            proto_types: None,
+            abbreviations: Some(Arc::new(abbreviations)),
+        }
+    }
+
+    /// Create a new program with proto type registry and abbreviations.
+    pub fn with_proto_types_and_abbreviations(
+        ast: Arc<Ast>,
+        functions: Arc<FunctionRegistry>,
+        proto_types: Arc<ProtoTypeRegistry>,
+        abbreviations: HashMap<String, String>,
+    ) -> Self {
+        Self {
+            ast,
+            functions,
+            proto_types: Some(proto_types),
+            abbreviations: Some(Arc::new(abbreviations)),
+        }
     }
 
     /// Get the AST for this program.
@@ -37,7 +89,42 @@ impl Program {
 
     /// Evaluate the program with the given variable bindings.
     pub fn eval(&self, activation: &dyn Activation) -> Value {
-        let evaluator = Evaluator::new(activation, &self.functions);
+        self.eval_with_container(activation, "")
+    }
+
+    /// Evaluate the program with the given variable bindings and container namespace.
+    ///
+    /// The container is used for resolving unqualified type names following
+    /// C++ namespace rules. For example, with container "cel.expr.conformance.proto3"
+    /// and type name "TestAllTypes", resolution tries:
+    /// 1. cel.expr.conformance.proto3.TestAllTypes
+    /// 2. cel.expr.conformance.TestAllTypes
+    /// 3. cel.expr.TestAllTypes
+    /// 4. cel.TestAllTypes
+    /// 5. TestAllTypes
+    pub fn eval_with_container(&self, activation: &dyn Activation, container: &str) -> Value {
+        let mut evaluator = Evaluator::new(activation, &self.functions);
+
+        // Pass type info from checked AST
+        if let Some(type_info) = self.ast.type_info() {
+            evaluator = evaluator.with_reference_map(&type_info.reference_map);
+        }
+
+        // Pass proto type registry
+        if let Some(ref proto_types) = self.proto_types {
+            evaluator = evaluator.with_proto_types(proto_types);
+        }
+
+        // Set container for type resolution
+        if !container.is_empty() {
+            evaluator = evaluator.with_container(container);
+        }
+
+        // Pass abbreviations
+        if let Some(ref abbreviations) = self.abbreviations {
+            evaluator = evaluator.with_abbreviations(abbreviations);
+        }
+
         evaluator.eval(self.ast.expr())
     }
 

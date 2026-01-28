@@ -5,10 +5,14 @@
 
 use std::sync::Arc;
 
+use prost::Message;
+use prost_reflect::prost_types;
+use prost_reflect::{DynamicMessage, ReflectMessage};
+
 use crate::{
     Binding, CheckResponse, ConformanceService, EvalResponse, Issue, ParseResponse, TypeDecl,
 };
-use cel_core::eval::{MapActivation, MapKey, Value, ValueMap};
+use cel_core::eval::{MapActivation, MapKey, ProtoValue as CelProtoValue, Value, ValueMap};
 use cel_core::types::ProtoTypeRegistry;
 use cel_core::Env;
 use cel_core_proto::gen::cel::expr::value::Kind as ProtoValueKind;
@@ -150,9 +154,9 @@ impl ConformanceService for CelConformanceService {
         }
     }
 
-    fn eval(&self, expr: &ParsedExpr, bindings: &[Binding]) -> EvalResponse {
+    fn eval(&self, expr: &ParsedExpr, bindings: &[Binding], container: &str) -> EvalResponse {
         // Convert ParsedExpr to AST
-        let ast = match from_parsed_expr(expr) {
+        let parsed_ast = match from_parsed_expr(expr) {
             Ok(ast) => ast,
             Err(e) => {
                 return EvalResponse {
@@ -162,8 +166,19 @@ impl ConformanceService for CelConformanceService {
             }
         };
 
+        // Get proto registry for value conversion
+        let proto_types = match self.env.proto_types() {
+            Some(registry) => registry,
+            None => {
+                return EvalResponse {
+                    result: None,
+                    issues: vec![Issue::error("proto type registry not available")],
+                };
+            }
+        };
+
         // Convert bindings to activation
-        let activation = match bindings_to_activation(bindings) {
+        let activation = match bindings_to_activation(bindings, proto_types) {
             Ok(act) => act,
             Err(e) => {
                 return EvalResponse {
@@ -173,13 +188,15 @@ impl ConformanceService for CelConformanceService {
             }
         };
 
-        // Create a program and evaluate
-        // Note: We create an unchecked Ast since we don't need type info for evaluation
-        let unchecked_ast = cel_core::Ast::new_unchecked(ast, "");
+        // Run the checker to get type info (needed for proto message construction)
+        // We use the check result even if there are errors, as we still get useful
+        // reference_map entries for type resolution
+        let check_result = self.env.check(&parsed_ast);
+        let checked_ast = cel_core::Ast::new_checked(parsed_ast, "", check_result);
 
-        match self.env.program(&unchecked_ast) {
+        match self.env.program(&checked_ast) {
             Ok(program) => {
-                let result = program.eval(&activation);
+                let result = program.eval_with_container(&activation, container);
                 let expr_value = value_to_proto(&result);
                 EvalResponse {
                     result: Some(expr_value),
@@ -195,17 +212,20 @@ impl ConformanceService for CelConformanceService {
 }
 
 /// Convert bindings to a MapActivation.
-fn bindings_to_activation(bindings: &[Binding]) -> Result<MapActivation, String> {
+fn bindings_to_activation(
+    bindings: &[Binding],
+    registry: &ProtoTypeRegistry,
+) -> Result<MapActivation, String> {
     let mut activation = MapActivation::new();
     for binding in bindings {
-        let value = proto_value_to_value(&binding.value)?;
+        let value = proto_value_to_value(&binding.value, registry)?;
         activation.insert(&binding.name, value);
     }
     Ok(activation)
 }
 
 /// Convert a proto Value to a cel_core::eval::Value.
-fn proto_value_to_value(proto: &ProtoValue) -> Result<Value, String> {
+fn proto_value_to_value(proto: &ProtoValue, registry: &ProtoTypeRegistry) -> Result<Value, String> {
     match &proto.kind {
         Some(ProtoValueKind::NullValue(_)) => Ok(Value::Null),
         Some(ProtoValueKind::BoolValue(b)) => Ok(Value::Bool(*b)),
@@ -215,49 +235,181 @@ fn proto_value_to_value(proto: &ProtoValue) -> Result<Value, String> {
         Some(ProtoValueKind::StringValue(s)) => Ok(Value::String(Arc::from(s.as_str()))),
         Some(ProtoValueKind::BytesValue(b)) => Ok(Value::Bytes(Arc::from(b.as_ref()))),
         Some(ProtoValueKind::ListValue(list)) => {
-            let values: Result<Vec<_>, _> =
-                list.values.iter().map(proto_value_to_value).collect();
+            let values: Result<Vec<_>, _> = list
+                .values
+                .iter()
+                .map(|v| proto_value_to_value(v, registry))
+                .collect();
             Ok(Value::List(Arc::from(values?)))
         }
         Some(ProtoValueKind::MapValue(map)) => {
             let mut value_map = ValueMap::new();
             for entry in &map.entries {
-                let key = entry
-                    .key
-                    .as_ref()
-                    .ok_or("missing map key")?;
-                let value = entry
-                    .value
-                    .as_ref()
-                    .ok_or("missing map value")?;
-                let key_value = proto_value_to_value(key)?;
+                let key = entry.key.as_ref().ok_or("missing map key")?;
+                let value = entry.value.as_ref().ok_or("missing map value")?;
+                let key_value = proto_value_to_value(key, registry)?;
                 let map_key = MapKey::from_value(&key_value)
                     .ok_or_else(|| format!("invalid map key type: {:?}", key_value))?;
-                value_map.insert(map_key, proto_value_to_value(value)?);
+                value_map.insert(map_key, proto_value_to_value(value, registry)?);
             }
             Ok(Value::Map(Arc::new(value_map)))
         }
-        Some(ProtoValueKind::TypeValue(name)) => {
-            Ok(Value::new_type(name.as_str()))
+        Some(ProtoValueKind::TypeValue(name)) => Ok(Value::new_type(name.as_str())),
+        Some(ProtoValueKind::EnumValue(ev)) => {
+            // Enum values are represented as ints in CEL
+            Ok(Value::Int(ev.value as i64))
         }
-        Some(ProtoValueKind::EnumValue(_)) => {
-            Err("enum values not yet supported".to_string())
-        }
-        Some(ProtoValueKind::ObjectValue(_)) => {
-            Err("object values not yet supported".to_string())
+        Some(ProtoValueKind::ObjectValue(any)) => {
+            // Decode the Any message using the proto registry
+            // Extract the type name from the type_url
+            let type_name = any
+                .type_url
+                .strip_prefix("type.googleapis.com/")
+                .unwrap_or(&any.type_url);
+
+            // Get the message descriptor
+            let descriptor = registry
+                .get_message(type_name)
+                .ok_or_else(|| format!("unknown message type: {}", type_name))?;
+
+            // Decode the message
+            let message = DynamicMessage::decode(descriptor, any.value.as_ref())
+                .map_err(|e| format!("failed to decode message: {}", e))?;
+
+            // Convert to CEL Value using well-known type unwrapping
+            Ok(unwrap_well_known_or_proto(message))
         }
         None => Err("missing value kind".to_string()),
+    }
+}
+
+/// Unwrap well-known types to native CEL values, or wrap as Proto value.
+fn unwrap_well_known_or_proto(message: DynamicMessage) -> Value {
+    let descriptor = message.descriptor();
+    let type_name = descriptor.full_name();
+    match type_name {
+        "google.protobuf.Timestamp" => {
+            let seconds = get_field_i64(&message, "seconds").unwrap_or(0);
+            let nanos = get_field_i32(&message, "nanos").unwrap_or(0);
+            Value::Timestamp(cel_core::eval::Timestamp::new(seconds, nanos))
+        }
+        "google.protobuf.Duration" => {
+            let seconds = get_field_i64(&message, "seconds").unwrap_or(0);
+            let nanos = get_field_i32(&message, "nanos").unwrap_or(0);
+            Value::Duration(cel_core::eval::Duration::new(seconds, nanos))
+        }
+        "google.protobuf.Int32Value" | "google.protobuf.Int64Value" => {
+            let value = get_field_i64(&message, "value").unwrap_or(0);
+            Value::Int(value)
+        }
+        "google.protobuf.UInt32Value" | "google.protobuf.UInt64Value" => {
+            let value = get_field_u64(&message, "value").unwrap_or(0);
+            Value::UInt(value)
+        }
+        "google.protobuf.FloatValue" | "google.protobuf.DoubleValue" => {
+            let value = get_field_f64(&message, "value").unwrap_or(0.0);
+            Value::Double(value)
+        }
+        "google.protobuf.BoolValue" => {
+            let value = get_field_bool(&message, "value").unwrap_or(false);
+            Value::Bool(value)
+        }
+        "google.protobuf.StringValue" => {
+            let value = get_field_string(&message, "value").unwrap_or_default();
+            Value::String(Arc::from(value))
+        }
+        "google.protobuf.BytesValue" => {
+            let value = get_field_bytes(&message, "value").unwrap_or_default();
+            Value::Bytes(Arc::from(value))
+        }
+        _ => Value::Proto(CelProtoValue::new(message)),
+    }
+}
+
+// Helper functions for extracting fields from DynamicMessage
+fn get_field_i64(message: &DynamicMessage, field_name: &str) -> Option<i64> {
+    let field = message.descriptor().get_field_by_name(field_name)?;
+    match message.get_field(&field) {
+        std::borrow::Cow::Owned(prost_reflect::Value::I64(v)) => Some(v),
+        std::borrow::Cow::Borrowed(prost_reflect::Value::I64(v)) => Some(*v),
+        std::borrow::Cow::Owned(prost_reflect::Value::I32(v)) => Some(v as i64),
+        std::borrow::Cow::Borrowed(prost_reflect::Value::I32(v)) => Some(*v as i64),
+        _ => None,
+    }
+}
+
+fn get_field_i32(message: &DynamicMessage, field_name: &str) -> Option<i32> {
+    let field = message.descriptor().get_field_by_name(field_name)?;
+    match message.get_field(&field) {
+        std::borrow::Cow::Owned(prost_reflect::Value::I32(v)) => Some(v),
+        std::borrow::Cow::Borrowed(prost_reflect::Value::I32(v)) => Some(*v),
+        _ => None,
+    }
+}
+
+fn get_field_u64(message: &DynamicMessage, field_name: &str) -> Option<u64> {
+    let field = message.descriptor().get_field_by_name(field_name)?;
+    match message.get_field(&field) {
+        std::borrow::Cow::Owned(prost_reflect::Value::U64(v)) => Some(v),
+        std::borrow::Cow::Borrowed(prost_reflect::Value::U64(v)) => Some(*v),
+        std::borrow::Cow::Owned(prost_reflect::Value::U32(v)) => Some(v as u64),
+        std::borrow::Cow::Borrowed(prost_reflect::Value::U32(v)) => Some(*v as u64),
+        _ => None,
+    }
+}
+
+fn get_field_f64(message: &DynamicMessage, field_name: &str) -> Option<f64> {
+    let field = message.descriptor().get_field_by_name(field_name)?;
+    match message.get_field(&field) {
+        std::borrow::Cow::Owned(prost_reflect::Value::F64(v)) => Some(v),
+        std::borrow::Cow::Borrowed(prost_reflect::Value::F64(v)) => Some(*v),
+        std::borrow::Cow::Owned(prost_reflect::Value::F32(v)) => Some(v as f64),
+        std::borrow::Cow::Borrowed(prost_reflect::Value::F32(v)) => Some(*v as f64),
+        _ => None,
+    }
+}
+
+fn get_field_bool(message: &DynamicMessage, field_name: &str) -> Option<bool> {
+    let field = message.descriptor().get_field_by_name(field_name)?;
+    match message.get_field(&field) {
+        std::borrow::Cow::Owned(prost_reflect::Value::Bool(v)) => Some(v),
+        std::borrow::Cow::Borrowed(prost_reflect::Value::Bool(v)) => Some(*v),
+        _ => None,
+    }
+}
+
+fn get_field_string(message: &DynamicMessage, field_name: &str) -> Option<String> {
+    let field = message.descriptor().get_field_by_name(field_name)?;
+    match message.get_field(&field) {
+        std::borrow::Cow::Owned(prost_reflect::Value::String(v)) => Some(v),
+        std::borrow::Cow::Borrowed(prost_reflect::Value::String(v)) => Some(v.clone()),
+        _ => None,
+    }
+}
+
+fn get_field_bytes(message: &DynamicMessage, field_name: &str) -> Option<Vec<u8>> {
+    let field = message.descriptor().get_field_by_name(field_name)?;
+    match message.get_field(&field) {
+        std::borrow::Cow::Owned(prost_reflect::Value::Bytes(v)) => Some(v.to_vec()),
+        std::borrow::Cow::Borrowed(prost_reflect::Value::Bytes(v)) => Some(v.to_vec()),
+        _ => None,
     }
 }
 
 /// Convert a cel_core::eval::Value to a proto ExprValue.
 fn value_to_proto(value: &Value) -> ExprValue {
     match value {
-        Value::Error(_) => {
-            // For errors, we return an empty ErrorSet - the error message is captured
-            // in the Issues returned alongside the result
+        Value::Error(e) => {
+            // For debugging, include the error message
+            use cel_core_proto::gen::cel::expr::Status;
             ExprValue {
-                kind: Some(expr_value::Kind::Error(ErrorSet { errors: vec![] })),
+                kind: Some(expr_value::Kind::Error(ErrorSet {
+                    errors: vec![Status {
+                        code: 0,
+                        message: e.to_string(),
+                        details: vec![],
+                    }],
+                })),
             }
         }
         _ => ExprValue {
@@ -303,6 +455,15 @@ fn value_to_proto_value(value: &Value) -> ProtoValue {
                 return value_to_proto_value(v);
             }
         },
+        Value::Proto(proto) => {
+            // Serialize proto message to Any format
+            let type_url = format!("type.googleapis.com/{}", proto.type_name());
+            let value_bytes = proto.message().encode_to_vec();
+            ProtoValueKind::ObjectValue(prost_types::Any {
+                type_url,
+                value: value_bytes.into(),
+            })
+        }
         Value::Error(_) => {
             // Errors are handled at the ExprValue level
             ProtoValueKind::NullValue(0)
@@ -401,7 +562,7 @@ mod tests {
     fn test_eval_literal() {
         let service = CelConformanceService::new();
         let parse_result = service.parse("42").parsed_expr.unwrap();
-        let eval_result = service.eval(&parse_result, &[]);
+        let eval_result = service.eval(&parse_result, &[], "");
         assert!(eval_result.is_ok(), "eval should succeed: {:?}", eval_result.issues);
         assert!(eval_result.result.is_some());
 
@@ -432,7 +593,7 @@ mod tests {
             },
         };
 
-        let eval_result = service.eval(&parse_result, &[binding]);
+        let eval_result = service.eval(&parse_result, &[binding], "");
         assert!(eval_result.is_ok(), "eval should succeed: {:?}", eval_result.issues);
 
         let result = eval_result.result.unwrap();
@@ -451,7 +612,7 @@ mod tests {
     fn test_eval_unknown_variable() {
         let service = CelConformanceService::new();
         let parse_result = service.parse("unknown_var").parsed_expr.unwrap();
-        let eval_result = service.eval(&parse_result, &[]);
+        let eval_result = service.eval(&parse_result, &[], "");
 
         // Should return an error result
         let result = eval_result.result.unwrap();

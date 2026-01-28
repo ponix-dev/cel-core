@@ -63,6 +63,8 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
 
+use prost_reflect::{DynamicMessage, ReflectMessage};
+
 use super::EvalError;
 use crate::types::{CelType, CelValue};
 
@@ -116,6 +118,8 @@ pub enum Value {
     Type(TypeValue),
     /// Optional value (present or absent).
     Optional(OptionalValue),
+    /// Protobuf message value.
+    Proto(ProtoValue),
     /// Error value (evaluation errors propagate as values).
     Error(Arc<EvalError>),
 }
@@ -335,6 +339,63 @@ pub enum OptionalValue {
     None,
     /// A present optional value.
     Some(Box<Value>),
+}
+
+/// A protobuf message value.
+///
+/// Wraps a `prost_reflect::DynamicMessage` for runtime proto handling.
+/// Uses Arc for cheap cloning.
+#[derive(Clone)]
+pub struct ProtoValue {
+    /// The dynamic message instance.
+    message: Arc<DynamicMessage>,
+    /// Cached type name for efficient access.
+    type_name: Arc<str>,
+}
+
+impl ProtoValue {
+    /// Create a new proto value from a dynamic message.
+    pub fn new(message: DynamicMessage) -> Self {
+        let type_name = Arc::from(message.descriptor().full_name());
+        Self {
+            message: Arc::new(message),
+            type_name,
+        }
+    }
+
+    /// Get a reference to the underlying dynamic message.
+    pub fn message(&self) -> &DynamicMessage {
+        &self.message
+    }
+
+    /// Get the fully qualified type name of this message.
+    pub fn type_name(&self) -> &str {
+        &self.type_name
+    }
+
+    /// Get the message descriptor.
+    pub fn descriptor(&self) -> prost_reflect::MessageDescriptor {
+        self.message.descriptor()
+    }
+}
+
+impl std::fmt::Debug for ProtoValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProtoValue")
+            .field("type_name", &self.type_name())
+            .finish()
+    }
+}
+
+impl PartialEq for ProtoValue {
+    fn eq(&self, other: &Self) -> bool {
+        // Messages are equal if same type and all fields equal
+        if self.type_name() != other.type_name() {
+            return false;
+        }
+        // Use prost_reflect's equality
+        self.message.as_ref() == other.message.as_ref()
+    }
 }
 
 impl OptionalValue {
@@ -1052,6 +1113,7 @@ impl Value {
                 OptionalValue::None => CelType::optional(CelType::Dyn),
                 OptionalValue::Some(v) => CelType::optional(v.cel_type()),
             },
+            Value::Proto(proto) => CelType::message(proto.type_name()),
             Value::Error(_) => CelType::Error,
         }
     }
@@ -1072,6 +1134,7 @@ impl Value {
             Value::Duration(_) => TypeValue::duration_type(),
             Value::Type(_) => TypeValue::type_type(),
             Value::Optional(_) => TypeValue::new("optional"),
+            Value::Proto(proto) => TypeValue::new(proto.type_name()),
             Value::Error(_) => TypeValue::new("error"),
         }
     }
@@ -1087,9 +1150,12 @@ impl Value {
     }
 
     /// Check if this value is truthy (for bool values).
+    ///
+    /// Returns Some(true) for proto messages since they are always truthy.
     pub fn is_truthy(&self) -> Option<bool> {
         match self {
             Value::Bool(b) => Some(*b),
+            Value::Proto(_) => Some(true), // Proto messages are always truthy
             _ => None,
         }
     }
@@ -1131,6 +1197,7 @@ impl PartialEq for Value {
                 (OptionalValue::Some(va), OptionalValue::Some(vb)) => va == vb,
                 _ => false,
             },
+            (Value::Proto(a), Value::Proto(b)) => a == b,
             _ => false,
         }
     }
@@ -1234,6 +1301,7 @@ impl fmt::Display for Value {
                 OptionalValue::None => write!(f, "optional.none()"),
                 OptionalValue::Some(v) => write!(f, "optional.of({})", v),
             },
+            Value::Proto(p) => write!(f, "{}{{...}}", p.type_name()),
             Value::Error(e) => write!(f, "error({})", e),
         }
     }

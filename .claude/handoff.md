@@ -1,69 +1,53 @@
 # Roadmap Handoff
 
 ## Last Updated
-2026-01-27
+2026-01-28
 
 ## Just Completed
-- [x] Timestamp and Duration Support (Milestone 5 partial)
-  - Full timestamp parsing from RFC 3339 strings (with timezone offsets)
-  - Full duration parsing from CEL duration strings (e.g., "1h30m15s")
-  - Timestamp/duration arithmetic with proper overflow and range checking
-  - All timestamp accessor methods (getFullYear, getMonth, getDate, etc.)
-  - All duration accessor methods (getHours, getMinutes, getSeconds, getMilliseconds)
-  - Timezone support via IANA names and UTC offset strings
-  - Proper range validation (timestamps: year 0001-9999, durations: ~10000 years)
+- [x] Abbreviations support for type name shortcuts (Milestone 3 completion)
+  - New `Abbreviations` type for mapping short names to fully-qualified names
+  - Integration with checker for type resolution during compilation
+  - Integration with evaluator for runtime type resolution
+  - Examples demonstrating containers, abbreviations, and combined usage
 
 ### Summary
-Implemented comprehensive timestamp and duration support for the CEL evaluator. This includes parsing, formatting, arithmetic operations, and all accessor methods. The implementation follows CEL spec requirements for range validation, ensuring that timestamps stay within the valid range (year 0001 to 9999) and durations don't exceed approximately 10000 years.
+Implemented abbreviations support for CEL namespace resolution. This allows short names (like `Timestamp`) to be used instead of fully-qualified names (like `google.protobuf.Timestamp`) in CEL expressions. The feature complements the existing container support, following cel-go's namespace resolution patterns.
 
 ### Key Files Added
-- `crates/cel-core/src/eval/time.rs` - 435 lines of timestamp/duration utilities
-  - `parse_timestamp()` - RFC 3339 parsing with timezone support
-  - `parse_duration()` - CEL duration string parsing (h, m, s, ms, us, ns)
-  - `format_timestamp()` / `format_duration()` - String conversion
-  - `TimestampComponent` enum for accessor methods
-  - `parse_timezone()` for IANA and offset timezone handling
+- `crates/cel-core/examples/namespaces/abbreviations.rs` - Example using abbreviations
+- `crates/cel-core/examples/namespaces/containers.rs` - Example using containers
+- `crates/cel-core/examples/namespaces/combined.rs` - Example combining both features
+- `crates/cel-core/examples/namespaces/README.md` - Documentation for namespace resolution
 
 ### Key Files Modified
-- `crates/cel-core/src/eval/value.rs` - Added range constants and validation methods
-  - `Timestamp::MIN_SECONDS` / `MAX_SECONDS` for valid range
-  - `Duration::MIN_SECONDS` / `MAX_SECONDS` for valid range
-  - `is_valid()` methods for range checking
-  - Chrono conversion helpers
-- `crates/cel-core/src/eval/evaluator.rs` - Added timestamp/duration operations
-  - Arithmetic with overflow/range checking
-  - `timestamp()` and `duration()` type conversion functions
-  - All timestamp/duration accessor methods
-- `crates/cel-core/src/eval/error.rs` - Added `range_error()` constructor
-- `crates/cel-core/src/eval/mod.rs` - Exported time module
-- `crates/cel-core/Cargo.toml` - Added chrono and chrono-tz dependencies
+- `crates/cel-core/src/env.rs` - Added `Abbreviations` type and `with_abbreviations()` builder
+- `crates/cel-core/src/checker/checker.rs` - Added abbreviation expansion during type checking
+- `crates/cel-core/src/checker/mod.rs` - Exported new checker functions with abbreviations
+- `crates/cel-core/src/eval/evaluator.rs` - Added abbreviation support during evaluation
+- `crates/cel-core/src/eval/program.rs` - Pass abbreviations to evaluator
 
-### Conformance Test Results
-- **Timestamp tests: 73/76 passing** (up from 71/76)
-- Fixed: Duration range validation for timestamp span calculations
-- Remaining 3 failures require proto type support (not timestamp/duration logic)
+### Notable Decisions
+- Abbreviations are resolved after container hierarchy (C++ namespace rules)
+- Reference map stores fully-qualified names for efficient evaluation
+- Abbreviations work for both message types and enum values
 
 ## Next Up
-- [ ] Proto type conformance issues
-  - `google.protobuf.Timestamp == type(timestamp(...))` comparison
-  - `google.protobuf.Duration == type(duration(...))` comparison
-  - Proto object value support for `getMilliseconds()` test
+- [ ] Error-as-value semantics
+  - CEL treats errors as first-class values that propagate through expressions
+  - Some operations should absorb errors (e.g., `false && error` returns `false`)
 
-### Why This Is Next
-The remaining timestamp conformance failures are all proto-related:
-1. Type comparison with `google.protobuf.Timestamp` and `google.protobuf.Duration`
-2. Object value handling for proto message inputs
-
-These are the logical next step as they're blocking full timestamp/duration conformance.
+- [ ] Proto type conformance
+  - `type(timestamp(...))` should return `google.protobuf.Timestamp`
+  - Wrapper type comparison with proto types
 
 ### Prerequisites
-- Need to understand how cel-go handles `type()` for proto well-known types
-- May need to special-case Timestamp/Duration type comparisons
+- Need to audit all operators for error propagation rules
+- Review cel-spec for exact error semantics
 
 ### Potential Challenges
-- Proto type names may need special handling in the type system
-- Object value support requires proto message construction at runtime
+- Error propagation rules vary by operator
+- Balancing performance with correct error handling
 
 ## Open Questions
-- Should `type(timestamp(...))` return `google.protobuf.Timestamp` or `timestamp`?
-- How should proto message values be constructed without full protobuf support?
+- Should `type(timestamp(...))` return `google.protobuf.Timestamp` or the CEL native `timestamp` type?
+- How should optional field errors be handled in error-as-value semantics?
