@@ -613,6 +613,7 @@ let result = program.eval(&[("name", Value::String("test123".into()))])?;
 - [x] Unified `Ast` type with proto roundtrip support
 - [x] AST unparser (to_cel_string)
 - [x] Container support for qualified name resolution
+- [x] Abbreviations support for type name shortcuts
 - [x] Conformance tests: 24/30 files passing
 
 ### Milestone 4: Evaluation

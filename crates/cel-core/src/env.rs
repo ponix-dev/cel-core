@@ -4,10 +4,168 @@
 //! following the cel-go architecture pattern.
 
 use std::collections::HashMap;
+use std::fmt;
 use std::sync::Arc;
 
+/// Error when creating abbreviations.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AbbrevError {
+    /// Two qualified names map to the same short name.
+    Conflict {
+        short_name: String,
+        existing: String,
+        new: String,
+    },
+    /// The qualified name is empty or invalid.
+    InvalidName(String),
+}
+
+impl fmt::Display for AbbrevError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AbbrevError::Conflict {
+                short_name,
+                existing,
+                new,
+            } => {
+                write!(
+                    f,
+                    "abbreviation conflict: '{}' already maps to '{}', cannot map to '{}'",
+                    short_name, existing, new
+                )
+            }
+            AbbrevError::InvalidName(name) => {
+                write!(f, "invalid qualified name: '{}'", name)
+            }
+        }
+    }
+}
+
+impl std::error::Error for AbbrevError {}
+
+/// A validated set of abbreviations mapping short names to fully-qualified names.
+///
+/// Abbreviations allow short names to be used instead of fully-qualified
+/// type names in CEL expressions. This is useful when working with protobuf
+/// types from multiple packages.
+///
+/// # Example
+///
+/// ```
+/// use cel_core::Abbreviations;
+///
+/// let abbrevs = Abbreviations::new()
+///     .add("my.package.Foo").unwrap()     // "Foo" -> "my.package.Foo"
+///     .add("other.package.Bar").unwrap(); // "Bar" -> "other.package.Bar"
+///
+/// assert_eq!(abbrevs.resolve("Foo"), Some("my.package.Foo"));
+/// assert_eq!(abbrevs.resolve("Bar"), Some("other.package.Bar"));
+/// ```
+#[derive(Debug, Clone, Default)]
+pub struct Abbreviations {
+    map: HashMap<String, String>, // short_name -> fully_qualified
+}
+
+impl Abbreviations {
+    /// Create an empty abbreviations set.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Add an abbreviation for a qualified name.
+    ///
+    /// The short name is derived from the last segment of the qualified name.
+    /// Returns an error if the short name conflicts with an existing abbreviation.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use cel_core::Abbreviations;
+    ///
+    /// let abbrevs = Abbreviations::new()
+    ///     .add("my.package.Foo").unwrap();
+    ///
+    /// assert_eq!(abbrevs.resolve("Foo"), Some("my.package.Foo"));
+    /// ```
+    pub fn add(mut self, qualified_name: &str) -> Result<Self, AbbrevError> {
+        if qualified_name.is_empty() {
+            return Err(AbbrevError::InvalidName(qualified_name.to_string()));
+        }
+
+        let short_name = qualified_name
+            .rsplit('.')
+            .next()
+            .unwrap_or(qualified_name)
+            .to_string();
+
+        if short_name.is_empty() {
+            return Err(AbbrevError::InvalidName(qualified_name.to_string()));
+        }
+
+        if let Some(existing) = self.map.get(&short_name) {
+            if existing != qualified_name {
+                return Err(AbbrevError::Conflict {
+                    short_name,
+                    existing: existing.clone(),
+                    new: qualified_name.to_string(),
+                });
+            }
+            // Same mapping already exists - idempotent, no error
+        } else {
+            self.map.insert(short_name, qualified_name.to_string());
+        }
+
+        Ok(self)
+    }
+
+    /// Create abbreviations from a slice of qualified names.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use cel_core::Abbreviations;
+    ///
+    /// let abbrevs = Abbreviations::from_qualified_names(&[
+    ///     "my.package.Foo",
+    ///     "other.package.Bar",
+    /// ]).unwrap();
+    /// ```
+    pub fn from_qualified_names(names: &[&str]) -> Result<Self, AbbrevError> {
+        let mut abbrevs = Self::new();
+        for name in names {
+            abbrevs = abbrevs.add(name)?;
+        }
+        Ok(abbrevs)
+    }
+
+    /// Get the underlying map of short names to fully-qualified names.
+    pub fn as_map(&self) -> &HashMap<String, String> {
+        &self.map
+    }
+
+    /// Resolve a short name to its fully qualified name.
+    ///
+    /// Returns `None` if the short name is not in the abbreviations set.
+    pub fn resolve(&self, short_name: &str) -> Option<&str> {
+        self.map.get(short_name).map(|s| s.as_str())
+    }
+
+    /// Check if the abbreviations set is empty.
+    pub fn is_empty(&self) -> bool {
+        self.map.is_empty()
+    }
+
+    /// Get the number of abbreviations.
+    pub fn len(&self) -> usize {
+        self.map.len()
+    }
+}
+
 use crate::ast::Ast;
-use crate::checker::{check, check_with_proto_types, CheckError, CheckResult, STANDARD_LIBRARY};
+use crate::checker::{
+    check, check_with_abbreviations, check_with_proto_types,
+    check_with_proto_types_and_abbreviations, CheckError, CheckResult, STANDARD_LIBRARY,
+};
 use crate::eval::{Function, FunctionRegistry, Overload, Program};
 use crate::ext;
 use crate::parser::{self, ParseError, ParseResult};
@@ -61,6 +219,7 @@ impl std::error::Error for CompileError {}
 /// - Variable declarations with their types
 /// - Function declarations (standard library + extensions)
 /// - Container namespace for qualified name resolution
+/// - Abbreviations for type name shortcuts
 ///
 /// # Example
 ///
@@ -84,6 +243,8 @@ pub struct Env {
     container: String,
     /// Proto type registry for resolving protobuf types.
     proto_types: Option<Arc<ProtoTypeRegistry>>,
+    /// Abbreviations for qualified name shortcuts.
+    abbreviations: Abbreviations,
 }
 
 impl Env {
@@ -97,6 +258,7 @@ impl Env {
             functions: HashMap::new(),
             container: String::new(),
             proto_types: None,
+            abbreviations: Abbreviations::new(),
         }
     }
 
@@ -204,6 +366,33 @@ impl Env {
         self.proto_types.as_ref().map(|r| r.as_ref())
     }
 
+    /// Set abbreviations for qualified name resolution (builder pattern).
+    ///
+    /// Abbreviations allow short names to be used instead of fully-qualified
+    /// type names in expressions. This is useful when working with protobuf
+    /// types from multiple packages.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use cel_core::{Env, Abbreviations};
+    ///
+    /// let abbrevs = Abbreviations::new()
+    ///     .add("google.protobuf.Duration").unwrap();
+    ///
+    /// let env = Env::with_standard_library()
+    ///     .with_abbreviations(abbrevs);
+    /// ```
+    pub fn with_abbreviations(mut self, abbreviations: Abbreviations) -> Self {
+        self.abbreviations = abbreviations;
+        self
+    }
+
+    /// Get the abbreviations.
+    pub fn abbreviations(&self) -> &Abbreviations {
+        &self.abbreviations
+    }
+
     /// Add an extension library to the environment (builder pattern).
     ///
     /// Extensions provide additional functions beyond the standard library.
@@ -275,19 +464,36 @@ impl Env {
     /// Type-check a parsed expression.
     ///
     /// This delegates to the checker with the environment's variables,
-    /// functions, and container.
+    /// functions, container, and abbreviations.
     pub fn check(&self, expr: &SpannedExpr) -> CheckResult {
-        if let Some(ref proto_types) = self.proto_types {
-            return check_with_proto_types(
+        let has_proto_types = self.proto_types.is_some();
+        let has_abbreviations = !self.abbreviations.is_empty();
+
+        match (has_proto_types, has_abbreviations) {
+            (true, true) => check_with_proto_types_and_abbreviations(
                 expr,
                 &self.variables,
                 &self.functions,
                 &self.container,
-                proto_types,
-            );
+                self.proto_types.as_ref().unwrap(),
+                self.abbreviations.as_map(),
+            ),
+            (true, false) => check_with_proto_types(
+                expr,
+                &self.variables,
+                &self.functions,
+                &self.container,
+                self.proto_types.as_ref().unwrap(),
+            ),
+            (false, true) => check_with_abbreviations(
+                expr,
+                &self.variables,
+                &self.functions,
+                &self.container,
+                self.abbreviations.as_map(),
+            ),
+            (false, false) => check(expr, &self.variables, &self.functions, &self.container),
         }
-
-        check(expr, &self.variables, &self.functions, &self.container)
     }
 
     /// Parse and type-check a CEL expression, returning a checked Ast.
@@ -377,7 +583,28 @@ impl Env {
     /// ```
     pub fn program(&self, ast: &Ast) -> Result<Program, CompileError> {
         let registry = self.build_function_registry();
-        Ok(Program::new(Arc::new(ast.clone()), Arc::new(registry)))
+        let has_proto_types = self.proto_types.is_some();
+        let has_abbreviations = !self.abbreviations.is_empty();
+
+        match (has_proto_types, has_abbreviations) {
+            (true, true) => Ok(Program::with_proto_types_and_abbreviations(
+                Arc::new(ast.clone()),
+                Arc::new(registry),
+                Arc::clone(self.proto_types.as_ref().unwrap()),
+                self.abbreviations.as_map().clone(),
+            )),
+            (true, false) => Ok(Program::with_proto_types(
+                Arc::new(ast.clone()),
+                Arc::new(registry),
+                Arc::clone(self.proto_types.as_ref().unwrap()),
+            )),
+            (false, true) => Ok(Program::with_abbreviations(
+                Arc::new(ast.clone()),
+                Arc::new(registry),
+                self.abbreviations.as_map().clone(),
+            )),
+            (false, false) => Ok(Program::new(Arc::new(ast.clone()), Arc::new(registry))),
+        }
     }
 
     /// Build the function registry from this environment's function declarations.
@@ -745,5 +972,156 @@ mod tests {
         // opt.orValue(42)
         let result = env.compile("opt.orValue(42)");
         assert!(result.is_ok(), "orValue should compile: {:?}", result);
+    }
+
+    // =====================================================================
+    // Abbreviations tests
+    // =====================================================================
+
+    #[test]
+    fn test_abbreviations_new() {
+        let abbrevs = Abbreviations::new();
+        assert!(abbrevs.is_empty());
+        assert_eq!(abbrevs.len(), 0);
+    }
+
+    #[test]
+    fn test_abbreviations_add() {
+        let abbrevs = Abbreviations::new()
+            .add("my.package.Foo")
+            .unwrap();
+
+        assert_eq!(abbrevs.resolve("Foo"), Some("my.package.Foo"));
+        assert_eq!(abbrevs.len(), 1);
+    }
+
+    #[test]
+    fn test_abbreviations_multiple() {
+        let abbrevs = Abbreviations::new()
+            .add("my.package.Foo")
+            .unwrap()
+            .add("other.package.Bar")
+            .unwrap();
+
+        assert_eq!(abbrevs.resolve("Foo"), Some("my.package.Foo"));
+        assert_eq!(abbrevs.resolve("Bar"), Some("other.package.Bar"));
+        assert_eq!(abbrevs.len(), 2);
+    }
+
+    #[test]
+    fn test_abbreviations_unqualified_name() {
+        // Single-segment name is valid
+        let abbrevs = Abbreviations::new().add("Foo").unwrap();
+        assert_eq!(abbrevs.resolve("Foo"), Some("Foo"));
+    }
+
+    #[test]
+    fn test_abbreviations_conflict() {
+        let result = Abbreviations::new()
+            .add("my.package.Foo")
+            .unwrap()
+            .add("other.package.Foo"); // Same short name!
+
+        assert!(result.is_err());
+        match result {
+            Err(AbbrevError::Conflict {
+                short_name,
+                existing,
+                new,
+            }) => {
+                assert_eq!(short_name, "Foo");
+                assert_eq!(existing, "my.package.Foo");
+                assert_eq!(new, "other.package.Foo");
+            }
+            _ => panic!("Expected Conflict error"),
+        }
+    }
+
+    #[test]
+    fn test_abbreviations_idempotent() {
+        // Adding the same mapping twice is OK (idempotent)
+        let abbrevs = Abbreviations::new()
+            .add("my.package.Foo")
+            .unwrap()
+            .add("my.package.Foo") // Same mapping again
+            .unwrap();
+
+        assert_eq!(abbrevs.resolve("Foo"), Some("my.package.Foo"));
+        assert_eq!(abbrevs.len(), 1);
+    }
+
+    #[test]
+    fn test_abbreviations_empty_name() {
+        let result = Abbreviations::new().add("");
+        assert!(result.is_err());
+        match result {
+            Err(AbbrevError::InvalidName(name)) => {
+                assert_eq!(name, "");
+            }
+            _ => panic!("Expected InvalidName error"),
+        }
+    }
+
+    #[test]
+    fn test_abbreviations_trailing_dot() {
+        // A name ending with a dot has an empty last segment
+        let result = Abbreviations::new().add("my.package.");
+        assert!(result.is_err());
+        match result {
+            Err(AbbrevError::InvalidName(_)) => {}
+            _ => panic!("Expected InvalidName error"),
+        }
+    }
+
+    #[test]
+    fn test_abbreviations_from_qualified_names() {
+        let abbrevs = Abbreviations::from_qualified_names(&[
+            "my.package.Foo",
+            "other.package.Bar",
+        ])
+        .unwrap();
+
+        assert_eq!(abbrevs.resolve("Foo"), Some("my.package.Foo"));
+        assert_eq!(abbrevs.resolve("Bar"), Some("other.package.Bar"));
+    }
+
+    #[test]
+    fn test_abbreviations_resolve_nonexistent() {
+        let abbrevs = Abbreviations::new()
+            .add("my.package.Foo")
+            .unwrap();
+
+        assert_eq!(abbrevs.resolve("Bar"), None);
+    }
+
+    #[test]
+    fn test_env_with_abbreviations() {
+        let abbrevs = Abbreviations::new()
+            .add("my.package.Foo")
+            .unwrap();
+
+        let env = Env::with_standard_library().with_abbreviations(abbrevs);
+
+        assert!(!env.abbreviations().is_empty());
+        assert_eq!(
+            env.abbreviations().resolve("Foo"),
+            Some("my.package.Foo")
+        );
+    }
+
+    #[test]
+    fn test_abbrev_error_display() {
+        let err = AbbrevError::Conflict {
+            short_name: "Foo".to_string(),
+            existing: "a.Foo".to_string(),
+            new: "b.Foo".to_string(),
+        };
+        assert_eq!(
+            err.to_string(),
+            "abbreviation conflict: 'Foo' already maps to 'a.Foo', cannot map to 'b.Foo'"
+        );
+
+        let err = AbbrevError::InvalidName("".to_string());
+        assert_eq!(err.to_string(), "invalid qualified name: ''");
     }
 }

@@ -357,7 +357,7 @@ fn run_eval_conformance_file(filename: &str) -> (usize, Vec<EvalTestFailure>) {
             };
 
             // Evaluate - always get a result to compare
-            let eval_result = service.eval(&parsed_expr, &bindings);
+            let eval_result = service.eval(&parsed_expr, &bindings, &test.container);
             let actual_result = match &eval_result.result {
                 Some(r) => r,
                 None => {

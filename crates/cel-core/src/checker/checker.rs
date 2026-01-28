@@ -97,6 +97,8 @@ pub struct Checker<'a> {
     substitutions: HashMap<Arc<str>, CelType>,
     /// Proto type registry for resolving protobuf types.
     proto_types: Option<&'a ProtoTypeRegistry>,
+    /// Abbreviations for qualified name shortcuts.
+    abbreviations: Option<&'a HashMap<String, String>>,
 }
 
 impl<'a> Checker<'a> {
@@ -127,12 +129,19 @@ impl<'a> Checker<'a> {
             errors: Vec::new(),
             substitutions: HashMap::new(),
             proto_types: None,
+            abbreviations: None,
         }
     }
 
     /// Set the proto type registry for resolving protobuf types.
     pub fn with_proto_types(mut self, registry: &'a ProtoTypeRegistry) -> Self {
         self.proto_types = Some(registry);
+        self
+    }
+
+    /// Set abbreviations for qualified name resolution.
+    pub fn with_abbreviations(mut self, abbreviations: &'a HashMap<String, String>) -> Self {
+        self.abbreviations = Some(abbreviations);
         self
     }
 
@@ -455,12 +464,16 @@ impl<'a> Checker<'a> {
     /// Try to resolve a qualified name as a proto type.
     fn resolve_proto_qualified(&mut self, qualified_name: &str, expr: &SpannedExpr) -> Option<CelType> {
         let registry = self.proto_types?;
-        let parts: Vec<&str> = qualified_name.split('.').collect();
+
+        // Try to expand abbreviations first
+        let expanded_name = self.expand_abbreviation(qualified_name);
+        let name_to_resolve = expanded_name.as_deref().unwrap_or(qualified_name);
+        let parts: Vec<&str> = name_to_resolve.split('.').collect();
 
         match registry.resolve_qualified(&parts, self.container)? {
             ResolvedProtoType::EnumValue { enum_name: _, value } => {
                 self.set_reference(expr.id, ReferenceInfo {
-                    name: qualified_name.to_string(),
+                    name: name_to_resolve.to_string(),
                     overload_ids: vec![],
                     value: Some(CelValue::Int(value as i64)),
                 });
@@ -474,6 +487,30 @@ impl<'a> Checker<'a> {
                 self.set_reference(expr.id, ReferenceInfo::ident(&name));
                 Some(cel_type)
             }
+        }
+    }
+
+    /// Try to expand a name using abbreviations.
+    ///
+    /// If the first segment of the name matches an abbreviation, the full
+    /// qualified name is substituted. For example, if "Foo" is abbreviated
+    /// to "my.package.Foo", then "Foo.Bar" becomes "my.package.Foo.Bar".
+    fn expand_abbreviation(&self, name: &str) -> Option<String> {
+        let abbrevs = self.abbreviations?;
+
+        // Get the first segment of the name
+        let first_segment = name.split('.').next()?;
+
+        // Check if it's an abbreviation
+        if let Some(qualified) = abbrevs.get(first_segment) {
+            // If the name has more segments, append them to the expanded name
+            if let Some(rest) = name.strip_prefix(first_segment).and_then(|s| s.strip_prefix('.')) {
+                Some(format!("{}.{}", qualified, rest))
+            } else {
+                Some(qualified.clone())
+            }
+        } else {
+            None
         }
     }
 
@@ -495,6 +532,7 @@ impl<'a> Checker<'a> {
     /// This checks for the name in the following order:
     /// 1. As-is
     /// 2. Prepended with container
+    /// 3. Via abbreviations
     fn resolve_qualified(&self, name: &str) -> Option<&VariableDecl> {
         // Try as-is first
         if let Some(decl) = self.scopes.resolve(name) {
@@ -506,6 +544,15 @@ impl<'a> Checker<'a> {
             let qualified = format!("{}.{}", self.container, name);
             if let Some(decl) = self.scopes.resolve(&qualified) {
                 return Some(decl);
+            }
+        }
+
+        // Try abbreviations
+        if let Some(abbrevs) = self.abbreviations {
+            if let Some(qualified) = abbrevs.get(name) {
+                if let Some(decl) = self.scopes.resolve(qualified) {
+                    return Some(decl);
+                }
             }
         }
 
@@ -652,15 +699,22 @@ impl<'a> Checker<'a> {
 
         // Return a message type
         if let Some(ref name) = name {
+            // Try to expand abbreviations first
+            let expanded_name = self.expand_abbreviation(name);
+            let name_to_resolve = expanded_name.as_ref().unwrap_or(name);
+
             // Try to resolve to fully qualified name using proto registry
             let fq_name = if let Some(registry) = self.proto_types {
-                registry.resolve_message_name(name, self.container)
-                    .unwrap_or_else(|| name.clone())
+                registry.resolve_message_name(name_to_resolve, self.container)
+                    .unwrap_or_else(|| name_to_resolve.clone())
             } else {
-                name.clone()
+                name_to_resolve.clone()
             };
 
+            // Set reference on both the struct expression and the type_name expression
+            // The evaluator looks up by type_name.id, so we need it there
             self.set_reference(expr.id, ReferenceInfo::ident(&fq_name));
+            self.set_reference(type_name.id, ReferenceInfo::ident(&fq_name));
             CelType::message(&fq_name)
         } else {
             CelType::Dyn
@@ -818,6 +872,38 @@ pub fn check_with_proto_types(
 ) -> CheckResult {
     let checker = Checker::new(variables, functions, container)
         .with_proto_types(proto_types);
+    checker.check(expr)
+}
+
+/// Check an expression with abbreviations.
+///
+/// This is like `check`, but also takes abbreviations for qualified name shortcuts.
+pub fn check_with_abbreviations(
+    expr: &SpannedExpr,
+    variables: &HashMap<String, CelType>,
+    functions: &HashMap<String, FunctionDecl>,
+    container: &str,
+    abbreviations: &HashMap<String, String>,
+) -> CheckResult {
+    let checker = Checker::new(variables, functions, container)
+        .with_abbreviations(abbreviations);
+    checker.check(expr)
+}
+
+/// Check an expression with proto type registry and abbreviations.
+///
+/// This is the most complete variant, supporting both proto types and abbreviations.
+pub fn check_with_proto_types_and_abbreviations(
+    expr: &SpannedExpr,
+    variables: &HashMap<String, CelType>,
+    functions: &HashMap<String, FunctionDecl>,
+    container: &str,
+    proto_types: &ProtoTypeRegistry,
+    abbreviations: &HashMap<String, String>,
+) -> CheckResult {
+    let checker = Checker::new(variables, functions, container)
+        .with_proto_types(proto_types)
+        .with_abbreviations(abbreviations);
     checker.check(expr)
 }
 

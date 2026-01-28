@@ -50,7 +50,7 @@ pub mod parser;
 pub mod types;
 
 pub use ast::{Ast, AstError};
-pub use env::{CompileError, Env};
+pub use env::{AbbrevError, Abbreviations, CompileError, Env};
 pub use unparser::ast_to_string;
 
 // Re-export from checker module
