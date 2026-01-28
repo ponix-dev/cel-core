@@ -4,49 +4,27 @@
 2026-01-28
 
 ## Just Completed
-- [x] Abbreviations support for type name shortcuts (Milestone 3 completion)
-  - New `Abbreviations` type for mapping short names to fully-qualified names
-  - Integration with checker for type resolution during compilation
-  - Integration with evaluator for runtime type resolution
-  - Examples demonstrating containers, abbreviations, and combined usage
+- [x] Error-as-value semantics (Milestone 5)
+  - Non-boolean type errors in logical operators now use commutative evaluation
+  - `'horses' && false` returns `false` (right side is definitive)
+  - `'horses' || true` returns `true` (right side is definitive)
+  - Type mismatches in logical operators now produce `no_matching_overload` errors (matching cel-go)
+  - Logic conformance tests: 30/30 passing
 
 ### Summary
-Implemented abbreviations support for CEL namespace resolution. This allows short names (like `Timestamp`) to be used instead of fully-qualified names (like `google.protobuf.Timestamp`) in CEL expressions. The feature complements the existing container support, following cel-go's namespace resolution patterns.
-
-### Key Files Added
-- `crates/cel-core/examples/namespaces/abbreviations.rs` - Example using abbreviations
-- `crates/cel-core/examples/namespaces/containers.rs` - Example using containers
-- `crates/cel-core/examples/namespaces/combined.rs` - Example combining both features
-- `crates/cel-core/examples/namespaces/README.md` - Documentation for namespace resolution
+Completed error-as-value semantics for logical operators. The key change was treating non-boolean type errors the same as runtime errors for short-circuit purposes in `eval_and` and `eval_or`. When the left operand is a non-boolean value, the right operand is evaluated; if it can definitively determine the result (false for AND, true for OR), that result is returned instead of an error.
 
 ### Key Files Modified
-- `crates/cel-core/src/env.rs` - Added `Abbreviations` type and `with_abbreviations()` builder
-- `crates/cel-core/src/checker/checker.rs` - Added abbreviation expansion during type checking
-- `crates/cel-core/src/checker/mod.rs` - Exported new checker functions with abbreviations
-- `crates/cel-core/src/eval/evaluator.rs` - Added abbreviation support during evaluation
-- `crates/cel-core/src/eval/program.rs` - Pass abbreviations to evaluator
+- `crates/cel-core/src/eval/evaluator.rs` - Updated `eval_and()` and `eval_or()` to apply commutative evaluation for non-boolean type errors
 
 ### Notable Decisions
-- Abbreviations are resolved after container hierarchy (C++ namespace rules)
-- Reference map stores fully-qualified names for efficient evaluation
-- Abbreviations work for both message types and enum values
+- Non-boolean types in logical operators produce `no_matching_overload` errors (not `type_mismatch`), matching cel-go behavior
+- Commutative evaluation applies the same logic to type errors as to runtime `Value::Error` values
 
 ## Next Up
-- [ ] Error-as-value semantics
-  - CEL treats errors as first-class values that propagate through expressions
-  - Some operations should absorb errors (e.g., `false && error` returns `false`)
-
 - [ ] Proto type conformance
   - `type(timestamp(...))` should return `google.protobuf.Timestamp`
   - Wrapper type comparison with proto types
-
-### Prerequisites
-- Need to audit all operators for error propagation rules
-- Review cel-spec for exact error semantics
-
-### Potential Challenges
-- Error propagation rules vary by operator
-- Balancing performance with correct error handling
 
 ## Open Questions
 - Should `type(timestamp(...))` return `google.protobuf.Timestamp` or the CEL native `timestamp` type?

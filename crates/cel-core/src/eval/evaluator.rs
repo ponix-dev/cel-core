@@ -382,11 +382,13 @@ impl<'a> Evaluator<'a> {
                     _ => left_val, // Return the error
                 };
             }
+            // Non-boolean type: apply commutative logic same as errors
             _ => {
-                return Value::error(EvalError::type_mismatch(
-                    "bool",
-                    &left_val.cel_type().display_name(),
-                ))
+                let right_val = self.eval_expr(right);
+                return match right_val {
+                    Value::Bool(false) => Value::Bool(false),
+                    _ => Value::error(EvalError::no_matching_overload("_&&_")),
+                };
             }
         }
 
@@ -394,10 +396,7 @@ impl<'a> Evaluator<'a> {
         let right_val = self.eval_expr(right);
         match &right_val {
             Value::Bool(_) | Value::Error(_) => right_val,
-            _ => Value::error(EvalError::type_mismatch(
-                "bool",
-                &right_val.cel_type().display_name(),
-            )),
+            _ => Value::error(EvalError::no_matching_overload("_&&_")),
         }
     }
 
@@ -416,11 +415,13 @@ impl<'a> Evaluator<'a> {
                     _ => left_val, // Return the error
                 };
             }
+            // Non-boolean type: apply commutative logic same as errors
             _ => {
-                return Value::error(EvalError::type_mismatch(
-                    "bool",
-                    &left_val.cel_type().display_name(),
-                ))
+                let right_val = self.eval_expr(right);
+                return match right_val {
+                    Value::Bool(true) => Value::Bool(true),
+                    _ => Value::error(EvalError::no_matching_overload("_||_")),
+                };
             }
         }
 
@@ -428,10 +429,7 @@ impl<'a> Evaluator<'a> {
         let right_val = self.eval_expr(right);
         match &right_val {
             Value::Bool(_) | Value::Error(_) => right_val,
-            _ => Value::error(EvalError::type_mismatch(
-                "bool",
-                &right_val.cel_type().display_name(),
-            )),
+            _ => Value::error(EvalError::no_matching_overload("_||_")),
         }
     }
 
