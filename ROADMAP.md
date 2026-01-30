@@ -638,14 +638,15 @@ let result = program.eval(&[("name", Value::String("test123".into()))])?;
 
 Register extension library function implementations in the evaluator runtime. The checker already handles these; the evaluator needs matching runtime functions.
 
-##### 5.1a String Extension Functions (163 failures)
-- [ ] `charAt`, `indexOf`, `lastIndexOf` — string indexing
-- [ ] `lowerAscii`, `upperAscii` — ASCII case conversion
-- [ ] `replace`, `split`, `substring`, `trim` — string manipulation
-- [ ] `join` — list-to-string joining
-- [ ] `reverse` — string reversal
-- [ ] `format` — printf-style string formatting (`%s`, `%d`, `%f`, `%e`, `%x`, `%o`, `%b`)
-- [ ] `strings.quote` — string quoting via `strings` namespace
+##### 5.1a String Extension Functions (163 failures) ✅
+- [x] `charAt`, `indexOf`, `lastIndexOf` — string indexing
+- [x] `lowerAscii`, `upperAscii` — ASCII case conversion
+- [x] `replace`, `split`, `substring`, `trim` — string manipulation
+- [x] `join` — list-to-string joining
+- [x] `reverse` — string reversal
+- [x] `format` — printf-style string formatting (`%s`, `%d`, `%f`, `%e`, `%x`, `%o`, `%b`)
+- [x] `strings.quote` — string quoting via `strings` namespace
+- [x] Namespaced function dispatch in evaluator (required for `strings.quote`)
 
 ##### 5.1b Math Extension Functions (182 failures)
 - [ ] `math.greatest`, `math.least` — min/max across numeric types

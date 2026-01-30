@@ -1189,6 +1189,28 @@ impl<'a> Evaluator<'a> {
     }
 
     fn eval_call(&self, expr: &SpannedExpr, args: &[SpannedExpr]) -> Value {
+        // Try namespaced function first (e.g., strings.quote, math.greatest)
+        if let Expr::Member {
+            expr: receiver,
+            field,
+            ..
+        } = &expr.node
+        {
+            if let Some(qualified_name) = self.try_qualified_function_name(receiver, field) {
+                if self.functions.contains(&qualified_name) {
+                    let mut arg_values = Vec::with_capacity(args.len());
+                    for arg in args {
+                        let val = self.eval_expr(arg);
+                        if val.is_error() {
+                            return val;
+                        }
+                        arg_values.push(val);
+                    }
+                    return self.call_function(&qualified_name, &arg_values, false);
+                }
+            }
+        }
+
         // Determine function name and whether it's a member call
         let (func_name, receiver, is_member) = self.resolve_call_target(expr);
 
@@ -1227,6 +1249,21 @@ impl<'a> Evaluator<'a> {
                 optional: _,
             } => (field.clone(), Some(recv.as_ref()), true),
             _ => ("".to_string(), None, false),
+        }
+    }
+
+    fn try_qualified_function_name(&self, obj: &SpannedExpr, field: &str) -> Option<String> {
+        match &obj.node {
+            Expr::Ident(name) => Some(format!("{}.{}", name, field)),
+            Expr::Member {
+                expr: inner,
+                field: inner_field,
+                ..
+            } => {
+                let prefix = self.try_qualified_function_name(inner, inner_field)?;
+                Some(format!("{}.{}", prefix, field))
+            }
+            _ => None,
         }
     }
 
@@ -3008,5 +3045,30 @@ mod tests {
     fn test_overflow() {
         let result = eval_expr("9223372036854775807 + 1");
         assert!(result.is_error());
+    }
+
+    fn eval_with_extensions(source: &str) -> Value {
+        let env = crate::Env::with_standard_library().with_all_extensions();
+        let ast = env.compile(source).expect("compile failed");
+        let program = env.program(&ast).expect("program failed");
+        program.eval_empty()
+    }
+
+    #[test]
+    fn test_namespaced_function_strings_quote() {
+        let result = eval_with_extensions("strings.quote(\"hello\")");
+        assert_eq!(result, Value::String("\"hello\"".into()));
+    }
+
+    #[test]
+    fn test_namespaced_function_strings_quote_escape() {
+        let result = eval_with_extensions("strings.quote(\"first\\nsecond\")");
+        assert_eq!(result, Value::String(Arc::from("\"first\\nsecond\"")));
+    }
+
+    #[test]
+    fn test_member_call_still_works() {
+        let result = eval_with_extensions("\"hello\".startsWith(\"he\")");
+        assert_eq!(result, Value::Bool(true));
     }
 }
