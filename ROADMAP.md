@@ -627,11 +627,133 @@ let result = program.eval(&[("name", Value::String("test123".into()))])?;
 - [x] Conformance tests: evaluation verification
 
 ### Milestone 5: Full Conformance
+
+**Goal:** Pass all official cel-spec conformance tests. Current state: 33/59 test suites passing, ~617 individual test failures remaining.
+
 - [x] Timestamp and duration support
 - [x] Proto message field resolution
 - [x] Error-as-value semantics
-- [ ] Proto type conformance (type comparison with proto types)
-- [ ] All conformance tests passing
+
+#### 5.1 Evaluator Extension Libraries (~409 failures)
+
+Register extension library function implementations in the evaluator runtime. The checker already handles these; the evaluator needs matching runtime functions.
+
+##### 5.1a String Extension Functions (163 failures)
+- [ ] `charAt`, `indexOf`, `lastIndexOf` — string indexing
+- [ ] `lowerAscii`, `upperAscii` — ASCII case conversion
+- [ ] `replace`, `split`, `substring`, `trim` — string manipulation
+- [ ] `join` — list-to-string joining
+- [ ] `reverse` — string reversal
+- [ ] `format` — printf-style string formatting (`%s`, `%d`, `%f`, `%e`, `%x`, `%o`, `%b`)
+- [ ] `strings.quote` — string quoting via `strings` namespace
+
+##### 5.1b Math Extension Functions (182 failures)
+- [ ] `math.greatest`, `math.least` — min/max across numeric types
+- [ ] `math.ceil`, `math.floor`, `math.round`, `math.trunc` — rounding
+- [ ] `math.abs`, `math.sign` — absolute value and sign
+- [ ] `math.isNaN`, `math.isInf`, `math.isFinite` — float classification
+- [ ] `math.bitAnd`, `math.bitOr`, `math.bitXor`, `math.bitNot` — bitwise ops
+- [ ] `math.bitShiftLeft`, `math.bitShiftRight` — bit shifting
+
+##### 5.1c Optional Extension Functions (60 failures)
+- [ ] `optional.of`, `optional.none`, `optional.ofNonZeroValue` — constructors via namespace
+- [ ] `hasValue`, `value`, `orValue` — optional value access methods
+- [ ] Optional chaining support (`x.?y`, `x[?key]`) in evaluator
+
+##### 5.1d Encoders Extension (4 failures)
+- [ ] `base64.encode`, `base64.decode` — base64 encoding via namespace
+
+#### 5.2 Conversion & Operator Edge Cases (~13 failures)
+
+Fix standard library conversion functions and operator behavior to match spec.
+
+- [ ] `bool()` from string: accept `"1"`, `"0"`, `"t"`, `"f"`, `"TRUE"`, `"True"`, `"FALSE"`, `"False"` (not just `"true"`/`"false"`)
+- [ ] `int()` / `uint()` from out-of-range doubles: error instead of silent clamping
+- [ ] Map `+` operator for map merging (needed by `transformMap` macro)
+- [ ] Repeated map key detection in map literals
+
+#### 5.3 Two-Variable Macro Forms (~41 failures)
+
+Implement two-variable comprehension macros (parser + evaluator).
+
+- [ ] `.exists(i, v, ...)` — two-variable exists with index
+- [ ] `.all(i, v, ...)` — two-variable all with index
+- [ ] `.existsOne(i, v, ...)` — two-variable existsOne (currently unrecognized)
+- [ ] `.transformList(i, v, ...)` — list transform with index variable binding
+- [ ] `.transformMap(k, v, ...)` — map transform with key/value variable binding
+
+#### 5.4 Strong Enum Typing (~51 failures)
+
+Represent enums as typed values rather than plain integers.
+
+- [ ] `EnumValue` representation with fully-qualified enum type name
+- [ ] Enum type conversion functions (`TestAllTypes.NestedEnum(2)`, `GlobalEnum(-33)`)
+- [ ] `type()` returns enum type name instead of `int`
+- [ ] Out-of-range enum value validation
+
+#### 5.5 Well-Known Type (WKT) Handling (~24 failures)
+
+Proper field access and value coercion for protobuf well-known types.
+
+- [ ] Wrapper type field access (`google.protobuf.BoolValue{value: true}.value`)
+- [ ] Wrapper type auto-unwrapping when assigned to `Any` or `Value` fields
+- [ ] Duration/Timestamp coercion to `google.protobuf.Value`
+- [ ] `google.protobuf.FieldMask` field access (`paths`)
+- [ ] `google.protobuf.Empty` to `Value` coercion
+
+#### 5.6 Any Type Support (~12 failures)
+
+Implement `google.protobuf.Any` packing, unpacking, and comparison.
+
+- [ ] `type_url` field access on Any values
+- [ ] Any unpacking for equality comparison
+- [ ] Bytewise fallback comparison for unknown Any types
+
+#### 5.7 Namespace & Qualified Identifier Resolution (~10 failures)
+
+Fix variable and namespace resolution edge cases.
+
+- [ ] Qualified variable identifiers (`a.b.c` where `a.b` is the variable name)
+- [ ] Container namespace shadowing and lookup
+- [ ] `google.protobuf.Timestamp` / `google.protobuf.Duration` as type identifiers
+
+#### 5.8 Type Checker Inference Improvements (~27 failures)
+
+Improve type parameter resolution and reduce unnecessary `dyn` fallback.
+
+- [ ] Parameterized type propagation through nested generics (`list<list<list<T>>>`)
+- [ ] Optional type narrowing (`optional<dyn>` → `optional_type<int>`)
+- [ ] Wrapper type promotion in type checker (`int` → `wrapper<int>`)
+- [ ] Null assignability to message/duration/timestamp/abstract parameter types
+- [ ] Custom function type declarations (`fn`, `tuple`, `sort` in conformance tests)
+
+#### 5.9 Proto Extensions (`proto.hasExt`/`getExt`) (~36 failures)
+
+Implement the proto extension namespace for proto2 extension field access.
+
+- [ ] `proto.hasExt(msg, ext)` — check if extension field is set
+- [ ] `proto.getExt(msg, ext)` — get extension field value
+
+#### 5.10 `cel.block` Extension (~74 failures)
+
+Implement the Common Subexpression Elimination block extension.
+
+- [ ] `cel.block(slots, expr)` — CSE optimization blocks (parser + checker + evaluator)
+- [ ] `cel.index(n)` — slot reference within blocks
+- [ ] `cel.iterVar` — iteration variable reference within blocks
+
+#### 5.11 Miscellaneous Behavioral Fixes (~15 failures)
+
+Remaining edge cases across multiple test files.
+
+- [ ] `dyn()` type equality: different message types should not be equal
+- [ ] FloatValue precision: float32 vs float64 precision loss detection
+- [ ] `google.protobuf.Any` literal construction validation
+- [ ] Macro short-circuit semantics (`all` short-circuits before errors; `exists_one` does not)
+- [ ] `has()` on explicitly-set message fields returns `true`
+- [ ] `has()` on optional map entries with `optional.none()` values
+- [ ] Deeply nested message field access (`NestedTestAllTypes.payload.single_int64`)
+- [ ] Proto map key serialization ordering (deterministic output)
 - [ ] LSP integration with new checker
 
 ---
