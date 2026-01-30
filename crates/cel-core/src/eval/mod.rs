@@ -34,6 +34,7 @@ mod functions;
 mod program;
 pub mod time;
 mod value;
+pub mod wkt;
 
 pub use activation::{
     Activation, EmptyActivation, HierarchicalActivation, MapActivation, SharedActivation,

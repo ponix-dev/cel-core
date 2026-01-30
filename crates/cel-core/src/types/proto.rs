@@ -4,7 +4,9 @@
 //! to enable field type lookup, enum value resolution, and well-known type mapping.
 
 use prost_reflect::prost::Message;
-use prost_reflect::{DescriptorPool, EnumDescriptor, FieldDescriptor, Kind, MessageDescriptor};
+use prost_reflect::{
+    DescriptorPool, EnumDescriptor, ExtensionDescriptor, FieldDescriptor, Kind, MessageDescriptor,
+};
 
 use crate::types::CelType;
 
@@ -254,6 +256,11 @@ impl ProtoTypeRegistry {
             Kind::Message(msg) => proto_message_to_cel_type(msg.full_name()),
             Kind::Enum(_) => CelType::Int, // Enum values are ints in CEL
         }
+    }
+
+    /// Get an extension descriptor by fully qualified name.
+    pub fn get_extension_by_name(&self, name: &str) -> Option<ExtensionDescriptor> {
+        self.pool.get_extension_by_name(name)
     }
 
     /// Get the underlying descriptor pool.
