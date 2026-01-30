@@ -356,8 +356,11 @@ fn run_eval_conformance_file(filename: &str) -> (usize, Vec<EvalTestFailure>) {
                 }
             };
 
+            // Build type declarations from type_env
+            let type_decls = build_type_decls(test);
+
             // Evaluate - always get a result to compare
-            let eval_result = service.eval(&parsed_expr, &bindings, &test.container);
+            let eval_result = service.eval(&parsed_expr, &bindings, &type_decls, &test.container);
             let actual_result = match &eval_result.result {
                 Some(r) => r,
                 None => {

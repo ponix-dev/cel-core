@@ -13,12 +13,15 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use prost_reflect::{DynamicMessage, FieldDescriptor, Kind, MapKey as ProtoMapKey, ReflectMessage};
+use prost_reflect::{
+    DynamicMessage, FieldDescriptor, Kind, MapKey as ProtoMapKey, MessageDescriptor, ReflectMessage,
+};
 
 use super::{
     time::{self, TimestampComponent},
-    Activation, Duration, EvalError, FunctionRegistry, HierarchicalActivation, MapKey,
-    OptionalValue, ProtoValue, Timestamp, TypeValue, Value, ValueMap,
+    wkt,
+    Activation, EvalError, FunctionRegistry, HierarchicalActivation, MapKey,
+    OptionalValue, TypeValue, Value, ValueMap,
 };
 use crate::checker::ReferenceInfo;
 use crate::types::{BinaryOp, Expr, ProtoTypeRegistry, SpannedExpr, UnaryOp};
@@ -117,6 +120,14 @@ impl<'a> Evaluator<'a> {
     }
 
     fn eval_expr(&self, expr: &SpannedExpr) -> Value {
+        // Check reference_map for pre-resolved constant values (enum values, etc.)
+        if let Some(ref_map) = self.reference_map {
+            if let Some(ref_info) = ref_map.get(&expr.id) {
+                if let Some(ref value) = ref_info.value {
+                    return Value::from(value.clone());
+                }
+            }
+        }
         match &expr.node {
             // Literals
             Expr::Null => Value::Null,
@@ -702,8 +713,18 @@ impl<'a> Evaluator<'a> {
                 Value::Bool(false)
             }
             Value::Map(map) => {
+                // Handle double keys: coerce exact integers to int/uint for lookup
+                if let Value::Double(d) = &left {
+                    if d.is_finite() && d.fract() == 0.0 {
+                        let as_int = *d as i64;
+                        let int_key = MapKey::Int(as_int);
+                        return Value::Bool(map.contains_key_with_numeric_coercion(&int_key));
+                    } else {
+                        return Value::Bool(false);
+                    }
+                }
                 if let Some(key) = MapKey::from_value(&left) {
-                    Value::Bool(map.contains_key(&key))
+                    Value::Bool(map.contains_key_with_numeric_coercion(&key))
                 } else {
                     Value::error(EvalError::type_mismatch(
                         "valid map key",
@@ -780,6 +801,42 @@ impl<'a> Evaluator<'a> {
                 let descriptor = proto.descriptor();
                 match descriptor.get_field_by_name(field) {
                     Some(field_desc) => {
+                        // For wrapper/well-known message fields that support presence,
+                        // return null if the field is not set.
+                        // This applies to wrapper types (e.g., Int64Value, StringValue)
+                        // and other WKT message fields (Any, Value, etc.)
+                        if field_desc.supports_presence()
+                            && !proto.message().has_field(&field_desc)
+                        {
+                            if let Kind::Message(msg_desc) = field_desc.kind() {
+                                let msg_name = msg_desc.full_name();
+                                // Unset ListValue → empty list, unset Struct → empty map
+                                if msg_name == "google.protobuf.ListValue" {
+                                    let result = Value::List(Arc::from(Vec::<Value>::new()));
+                                    return if optional {
+                                        Value::optional_some(result)
+                                    } else {
+                                        result
+                                    };
+                                }
+                                if msg_name == "google.protobuf.Struct" {
+                                    let result = Value::Map(Arc::new(ValueMap::new()));
+                                    return if optional {
+                                        Value::optional_some(result)
+                                    } else {
+                                        result
+                                    };
+                                }
+                                let is_wkt = msg_name.starts_with("google.protobuf.");
+                                if is_wkt {
+                                    if optional {
+                                        return Value::optional_some(Value::Null);
+                                    } else {
+                                        return Value::Null;
+                                    }
+                                }
+                            }
+                        }
                         let proto_value = proto.message().get_field(&field_desc);
                         let cel_value = self.proto_reflect_to_value(proto_value, &field_desc);
                         if optional {
@@ -789,6 +846,21 @@ impl<'a> Evaluator<'a> {
                         }
                     }
                     None => {
+                        // Try extension field lookup
+                        if let Some(registry) = self.proto_types {
+                            if let Some(ext) = registry.get_extension_by_name(field) {
+                                if ext.containing_message() == descriptor {
+                                    let proto_value = proto.message().get_extension(&ext);
+                                    let cel_value =
+                                        self.extension_value_to_cel(proto_value, &ext);
+                                    return if optional {
+                                        Value::optional_some(cel_value)
+                                    } else {
+                                        cel_value
+                                    };
+                                }
+                            }
+                        }
                         if optional {
                             Value::optional_none()
                         } else {
@@ -897,6 +969,38 @@ impl<'a> Evaluator<'a> {
         }
     }
 
+    /// Convert an extension field value to a CEL Value.
+    fn extension_value_to_cel(
+        &self,
+        proto_value: std::borrow::Cow<prost_reflect::Value>,
+        ext: &prost_reflect::ExtensionDescriptor,
+    ) -> Value {
+        match proto_value.as_ref() {
+            prost_reflect::Value::Bool(b) => Value::Bool(*b),
+            prost_reflect::Value::I32(i) => Value::Int(*i as i64),
+            prost_reflect::Value::I64(i) => Value::Int(*i),
+            prost_reflect::Value::U32(u) => Value::UInt(*u as u64),
+            prost_reflect::Value::U64(u) => Value::UInt(*u),
+            prost_reflect::Value::F32(f) => Value::Double(*f as f64),
+            prost_reflect::Value::F64(f) => Value::Double(*f),
+            prost_reflect::Value::String(s) => Value::String(Arc::from(s.as_str())),
+            prost_reflect::Value::Bytes(b) => Value::Bytes(Arc::from(b.as_ref())),
+            prost_reflect::Value::EnumNumber(n) => Value::Int(*n as i64),
+            prost_reflect::Value::Message(msg) => self.maybe_unwrap_well_known(msg.clone()),
+            prost_reflect::Value::List(list) => {
+                let kind = ext.kind();
+                let values: Vec<Value> = list
+                    .iter()
+                    .map(|v| self.proto_scalar_to_value(v, &kind))
+                    .collect();
+                Value::List(Arc::from(values))
+            }
+            prost_reflect::Value::Map(_) => {
+                Value::error(EvalError::internal("extension maps not supported"))
+            }
+        }
+    }
+
     fn eval_index(&self, expr: &SpannedExpr, index: &SpannedExpr, optional: bool) -> Value {
         let value = self.eval_expr(expr);
         if value.is_error() {
@@ -927,6 +1031,8 @@ impl<'a> Evaluator<'a> {
             Value::List(list) => {
                 let idx = match index {
                     Value::Int(i) => *i,
+                    Value::UInt(u) => *u as i64,
+                    Value::Double(d) if d.is_finite() && d.fract() == 0.0 => *d as i64,
                     _ => {
                         return Value::error(EvalError::type_mismatch(
                             "int",
@@ -959,8 +1065,34 @@ impl<'a> Evaluator<'a> {
                 }
             }
             Value::Map(map) => {
-                if let Some(key) = MapKey::from_value(index) {
-                    match map.get(&key) {
+                // Handle double keys: coerce exact integers to int/uint for lookup
+                let map_key = if let Value::Double(d) = index {
+                    if d.is_finite() && d.fract() == 0.0 {
+                        // Try as int key first, then uint
+                        let as_int = *d as i64;
+                        let int_key = MapKey::Int(as_int);
+                        if let Some(v) = map.get_with_numeric_coercion(&int_key) {
+                            let result = v.clone();
+                            return if optional {
+                                Value::optional_some(result)
+                            } else {
+                                result
+                            };
+                        }
+                        // Key not found
+                        return if optional {
+                            Value::optional_none()
+                        } else {
+                            Value::error(EvalError::key_not_found(&format!("{}", index)))
+                        };
+                    } else {
+                        return Value::error(EvalError::key_not_found(&format!("{}", index)));
+                    }
+                } else {
+                    MapKey::from_value(index)
+                };
+                if let Some(key) = map_key {
+                    match map.get_with_numeric_coercion(&key) {
                         Some(v) => {
                             if optional {
                                 Value::optional_some(v.clone())
@@ -1644,6 +1776,18 @@ impl<'a> Evaluator<'a> {
             }
         };
 
+        // Shortcut for wrapper types: bypass DynamicMessage field-setting
+        if wkt::is_wrapper_type(&descriptor) {
+            return self.eval_wrapper_struct(&descriptor, fields);
+        }
+
+        // Shortcut for google.protobuf.Any: construct directly
+        if descriptor.full_name() == "google.protobuf.Any"
+            || fq_name == "google.protobuf.Any"
+        {
+            return self.eval_any_struct(&descriptor, fields);
+        }
+
         // Create the dynamic message
         let mut message = DynamicMessage::new(descriptor.clone());
 
@@ -1658,7 +1802,7 @@ impl<'a> Evaluator<'a> {
             if field.optional {
                 match value {
                     Value::Optional(OptionalValue::Some(v)) => {
-                        if let Err(e) = self.set_proto_field(&mut message, &field.name, *v) {
+                        if let Err(e) = self.set_proto_field_or_null(&mut message, &field.name, *v) {
                             return e;
                         }
                     }
@@ -1666,13 +1810,13 @@ impl<'a> Evaluator<'a> {
                         // Skip absent optionals
                     }
                     _ => {
-                        if let Err(e) = self.set_proto_field(&mut message, &field.name, value) {
+                        if let Err(e) = self.set_proto_field_or_null(&mut message, &field.name, value) {
                             return e;
                         }
                     }
                 }
             } else {
-                if let Err(e) = self.set_proto_field(&mut message, &field.name, value) {
+                if let Err(e) = self.set_proto_field_or_null(&mut message, &field.name, value) {
                     return e;
                 }
             }
@@ -1680,6 +1824,206 @@ impl<'a> Evaluator<'a> {
 
         // Check for well-known type unwrapping
         self.maybe_unwrap_well_known(message)
+    }
+
+    /// Construct a wrapper type (e.g., google.protobuf.Int32Value{value: 1}).
+    /// Bypasses the normal DynamicMessage field-setting path.
+    fn eval_wrapper_struct(
+        &self,
+        descriptor: &MessageDescriptor,
+        fields: &[crate::types::StructField],
+    ) -> Value {
+        // Empty wrapper construction returns the default value
+        if fields.is_empty() {
+            return match descriptor.full_name() {
+                "google.protobuf.BoolValue" => Value::Bool(false),
+                "google.protobuf.Int32Value" | "google.protobuf.Int64Value" => Value::Int(0),
+                "google.protobuf.UInt32Value" | "google.protobuf.UInt64Value" => Value::UInt(0),
+                "google.protobuf.FloatValue" | "google.protobuf.DoubleValue" => Value::Double(0.0),
+                "google.protobuf.StringValue" => Value::String(Arc::from("")),
+                "google.protobuf.BytesValue" => Value::Bytes(Arc::from(Vec::<u8>::new().as_slice())),
+                _ => Value::error(EvalError::internal("unknown wrapper type")),
+            };
+        }
+
+        // Wrapper types have a single field named "value"
+        if fields.len() != 1 || fields[0].name != "value" {
+            return Value::error(EvalError::internal(
+                "wrapper type expects exactly one field named 'value'",
+            ));
+        }
+
+        let value = self.eval_expr(&fields[0].value);
+        if value.is_error() {
+            return value;
+        }
+
+        // Convert the value directly based on wrapper type
+        let type_name = descriptor.full_name();
+        match type_name {
+            "google.protobuf.BoolValue" => match &value {
+                Value::Bool(_) => value,
+                _ => Value::error(EvalError::type_mismatch("bool", &value.cel_type().display_name())),
+            },
+            "google.protobuf.Int32Value" => match &value {
+                Value::Int(i) => {
+                    if *i < i32::MIN as i64 || *i > i32::MAX as i64 {
+                        Value::error(EvalError::overflow("int to int32 overflow"))
+                    } else {
+                        Value::Int(*i)
+                    }
+                }
+                Value::UInt(u) => {
+                    if *u > i32::MAX as u64 {
+                        Value::error(EvalError::overflow("uint to int32 overflow"))
+                    } else {
+                        Value::Int(*u as i64)
+                    }
+                }
+                Value::Double(d) => {
+                    if d.fract() != 0.0 || *d < i32::MIN as f64 || *d > i32::MAX as f64 {
+                        Value::error(EvalError::overflow("double to int32 overflow"))
+                    } else {
+                        Value::Int(*d as i64)
+                    }
+                }
+                _ => Value::error(EvalError::type_mismatch("int", &value.cel_type().display_name())),
+            },
+            "google.protobuf.Int64Value" => match &value {
+                Value::Int(_) => value,
+                Value::UInt(u) => {
+                    if *u > i64::MAX as u64 {
+                        Value::error(EvalError::overflow("uint to int64 overflow"))
+                    } else {
+                        Value::Int(*u as i64)
+                    }
+                }
+                _ => Value::error(EvalError::type_mismatch("int", &value.cel_type().display_name())),
+            },
+            "google.protobuf.UInt32Value" => match &value {
+                Value::UInt(u) => {
+                    if *u > u32::MAX as u64 {
+                        Value::error(EvalError::overflow("uint to uint32 overflow"))
+                    } else {
+                        Value::UInt(*u)
+                    }
+                }
+                Value::Int(i) => {
+                    if *i < 0 || *i > u32::MAX as i64 {
+                        Value::error(EvalError::overflow("int to uint32 overflow"))
+                    } else {
+                        Value::UInt(*i as u64)
+                    }
+                }
+                _ => Value::error(EvalError::type_mismatch("uint", &value.cel_type().display_name())),
+            },
+            "google.protobuf.UInt64Value" => match &value {
+                Value::UInt(_) => value,
+                Value::Int(i) => {
+                    if *i < 0 {
+                        Value::error(EvalError::overflow("negative int to uint64"))
+                    } else {
+                        Value::UInt(*i as u64)
+                    }
+                }
+                _ => Value::error(EvalError::type_mismatch("uint", &value.cel_type().display_name())),
+            },
+            "google.protobuf.FloatValue" | "google.protobuf.DoubleValue" => match &value {
+                Value::Double(_) => value,
+                Value::Int(i) => Value::Double(*i as f64),
+                Value::UInt(u) => Value::Double(*u as f64),
+                _ => Value::error(EvalError::type_mismatch("double", &value.cel_type().display_name())),
+            },
+            "google.protobuf.StringValue" => match &value {
+                Value::String(_) => value,
+                _ => Value::error(EvalError::type_mismatch("string", &value.cel_type().display_name())),
+            },
+            "google.protobuf.BytesValue" => match &value {
+                Value::Bytes(_) => value,
+                _ => Value::error(EvalError::type_mismatch("bytes", &value.cel_type().display_name())),
+            },
+            _ => Value::error(EvalError::internal(format!(
+                "unknown wrapper type: {}",
+                type_name
+            ))),
+        }
+    }
+
+    /// Construct a google.protobuf.Any message directly.
+    /// Works around potential descriptor pool issues with the Any type.
+    fn eval_any_struct(
+        &self,
+        descriptor: &MessageDescriptor,
+        fields: &[crate::types::StructField],
+    ) -> Value {
+        let mut type_url = String::new();
+        let mut value_bytes = Vec::new();
+
+        for field in fields {
+            let val = self.eval_expr(&field.value);
+            if val.is_error() {
+                return val;
+            }
+            match field.name.as_str() {
+                "type_url" => {
+                    if let Value::String(s) = &val {
+                        type_url = s.to_string();
+                    } else {
+                        return Value::error(EvalError::type_mismatch(
+                            "string",
+                            &val.cel_type().display_name(),
+                        ));
+                    }
+                }
+                "value" => {
+                    if let Value::Bytes(b) = &val {
+                        value_bytes = b.to_vec();
+                    } else {
+                        return Value::error(EvalError::type_mismatch(
+                            "bytes",
+                            &val.cel_type().display_name(),
+                        ));
+                    }
+                }
+                other => {
+                    return Value::error(EvalError::field_not_found(other));
+                }
+            }
+        }
+
+        // Build the Any message by setting fields directly
+        let mut msg = DynamicMessage::new(descriptor.clone());
+        if let Some(type_url_field) = descriptor.get_field_by_name("type_url") {
+            msg.set_field(
+                &type_url_field,
+                prost_reflect::Value::String(type_url.clone()),
+            );
+        } else {
+            // Fallback: try to find by field number (1 for type_url, 2 for value)
+            for field_desc in descriptor.fields() {
+                match field_desc.number() {
+                    1 => msg.set_field(
+                        &field_desc,
+                        prost_reflect::Value::String(type_url.clone()),
+                    ),
+                    2 => msg.set_field(
+                        &field_desc,
+                        prost_reflect::Value::Bytes(prost::bytes::Bytes::from(
+                            value_bytes.clone(),
+                        )),
+                    ),
+                    _ => {}
+                }
+            }
+        }
+        if let Some(value_field) = descriptor.get_field_by_name("value") {
+            msg.set_field(
+                &value_field,
+                prost_reflect::Value::Bytes(prost::bytes::Bytes::from(value_bytes)),
+            );
+        }
+
+        Value::Proto(super::ProtoValue::new(msg))
     }
 
     /// Resolve a type name expression to a fully qualified name.
@@ -1756,6 +2100,55 @@ impl<'a> Evaluator<'a> {
         }
     }
 
+    /// Set a field on a proto message, handling null values.
+    /// Null is valid only for singular message-type fields (means "absent").
+    /// For scalar, repeated, or map fields, null produces an error.
+    fn set_proto_field_or_null(
+        &self,
+        message: &mut DynamicMessage,
+        field_name: &str,
+        value: Value,
+    ) -> Result<(), Value> {
+        if matches!(value, Value::Null) {
+            let descriptor = message.descriptor();
+            let field = match descriptor.get_field_by_name(field_name) {
+                Some(f) => f,
+                None => return Err(Value::error(EvalError::field_not_found(field_name))),
+            };
+            // Null is only valid for singular message fields (except ListValue/Struct
+            // which map to list/map types, not nullable messages)
+            if !field.is_list() && !field.is_map() {
+                if let Kind::Message(msg_desc) = field.kind() {
+                    let msg_name = msg_desc.full_name();
+                    if msg_name == "google.protobuf.ListValue"
+                        || msg_name == "google.protobuf.Struct"
+                    {
+                        return Err(Value::error(EvalError::type_mismatch(
+                            &format!("{} field", msg_name),
+                            "null",
+                        )));
+                    }
+                    // For google.protobuf.Value, null sets the null_value oneof
+                    if msg_name == "google.protobuf.Value" {
+                        if let Some(registry) = self.proto_types {
+                            let val_msg =
+                                wkt::cel_value_to_google_value(&Value::Null, registry)?;
+                            message.set_field(&field, prost_reflect::Value::Message(val_msg));
+                            return Ok(());
+                        }
+                    }
+                    // Leave the field unset (absent) — don't call set_field
+                    return Ok(());
+                }
+            }
+            return Err(Value::error(EvalError::type_mismatch(
+                "unsupported field type",
+                "null",
+            )));
+        }
+        self.set_proto_field(message, field_name, value)
+    }
+
     /// Set a field on a proto message.
     fn set_proto_field(
         &self,
@@ -1767,6 +2160,17 @@ impl<'a> Evaluator<'a> {
         let field = match descriptor.get_field_by_name(field_name) {
             Some(f) => f,
             None => {
+                // Try extension field lookup
+                if let Some(registry) = self.proto_types {
+                    if let Some(ext) = registry.get_extension_by_name(field_name) {
+                        if ext.containing_message() == descriptor {
+                            let proto_value =
+                                self.scalar_value_to_proto(&value, &ext.kind())?;
+                            message.set_extension(&ext, proto_value);
+                            return Ok(());
+                        }
+                    }
+                }
                 return Err(Value::error(EvalError::field_not_found(field_name)));
             }
         };
@@ -1841,14 +2245,22 @@ impl<'a> Evaluator<'a> {
         match (value, kind) {
             (Value::Bool(b), Kind::Bool) => Ok(prost_reflect::Value::Bool(*b)),
             (Value::Int(i), Kind::Int32 | Kind::Sint32 | Kind::Sfixed32) => {
-                Ok(prost_reflect::Value::I32(*i as i32))
+                if *i < i32::MIN as i64 || *i > i32::MAX as i64 {
+                    Err(Value::error(EvalError::overflow("int to int32 overflow")))
+                } else {
+                    Ok(prost_reflect::Value::I32(*i as i32))
+                }
             }
             (Value::Int(i), Kind::Int64 | Kind::Sint64 | Kind::Sfixed64) => {
                 Ok(prost_reflect::Value::I64(*i))
             }
             (Value::Int(i), Kind::Enum(_)) => Ok(prost_reflect::Value::EnumNumber(*i as i32)),
             (Value::UInt(u), Kind::Uint32 | Kind::Fixed32) => {
-                Ok(prost_reflect::Value::U32(*u as u32))
+                if *u > u32::MAX as u64 {
+                    Err(Value::error(EvalError::overflow("uint to uint32 overflow")))
+                } else {
+                    Ok(prost_reflect::Value::U32(*u as u32))
+                }
             }
             (Value::UInt(u), Kind::Uint64 | Kind::Fixed64) => Ok(prost_reflect::Value::U64(*u)),
             (Value::Double(d), Kind::Double) => Ok(prost_reflect::Value::F64(*d)),
@@ -1857,12 +2269,69 @@ impl<'a> Evaluator<'a> {
             (Value::Bytes(b), Kind::Bytes) => {
                 Ok(prost_reflect::Value::Bytes(prost::bytes::Bytes::copy_from_slice(b)))
             }
-            (Value::Null, Kind::Message(msg_desc)) => {
-                // Null for message fields - create default message
-                Ok(prost_reflect::Value::Message(DynamicMessage::new(msg_desc.clone())))
+            // Cross-type numeric coercion: Int → Uint
+            (Value::Int(i), Kind::Uint32 | Kind::Fixed32) => {
+                if *i < 0 || *i > u32::MAX as i64 {
+                    Err(Value::error(EvalError::overflow("int to uint32 overflow")))
+                } else {
+                    Ok(prost_reflect::Value::U32(*i as u32))
+                }
             }
-            (Value::Proto(proto), Kind::Message(_)) => {
-                Ok(prost_reflect::Value::Message((*proto.message()).clone()))
+            (Value::Int(i), Kind::Uint64 | Kind::Fixed64) => {
+                if *i < 0 {
+                    Err(Value::error(EvalError::overflow("negative int to uint64")))
+                } else {
+                    Ok(prost_reflect::Value::U64(*i as u64))
+                }
+            }
+            // Cross-type numeric coercion: UInt → Int
+            (Value::UInt(u), Kind::Int32 | Kind::Sint32 | Kind::Sfixed32) => {
+                if *u > i32::MAX as u64 {
+                    Err(Value::error(EvalError::overflow("uint to int32 overflow")))
+                } else {
+                    Ok(prost_reflect::Value::I32(*u as i32))
+                }
+            }
+            (Value::UInt(u), Kind::Int64 | Kind::Sint64 | Kind::Sfixed64) => {
+                if *u > i64::MAX as u64 {
+                    Err(Value::error(EvalError::overflow("uint to int64 overflow")))
+                } else {
+                    Ok(prost_reflect::Value::I64(*u as i64))
+                }
+            }
+            // Cross-type numeric coercion: Int/UInt → Double/Float
+            (Value::Int(i), Kind::Double) => Ok(prost_reflect::Value::F64(*i as f64)),
+            (Value::Int(i), Kind::Float) => Ok(prost_reflect::Value::F32(*i as f32)),
+            (Value::UInt(u), Kind::Double) => Ok(prost_reflect::Value::F64(*u as f64)),
+            (Value::UInt(u), Kind::Float) => Ok(prost_reflect::Value::F32(*u as f32)),
+            // Cross-type numeric coercion: Double → Int/UInt (check integrality)
+            (Value::Double(d), Kind::Int32 | Kind::Sint32 | Kind::Sfixed32) => {
+                if d.fract() != 0.0 || *d < i32::MIN as f64 || *d > i32::MAX as f64 {
+                    Err(Value::error(EvalError::overflow("double to int32 overflow")))
+                } else {
+                    Ok(prost_reflect::Value::I32(*d as i32))
+                }
+            }
+            (Value::Double(d), Kind::Int64 | Kind::Sint64 | Kind::Sfixed64) => {
+                if d.fract() != 0.0 || *d < i64::MIN as f64 || *d > i64::MAX as f64 {
+                    Err(Value::error(EvalError::overflow("double to int64 overflow")))
+                } else {
+                    Ok(prost_reflect::Value::I64(*d as i64))
+                }
+            }
+            (Value::Double(d), Kind::Uint32 | Kind::Fixed32) => {
+                if d.fract() != 0.0 || *d < 0.0 || *d > u32::MAX as f64 {
+                    Err(Value::error(EvalError::overflow("double to uint32 overflow")))
+                } else {
+                    Ok(prost_reflect::Value::U32(*d as u32))
+                }
+            }
+            (Value::Double(d), Kind::Uint64 | Kind::Fixed64) => {
+                if d.fract() != 0.0 || *d < 0.0 || *d > u64::MAX as f64 {
+                    Err(Value::error(EvalError::overflow("double to uint64 overflow")))
+                } else {
+                    Ok(prost_reflect::Value::U64(*d as u64))
+                }
             }
             // Handle Timestamp -> google.protobuf.Timestamp conversion
             (Value::Timestamp(ts), Kind::Message(msg_desc))
@@ -1891,10 +2360,13 @@ impl<'a> Evaluator<'a> {
                 Ok(prost_reflect::Value::Message(msg))
             }
             // Handle wrapper types
-            (Value::Int(i), Kind::Message(msg_desc)) if is_int_wrapper(msg_desc) => {
+            (Value::Int(i), Kind::Message(msg_desc)) if wkt::is_int_wrapper(msg_desc) => {
                 let mut msg = DynamicMessage::new(msg_desc.clone());
                 if let Some(value_field) = msg_desc.get_field_by_name("value") {
                     let proto_val = if msg_desc.full_name() == "google.protobuf.Int32Value" {
+                        if *i < i32::MIN as i64 || *i > i32::MAX as i64 {
+                            return Err(Value::error(EvalError::overflow("int to int32 overflow")));
+                        }
                         prost_reflect::Value::I32(*i as i32)
                     } else {
                         prost_reflect::Value::I64(*i)
@@ -1903,10 +2375,13 @@ impl<'a> Evaluator<'a> {
                 }
                 Ok(prost_reflect::Value::Message(msg))
             }
-            (Value::UInt(u), Kind::Message(msg_desc)) if is_uint_wrapper(msg_desc) => {
+            (Value::UInt(u), Kind::Message(msg_desc)) if wkt::is_uint_wrapper(msg_desc) => {
                 let mut msg = DynamicMessage::new(msg_desc.clone());
                 if let Some(value_field) = msg_desc.get_field_by_name("value") {
                     let proto_val = if msg_desc.full_name() == "google.protobuf.UInt32Value" {
+                        if *u > u32::MAX as u64 {
+                            return Err(Value::error(EvalError::overflow("uint to uint32 overflow")));
+                        }
                         prost_reflect::Value::U32(*u as u32)
                     } else {
                         prost_reflect::Value::U64(*u)
@@ -1915,7 +2390,7 @@ impl<'a> Evaluator<'a> {
                 }
                 Ok(prost_reflect::Value::Message(msg))
             }
-            (Value::Double(d), Kind::Message(msg_desc)) if is_double_wrapper(msg_desc) => {
+            (Value::Double(d), Kind::Message(msg_desc)) if wkt::is_double_wrapper(msg_desc) => {
                 let mut msg = DynamicMessage::new(msg_desc.clone());
                 if let Some(value_field) = msg_desc.get_field_by_name("value") {
                     let proto_val = if msg_desc.full_name() == "google.protobuf.FloatValue" {
@@ -1957,6 +2432,126 @@ impl<'a> Evaluator<'a> {
                 }
                 Ok(prost_reflect::Value::Message(msg))
             }
+            // Cross-type numeric coercion for wrapper types: Int → UInt wrapper
+            (Value::Int(i), Kind::Message(msg_desc)) if wkt::is_uint_wrapper(msg_desc) => {
+                if *i < 0 {
+                    return Err(Value::error(EvalError::overflow("negative int to uint wrapper")));
+                }
+                let mut msg = DynamicMessage::new(msg_desc.clone());
+                if let Some(value_field) = msg_desc.get_field_by_name("value") {
+                    let proto_val = if msg_desc.full_name() == "google.protobuf.UInt32Value" {
+                        if *i > u32::MAX as i64 {
+                            return Err(Value::error(EvalError::overflow("int to uint32 overflow")));
+                        }
+                        prost_reflect::Value::U32(*i as u32)
+                    } else {
+                        prost_reflect::Value::U64(*i as u64)
+                    };
+                    msg.set_field(&value_field, proto_val);
+                }
+                Ok(prost_reflect::Value::Message(msg))
+            }
+            // Cross-type numeric coercion for wrapper types: UInt → Int wrapper
+            (Value::UInt(u), Kind::Message(msg_desc)) if wkt::is_int_wrapper(msg_desc) => {
+                let mut msg = DynamicMessage::new(msg_desc.clone());
+                if let Some(value_field) = msg_desc.get_field_by_name("value") {
+                    let proto_val = if msg_desc.full_name() == "google.protobuf.Int32Value" {
+                        if *u > i32::MAX as u64 {
+                            return Err(Value::error(EvalError::overflow("uint to int32 overflow")));
+                        }
+                        prost_reflect::Value::I32(*u as i32)
+                    } else {
+                        if *u > i64::MAX as u64 {
+                            return Err(Value::error(EvalError::overflow("uint to int64 overflow")));
+                        }
+                        prost_reflect::Value::I64(*u as i64)
+                    };
+                    msg.set_field(&value_field, proto_val);
+                }
+                Ok(prost_reflect::Value::Message(msg))
+            }
+            // Cross-type numeric coercion for wrapper types: Int/UInt → Double wrapper
+            (Value::Int(i), Kind::Message(msg_desc)) if wkt::is_double_wrapper(msg_desc) => {
+                let mut msg = DynamicMessage::new(msg_desc.clone());
+                if let Some(value_field) = msg_desc.get_field_by_name("value") {
+                    let proto_val = if msg_desc.full_name() == "google.protobuf.FloatValue" {
+                        prost_reflect::Value::F32(*i as f32)
+                    } else {
+                        prost_reflect::Value::F64(*i as f64)
+                    };
+                    msg.set_field(&value_field, proto_val);
+                }
+                Ok(prost_reflect::Value::Message(msg))
+            }
+            (Value::UInt(u), Kind::Message(msg_desc)) if wkt::is_double_wrapper(msg_desc) => {
+                let mut msg = DynamicMessage::new(msg_desc.clone());
+                if let Some(value_field) = msg_desc.get_field_by_name("value") {
+                    let proto_val = if msg_desc.full_name() == "google.protobuf.FloatValue" {
+                        prost_reflect::Value::F32(*u as f32)
+                    } else {
+                        prost_reflect::Value::F64(*u as f64)
+                    };
+                    msg.set_field(&value_field, proto_val);
+                }
+                Ok(prost_reflect::Value::Message(msg))
+            }
+            // google.protobuf.Value coercion
+            (_, Kind::Message(msg_desc))
+                if msg_desc.full_name() == "google.protobuf.Value" =>
+            {
+                if let Some(registry) = self.proto_types {
+                    let msg = wkt::cel_value_to_google_value(value, registry)?;
+                    Ok(prost_reflect::Value::Message(msg))
+                } else {
+                    Err(Value::error(EvalError::internal("proto type registry not available for Value coercion")))
+                }
+            }
+            // google.protobuf.Struct coercion
+            (Value::Map(map), Kind::Message(msg_desc))
+                if msg_desc.full_name() == "google.protobuf.Struct" =>
+            {
+                if let Some(registry) = self.proto_types {
+                    let msg = wkt::cel_map_to_struct(map, registry)?;
+                    Ok(prost_reflect::Value::Message(msg))
+                } else {
+                    Err(Value::error(EvalError::internal("proto type registry not available for Struct coercion")))
+                }
+            }
+            // google.protobuf.ListValue coercion
+            (Value::List(list), Kind::Message(msg_desc))
+                if msg_desc.full_name() == "google.protobuf.ListValue" =>
+            {
+                if let Some(registry) = self.proto_types {
+                    let msg = wkt::cel_list_to_list_value(list, registry)?;
+                    Ok(prost_reflect::Value::Message(msg))
+                } else {
+                    Err(Value::error(EvalError::internal("proto type registry not available for ListValue coercion")))
+                }
+            }
+            // google.protobuf.Any packing for proto messages
+            (Value::Proto(proto), Kind::Message(msg_desc))
+                if msg_desc.full_name() == "google.protobuf.Any" =>
+            {
+                wkt::pack_message_into_any(proto.message(), msg_desc)
+            }
+            // google.protobuf.Any wrapping for primitive values
+            (_, Kind::Message(msg_desc))
+                if msg_desc.full_name() == "google.protobuf.Any" =>
+            {
+                if let Some(registry) = self.proto_types {
+                    let any_msg = wkt::wrap_value_for_any(value, registry)?;
+                    Ok(prost_reflect::Value::Message(any_msg))
+                } else {
+                    Err(Value::error(EvalError::internal("proto type registry not available for Any wrapping")))
+                }
+            }
+            (Value::Null, Kind::Message(msg_desc)) => {
+                // Null for message fields - create default message
+                Ok(prost_reflect::Value::Message(DynamicMessage::new(msg_desc.clone())))
+            }
+            (Value::Proto(proto), Kind::Message(_)) => {
+                Ok(prost_reflect::Value::Message((*proto.message()).clone()))
+            }
             _ => Err(Value::error(EvalError::type_mismatch(
                 &format!("{:?}", kind),
                 &value.cel_type().display_name(),
@@ -1990,44 +2585,54 @@ impl<'a> Evaluator<'a> {
 
     /// Check if a message is a well-known type and unwrap it to a native CEL value.
     fn maybe_unwrap_well_known(&self, message: DynamicMessage) -> Value {
-        let descriptor = message.descriptor();
-        let type_name = descriptor.full_name();
-        match type_name {
-            "google.protobuf.Timestamp" => {
-                let seconds = get_field_i64(&message, "seconds").unwrap_or(0);
-                let nanos = get_field_i32(&message, "nanos").unwrap_or(0);
-                Value::Timestamp(Timestamp::new(seconds, nanos))
-            }
-            "google.protobuf.Duration" => {
-                let seconds = get_field_i64(&message, "seconds").unwrap_or(0);
-                let nanos = get_field_i32(&message, "nanos").unwrap_or(0);
-                Value::Duration(Duration::new(seconds, nanos))
-            }
-            "google.protobuf.Int32Value" | "google.protobuf.Int64Value" => {
-                let value = get_field_i64(&message, "value").unwrap_or(0);
-                Value::Int(value)
-            }
-            "google.protobuf.UInt32Value" | "google.protobuf.UInt64Value" => {
-                let value = get_field_u64(&message, "value").unwrap_or(0);
-                Value::UInt(value)
-            }
-            "google.protobuf.FloatValue" | "google.protobuf.DoubleValue" => {
-                let value = get_field_f64(&message, "value").unwrap_or(0.0);
-                Value::Double(value)
-            }
-            "google.protobuf.BoolValue" => {
-                let value = get_field_bool(&message, "value").unwrap_or(false);
-                Value::Bool(value)
-            }
-            "google.protobuf.StringValue" => {
-                let value = get_field_string(&message, "value").unwrap_or_default();
-                Value::String(Arc::from(value))
-            }
-            "google.protobuf.BytesValue" => {
-                let value = get_field_bytes(&message, "value").unwrap_or_default();
-                Value::Bytes(Arc::from(value))
-            }
-            _ => Value::Proto(ProtoValue::new(message)),
+        // Handle google.protobuf.Any: unpack and then unwrap the inner message
+        if message.descriptor().full_name() == "google.protobuf.Any" {
+            return self.unpack_any(&message);
+        }
+        wkt::maybe_unwrap_well_known(message)
+    }
+
+    /// Unpack a `google.protobuf.Any` message to a native CEL value.
+    fn unpack_any(&self, any_msg: &DynamicMessage) -> Value {
+        let type_url_field = match any_msg.descriptor().get_field_by_name("type_url") {
+            Some(f) => f,
+            None => return Value::Proto(super::ProtoValue::new(any_msg.clone())),
+        };
+        let type_url = match any_msg.get_field(&type_url_field).into_owned() {
+            prost_reflect::Value::String(s) => s,
+            _ => return Value::Proto(super::ProtoValue::new(any_msg.clone())),
+        };
+
+        if type_url.is_empty() {
+            return Value::Proto(super::ProtoValue::new(any_msg.clone()));
+        }
+
+        let type_name = type_url
+            .strip_prefix("type.googleapis.com/")
+            .unwrap_or(&type_url);
+
+        let registry = match self.proto_types {
+            Some(r) => r,
+            None => return Value::Proto(super::ProtoValue::new(any_msg.clone())),
+        };
+
+        let descriptor = match registry.get_message(type_name) {
+            Some(d) => d,
+            None => return Value::Proto(super::ProtoValue::new(any_msg.clone())),
+        };
+
+        let value_field = match any_msg.descriptor().get_field_by_name("value") {
+            Some(f) => f,
+            None => return Value::Proto(super::ProtoValue::new(any_msg.clone())),
+        };
+        let value_bytes = match any_msg.get_field(&value_field).into_owned() {
+            prost_reflect::Value::Bytes(b) => b,
+            _ => return Value::Proto(super::ProtoValue::new(any_msg.clone())),
+        };
+
+        match DynamicMessage::decode(descriptor.clone(), value_bytes.as_ref()) {
+            Ok(inner_msg) => self.maybe_unwrap_well_known(inner_msg),
+            Err(_) => Value::Proto(super::ProtoValue::new(any_msg.clone())),
         }
     }
 
@@ -2161,12 +2766,27 @@ impl<'a> Evaluator<'a> {
                 let descriptor = proto.descriptor();
                 match descriptor.get_field_by_name(field) {
                     Some(field_desc) => {
-                        // For proto3, scalar fields are always "present" (have default values)
-                        // For proto2, fields are present if explicitly set
-                        // has_field returns true if the field is explicitly set
-                        Value::Bool(proto.message().has_field(&field_desc))
+                        if field_desc.supports_presence() {
+                            // Proto2 fields, oneof fields, and message fields track presence
+                            Value::Bool(proto.message().has_field(&field_desc))
+                        } else {
+                            // Proto3 scalar: has() = value differs from default
+                            let current = proto.message().get_field(&field_desc);
+                            let default = field_desc.default_value();
+                            Value::Bool(current.as_ref() != &default)
+                        }
                     }
-                    None => Value::Bool(false),
+                    None => {
+                        // Try extension field lookup
+                        if let Some(registry) = self.proto_types {
+                            if let Some(ext) = registry.get_extension_by_name(field) {
+                                if ext.containing_message() == descriptor {
+                                    return Value::Bool(proto.message().has_extension(&ext));
+                                }
+                            }
+                        }
+                        Value::error(EvalError::field_not_found(field))
+                    }
                 }
             }
             _ => Value::Bool(false),
@@ -2238,109 +2858,6 @@ fn format_double(d: f64) -> String {
     }
 }
 
-// ==================== Proto Helper Functions ====================
-
-/// Check if a message descriptor is an int wrapper type.
-fn is_int_wrapper(desc: &prost_reflect::MessageDescriptor) -> bool {
-    matches!(
-        desc.full_name(),
-        "google.protobuf.Int32Value" | "google.protobuf.Int64Value"
-    )
-}
-
-/// Check if a message descriptor is a uint wrapper type.
-fn is_uint_wrapper(desc: &prost_reflect::MessageDescriptor) -> bool {
-    matches!(
-        desc.full_name(),
-        "google.protobuf.UInt32Value" | "google.protobuf.UInt64Value"
-    )
-}
-
-/// Check if a message descriptor is a double/float wrapper type.
-fn is_double_wrapper(desc: &prost_reflect::MessageDescriptor) -> bool {
-    matches!(
-        desc.full_name(),
-        "google.protobuf.FloatValue" | "google.protobuf.DoubleValue"
-    )
-}
-
-/// Get an i64 field from a dynamic message.
-fn get_field_i64(message: &DynamicMessage, field_name: &str) -> Option<i64> {
-    let field = message.descriptor().get_field_by_name(field_name)?;
-    match message.get_field(&field) {
-        std::borrow::Cow::Owned(prost_reflect::Value::I64(v)) => Some(v),
-        std::borrow::Cow::Borrowed(prost_reflect::Value::I64(v)) => Some(*v),
-        std::borrow::Cow::Owned(prost_reflect::Value::I32(v)) => Some(v as i64),
-        std::borrow::Cow::Borrowed(prost_reflect::Value::I32(v)) => Some(*v as i64),
-        _ => None,
-    }
-}
-
-/// Get an i32 field from a dynamic message.
-fn get_field_i32(message: &DynamicMessage, field_name: &str) -> Option<i32> {
-    let field = message.descriptor().get_field_by_name(field_name)?;
-    match message.get_field(&field) {
-        std::borrow::Cow::Owned(prost_reflect::Value::I32(v)) => Some(v),
-        std::borrow::Cow::Borrowed(prost_reflect::Value::I32(v)) => Some(*v),
-        std::borrow::Cow::Owned(prost_reflect::Value::I64(v)) => Some(v as i32),
-        std::borrow::Cow::Borrowed(prost_reflect::Value::I64(v)) => Some(*v as i32),
-        _ => None,
-    }
-}
-
-/// Get a u64 field from a dynamic message.
-fn get_field_u64(message: &DynamicMessage, field_name: &str) -> Option<u64> {
-    let field = message.descriptor().get_field_by_name(field_name)?;
-    match message.get_field(&field) {
-        std::borrow::Cow::Owned(prost_reflect::Value::U64(v)) => Some(v),
-        std::borrow::Cow::Borrowed(prost_reflect::Value::U64(v)) => Some(*v),
-        std::borrow::Cow::Owned(prost_reflect::Value::U32(v)) => Some(v as u64),
-        std::borrow::Cow::Borrowed(prost_reflect::Value::U32(v)) => Some(*v as u64),
-        _ => None,
-    }
-}
-
-/// Get an f64 field from a dynamic message.
-fn get_field_f64(message: &DynamicMessage, field_name: &str) -> Option<f64> {
-    let field = message.descriptor().get_field_by_name(field_name)?;
-    match message.get_field(&field) {
-        std::borrow::Cow::Owned(prost_reflect::Value::F64(v)) => Some(v),
-        std::borrow::Cow::Borrowed(prost_reflect::Value::F64(v)) => Some(*v),
-        std::borrow::Cow::Owned(prost_reflect::Value::F32(v)) => Some(v as f64),
-        std::borrow::Cow::Borrowed(prost_reflect::Value::F32(v)) => Some(*v as f64),
-        _ => None,
-    }
-}
-
-/// Get a bool field from a dynamic message.
-fn get_field_bool(message: &DynamicMessage, field_name: &str) -> Option<bool> {
-    let field = message.descriptor().get_field_by_name(field_name)?;
-    match message.get_field(&field) {
-        std::borrow::Cow::Owned(prost_reflect::Value::Bool(v)) => Some(v),
-        std::borrow::Cow::Borrowed(prost_reflect::Value::Bool(v)) => Some(*v),
-        _ => None,
-    }
-}
-
-/// Get a string field from a dynamic message.
-fn get_field_string(message: &DynamicMessage, field_name: &str) -> Option<String> {
-    let field = message.descriptor().get_field_by_name(field_name)?;
-    match message.get_field(&field) {
-        std::borrow::Cow::Owned(prost_reflect::Value::String(v)) => Some(v),
-        std::borrow::Cow::Borrowed(prost_reflect::Value::String(v)) => Some(v.clone()),
-        _ => None,
-    }
-}
-
-/// Get a bytes field from a dynamic message.
-fn get_field_bytes(message: &DynamicMessage, field_name: &str) -> Option<Vec<u8>> {
-    let field = message.descriptor().get_field_by_name(field_name)?;
-    match message.get_field(&field) {
-        std::borrow::Cow::Owned(prost_reflect::Value::Bytes(v)) => Some(v.to_vec()),
-        std::borrow::Cow::Borrowed(prost_reflect::Value::Bytes(v)) => Some(v.to_vec()),
-        _ => None,
-    }
-}
 
 #[cfg(test)]
 mod tests {

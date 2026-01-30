@@ -7,12 +7,13 @@ use std::sync::Arc;
 
 use prost::Message;
 use prost_reflect::prost_types;
-use prost_reflect::{DynamicMessage, ReflectMessage};
+use prost_reflect::DynamicMessage;
 
 use crate::{
     Binding, CheckResponse, ConformanceService, EvalResponse, Issue, ParseResponse, TypeDecl,
 };
-use cel_core::eval::{MapActivation, MapKey, ProtoValue as CelProtoValue, Value, ValueMap};
+use cel_core::eval::wkt;
+use cel_core::eval::{MapActivation, MapKey, Value, ValueMap};
 use cel_core::types::ProtoTypeRegistry;
 use cel_core::Env;
 use cel_core_proto::gen::cel::expr::value::Kind as ProtoValueKind;
@@ -154,7 +155,7 @@ impl ConformanceService for CelConformanceService {
         }
     }
 
-    fn eval(&self, expr: &ParsedExpr, bindings: &[Binding], container: &str) -> EvalResponse {
+    fn eval(&self, expr: &ParsedExpr, bindings: &[Binding], type_env: &[TypeDecl], container: &str) -> EvalResponse {
         // Convert ParsedExpr to AST
         let parsed_ast = match from_parsed_expr(expr) {
             Ok(ast) => ast,
@@ -188,13 +189,23 @@ impl ConformanceService for CelConformanceService {
             }
         };
 
+        // Clone env and set container + type declarations for proper name resolution
+        let mut env = self.env.clone();
+        if !container.is_empty() {
+            env.set_container(container);
+        }
+        for decl in type_env {
+            let cel_type = cel_type_from_proto(&decl.cel_type);
+            env.add_variable(&decl.name, cel_type);
+        }
+
         // Run the checker to get type info (needed for proto message construction)
         // We use the check result even if there are errors, as we still get useful
         // reference_map entries for type resolution
-        let check_result = self.env.check(&parsed_ast);
+        let check_result = env.check(&parsed_ast);
         let checked_ast = cel_core::Ast::new_checked(parsed_ast, "", check_result);
 
-        match self.env.program(&checked_ast) {
+        match env.program(&checked_ast) {
             Ok(program) => {
                 let result = program.eval_with_container(&activation, container);
                 let expr_value = value_to_proto(&result);
@@ -277,122 +288,9 @@ fn proto_value_to_value(proto: &ProtoValue, registry: &ProtoTypeRegistry) -> Res
                 .map_err(|e| format!("failed to decode message: {}", e))?;
 
             // Convert to CEL Value using well-known type unwrapping
-            Ok(unwrap_well_known_or_proto(message))
+            Ok(wkt::maybe_unwrap_well_known(message))
         }
         None => Err("missing value kind".to_string()),
-    }
-}
-
-/// Unwrap well-known types to native CEL values, or wrap as Proto value.
-fn unwrap_well_known_or_proto(message: DynamicMessage) -> Value {
-    let descriptor = message.descriptor();
-    let type_name = descriptor.full_name();
-    match type_name {
-        "google.protobuf.Timestamp" => {
-            let seconds = get_field_i64(&message, "seconds").unwrap_or(0);
-            let nanos = get_field_i32(&message, "nanos").unwrap_or(0);
-            Value::Timestamp(cel_core::eval::Timestamp::new(seconds, nanos))
-        }
-        "google.protobuf.Duration" => {
-            let seconds = get_field_i64(&message, "seconds").unwrap_or(0);
-            let nanos = get_field_i32(&message, "nanos").unwrap_or(0);
-            Value::Duration(cel_core::eval::Duration::new(seconds, nanos))
-        }
-        "google.protobuf.Int32Value" | "google.protobuf.Int64Value" => {
-            let value = get_field_i64(&message, "value").unwrap_or(0);
-            Value::Int(value)
-        }
-        "google.protobuf.UInt32Value" | "google.protobuf.UInt64Value" => {
-            let value = get_field_u64(&message, "value").unwrap_or(0);
-            Value::UInt(value)
-        }
-        "google.protobuf.FloatValue" | "google.protobuf.DoubleValue" => {
-            let value = get_field_f64(&message, "value").unwrap_or(0.0);
-            Value::Double(value)
-        }
-        "google.protobuf.BoolValue" => {
-            let value = get_field_bool(&message, "value").unwrap_or(false);
-            Value::Bool(value)
-        }
-        "google.protobuf.StringValue" => {
-            let value = get_field_string(&message, "value").unwrap_or_default();
-            Value::String(Arc::from(value))
-        }
-        "google.protobuf.BytesValue" => {
-            let value = get_field_bytes(&message, "value").unwrap_or_default();
-            Value::Bytes(Arc::from(value))
-        }
-        _ => Value::Proto(CelProtoValue::new(message)),
-    }
-}
-
-// Helper functions for extracting fields from DynamicMessage
-fn get_field_i64(message: &DynamicMessage, field_name: &str) -> Option<i64> {
-    let field = message.descriptor().get_field_by_name(field_name)?;
-    match message.get_field(&field) {
-        std::borrow::Cow::Owned(prost_reflect::Value::I64(v)) => Some(v),
-        std::borrow::Cow::Borrowed(prost_reflect::Value::I64(v)) => Some(*v),
-        std::borrow::Cow::Owned(prost_reflect::Value::I32(v)) => Some(v as i64),
-        std::borrow::Cow::Borrowed(prost_reflect::Value::I32(v)) => Some(*v as i64),
-        _ => None,
-    }
-}
-
-fn get_field_i32(message: &DynamicMessage, field_name: &str) -> Option<i32> {
-    let field = message.descriptor().get_field_by_name(field_name)?;
-    match message.get_field(&field) {
-        std::borrow::Cow::Owned(prost_reflect::Value::I32(v)) => Some(v),
-        std::borrow::Cow::Borrowed(prost_reflect::Value::I32(v)) => Some(*v),
-        _ => None,
-    }
-}
-
-fn get_field_u64(message: &DynamicMessage, field_name: &str) -> Option<u64> {
-    let field = message.descriptor().get_field_by_name(field_name)?;
-    match message.get_field(&field) {
-        std::borrow::Cow::Owned(prost_reflect::Value::U64(v)) => Some(v),
-        std::borrow::Cow::Borrowed(prost_reflect::Value::U64(v)) => Some(*v),
-        std::borrow::Cow::Owned(prost_reflect::Value::U32(v)) => Some(v as u64),
-        std::borrow::Cow::Borrowed(prost_reflect::Value::U32(v)) => Some(*v as u64),
-        _ => None,
-    }
-}
-
-fn get_field_f64(message: &DynamicMessage, field_name: &str) -> Option<f64> {
-    let field = message.descriptor().get_field_by_name(field_name)?;
-    match message.get_field(&field) {
-        std::borrow::Cow::Owned(prost_reflect::Value::F64(v)) => Some(v),
-        std::borrow::Cow::Borrowed(prost_reflect::Value::F64(v)) => Some(*v),
-        std::borrow::Cow::Owned(prost_reflect::Value::F32(v)) => Some(v as f64),
-        std::borrow::Cow::Borrowed(prost_reflect::Value::F32(v)) => Some(*v as f64),
-        _ => None,
-    }
-}
-
-fn get_field_bool(message: &DynamicMessage, field_name: &str) -> Option<bool> {
-    let field = message.descriptor().get_field_by_name(field_name)?;
-    match message.get_field(&field) {
-        std::borrow::Cow::Owned(prost_reflect::Value::Bool(v)) => Some(v),
-        std::borrow::Cow::Borrowed(prost_reflect::Value::Bool(v)) => Some(*v),
-        _ => None,
-    }
-}
-
-fn get_field_string(message: &DynamicMessage, field_name: &str) -> Option<String> {
-    let field = message.descriptor().get_field_by_name(field_name)?;
-    match message.get_field(&field) {
-        std::borrow::Cow::Owned(prost_reflect::Value::String(v)) => Some(v),
-        std::borrow::Cow::Borrowed(prost_reflect::Value::String(v)) => Some(v.clone()),
-        _ => None,
-    }
-}
-
-fn get_field_bytes(message: &DynamicMessage, field_name: &str) -> Option<Vec<u8>> {
-    let field = message.descriptor().get_field_by_name(field_name)?;
-    match message.get_field(&field) {
-        std::borrow::Cow::Owned(prost_reflect::Value::Bytes(v)) => Some(v.to_vec()),
-        std::borrow::Cow::Borrowed(prost_reflect::Value::Bytes(v)) => Some(v.to_vec()),
-        _ => None,
     }
 }
 
@@ -442,12 +340,30 @@ fn value_to_proto_value(value: &Value) -> ProtoValue {
         }),
         Value::Type(t) => ProtoValueKind::TypeValue(t.name.to_string()),
         Value::Timestamp(t) => {
-            // CEL timestamps are represented as ints (seconds since epoch) when serialized
-            ProtoValueKind::Int64Value(t.seconds)
+            // Serialize as Any-wrapped google.protobuf.Timestamp
+            let ts = prost_types::Timestamp {
+                seconds: t.seconds,
+                nanos: t.nanos,
+            };
+            let mut buf = Vec::new();
+            ts.encode(&mut buf).unwrap();
+            ProtoValueKind::ObjectValue(prost_types::Any {
+                type_url: "type.googleapis.com/google.protobuf.Timestamp".to_string(),
+                value: buf.into(),
+            })
         }
         Value::Duration(d) => {
-            // CEL durations are represented as ints (seconds) when serialized
-            ProtoValueKind::Int64Value(d.seconds)
+            // Serialize as Any-wrapped google.protobuf.Duration
+            let dur = prost_types::Duration {
+                seconds: d.seconds,
+                nanos: d.nanos,
+            };
+            let mut buf = Vec::new();
+            dur.encode(&mut buf).unwrap();
+            ProtoValueKind::ObjectValue(prost_types::Any {
+                type_url: "type.googleapis.com/google.protobuf.Duration".to_string(),
+                value: buf.into(),
+            })
         }
         Value::Optional(opt) => match opt {
             cel_core::eval::OptionalValue::None => ProtoValueKind::NullValue(0),
@@ -456,13 +372,43 @@ fn value_to_proto_value(value: &Value) -> ProtoValue {
             }
         },
         Value::Proto(proto) => {
-            // Serialize proto message to Any format
-            let type_url = format!("type.googleapis.com/{}", proto.type_name());
-            let value_bytes = proto.message().encode_to_vec();
-            ProtoValueKind::ObjectValue(prost_types::Any {
-                type_url,
-                value: value_bytes.into(),
-            })
+            // If the proto message IS an Any, preserve its inner type_url and value
+            if proto.type_name() == "google.protobuf.Any" {
+                let msg = proto.message();
+                let desc = proto.descriptor();
+                let type_url = desc
+                    .get_field_by_name("type_url")
+                    .map(|f| {
+                        if let prost_reflect::Value::String(s) = msg.get_field(&f).into_owned() {
+                            s
+                        } else {
+                            String::new()
+                        }
+                    })
+                    .unwrap_or_default();
+                let value_bytes = desc
+                    .get_field_by_name("value")
+                    .map(|f| {
+                        if let prost_reflect::Value::Bytes(b) = msg.get_field(&f).into_owned() {
+                            b.to_vec()
+                        } else {
+                            Vec::new()
+                        }
+                    })
+                    .unwrap_or_default();
+                ProtoValueKind::ObjectValue(prost_types::Any {
+                    type_url,
+                    value: value_bytes.into(),
+                })
+            } else {
+                // Serialize proto message to Any format
+                let type_url = format!("type.googleapis.com/{}", proto.type_name());
+                let value_bytes = proto.message().encode_to_vec();
+                ProtoValueKind::ObjectValue(prost_types::Any {
+                    type_url,
+                    value: value_bytes.into(),
+                })
+            }
         }
         Value::Error(_) => {
             // Errors are handled at the ExprValue level
@@ -562,7 +508,7 @@ mod tests {
     fn test_eval_literal() {
         let service = CelConformanceService::new();
         let parse_result = service.parse("42").parsed_expr.unwrap();
-        let eval_result = service.eval(&parse_result, &[], "");
+        let eval_result = service.eval(&parse_result, &[], &[], "");
         assert!(eval_result.is_ok(), "eval should succeed: {:?}", eval_result.issues);
         assert!(eval_result.result.is_some());
 
@@ -593,7 +539,7 @@ mod tests {
             },
         };
 
-        let eval_result = service.eval(&parse_result, &[binding], "");
+        let eval_result = service.eval(&parse_result, &[binding], &[], "");
         assert!(eval_result.is_ok(), "eval should succeed: {:?}", eval_result.issues);
 
         let result = eval_result.result.unwrap();
@@ -612,7 +558,7 @@ mod tests {
     fn test_eval_unknown_variable() {
         let service = CelConformanceService::new();
         let parse_result = service.parse("unknown_var").parsed_expr.unwrap();
-        let eval_result = service.eval(&parse_result, &[], "");
+        let eval_result = service.eval(&parse_result, &[], &[], "");
 
         // Should return an error result
         let result = eval_result.result.unwrap();

@@ -155,11 +155,12 @@ pub trait ConformanceService {
     /// # Arguments
     /// * `expr` - The expression to evaluate (either parsed or checked)
     /// * `bindings` - Variable bindings for evaluation
+    /// * `type_env` - Type declarations for variables in the expression
     /// * `container` - Container namespace for qualified name resolution
     ///
     /// # Returns
     /// An EvalResponse containing the result or issues.
-    fn eval(&self, expr: &ParsedExpr, bindings: &[Binding], container: &str) -> EvalResponse;
+    fn eval(&self, expr: &ParsedExpr, bindings: &[Binding], type_env: &[TypeDecl], container: &str) -> EvalResponse;
 }
 
 /// A type declaration for a variable in the type environment.

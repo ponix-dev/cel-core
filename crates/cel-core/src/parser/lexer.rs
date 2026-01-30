@@ -370,40 +370,323 @@ fn lex_triple_single_string(lex: &mut logos::Lexer<Token>) -> Option<String> {
 
 fn lex_triple_string(lex: &mut logos::Lexer<Token>, end_quote: &str) -> Option<String> {
     let remainder = lex.remainder();
+    let end_bytes = end_quote.as_bytes();
+    let end_len = end_bytes.len();
+    let mut chars = remainder.chars().peekable();
+    let mut result = std::string::String::new();
+    let mut consumed = 0;
 
+    while consumed + end_len <= remainder.len() {
+        // Check if we've reached the end quote
+        if &remainder.as_bytes()[consumed..consumed + end_len] == end_bytes {
+            lex.bump(consumed + end_len);
+            return Some(result);
+        }
+
+        let c = chars.next()?;
+        consumed += c.len_utf8();
+
+        if c == '\\' {
+            let escape_char = chars.next()?;
+            consumed += escape_char.len_utf8();
+            match escape_char {
+                '\\' => result.push('\\'),
+                '/' => result.push('/'),
+                '"' => result.push('"'),
+                '\'' => result.push('\''),
+                '`' => result.push('`'),
+                'a' => result.push('\x07'),
+                'b' => result.push('\x08'),
+                'f' => result.push('\x0C'),
+                'n' => result.push('\n'),
+                'r' => result.push('\r'),
+                't' => result.push('\t'),
+                'v' => result.push('\x0B'),
+                '?' => result.push('?'),
+                'x' | 'X' => {
+                    let h1 = chars.next()?;
+                    let h2 = chars.next()?;
+                    consumed += h1.len_utf8() + h2.len_utf8();
+                    let hex = format!("{}{}", h1, h2);
+                    let val = u8::from_str_radix(&hex, 16).ok()?;
+                    result.push(val as char);
+                }
+                'u' => {
+                    let hex: String = chars.by_ref().take(4).collect();
+                    consumed += hex.len();
+                    if hex.len() != 4 {
+                        return None;
+                    }
+                    let val = u32::from_str_radix(&hex, 16).ok()?;
+                    result.push(char::from_u32(val)?);
+                }
+                'U' => {
+                    let hex: String = chars.by_ref().take(8).collect();
+                    consumed += hex.len();
+                    if hex.len() != 8 {
+                        return None;
+                    }
+                    let val = u32::from_str_radix(&hex, 16).ok()?;
+                    result.push(char::from_u32(val)?);
+                }
+                c @ '0'..='3' => {
+                    let d2 = chars.next()?;
+                    let d3 = chars.next()?;
+                    consumed += d2.len_utf8() + d3.len_utf8();
+                    if !matches!(d2, '0'..='7') || !matches!(d3, '0'..='7') {
+                        return None;
+                    }
+                    let octal = format!("{}{}{}", c, d2, d3);
+                    let val = u8::from_str_radix(&octal, 8).ok()?;
+                    result.push(val as char);
+                }
+                _ => return None,
+            }
+        } else {
+            // Allow literal newlines in triple-quoted strings
+            result.push(c);
+        }
+    }
+
+    // Check if the remaining content is exactly the end quote
+    if consumed < remainder.len()
+        && remainder.len() - consumed >= end_len
+        && &remainder.as_bytes()[consumed..consumed + end_len] == end_bytes
+    {
+        lex.bump(consumed + end_len);
+        return Some(result);
+    }
+
+    None // Unclosed triple-quoted string
+}
+
+fn lex_raw_triple_double_string(lex: &mut logos::Lexer<Token>) -> Option<String> {
+    lex_raw_triple_string(lex, "\"\"\"")
+}
+
+fn lex_raw_triple_single_string(lex: &mut logos::Lexer<Token>) -> Option<String> {
+    lex_raw_triple_string(lex, "'''")
+}
+
+/// Lex a raw triple-quoted string (no escape processing).
+fn lex_raw_triple_string(lex: &mut logos::Lexer<Token>, end_quote: &str) -> Option<String> {
+    let remainder = lex.remainder();
     if let Some(end_pos) = remainder.find(end_quote) {
         let content = &remainder[..end_pos];
         lex.bump(end_pos + end_quote.len());
         Some(content.to_string())
     } else {
-        None // Unclosed triple-quoted string
+        None
     }
-}
-
-fn lex_raw_triple_double_string(lex: &mut logos::Lexer<Token>) -> Option<String> {
-    lex_triple_string(lex, "\"\"\"")
-}
-
-fn lex_raw_triple_single_string(lex: &mut logos::Lexer<Token>) -> Option<String> {
-    lex_triple_string(lex, "'''")
 }
 
 // === Lexer Callbacks for Bytes ===
 
 fn lex_bytes_double(lex: &mut logos::Lexer<Token>) -> Option<Vec<u8>> {
-    lex_quoted_string(lex, '"').map(|s| s.into_bytes())
+    lex_quoted_bytes(lex, '"')
 }
 
 fn lex_bytes_single(lex: &mut logos::Lexer<Token>) -> Option<Vec<u8>> {
-    lex_quoted_string(lex, '\'').map(|s| s.into_bytes())
+    lex_quoted_bytes(lex, '\'')
+}
+
+/// Lex a quoted byte string, handling escapes to produce raw bytes.
+/// Unlike `lex_quoted_string`, octal/hex escapes push raw byte values
+/// rather than interpreting them as Unicode code points.
+fn lex_quoted_bytes(lex: &mut logos::Lexer<Token>, quote: char) -> Option<Vec<u8>> {
+    let remainder = lex.remainder();
+    let mut chars = remainder.chars().peekable();
+    let mut result = Vec::new();
+    let mut consumed = 0;
+
+    while let Some(c) = chars.next() {
+        consumed += c.len_utf8();
+        if c == quote {
+            lex.bump(consumed);
+            return Some(result);
+        } else if c == '\\' {
+            let escape_char = chars.next()?;
+            consumed += escape_char.len_utf8();
+            match escape_char {
+                '\\' => result.push(b'\\'),
+                '/' => result.push(b'/'),
+                '"' => result.push(b'"'),
+                '\'' => result.push(b'\''),
+                '`' => result.push(b'`'),
+                'a' => result.push(0x07),
+                'b' => result.push(0x08),
+                'f' => result.push(0x0C),
+                'n' => result.push(b'\n'),
+                'r' => result.push(b'\r'),
+                't' => result.push(b'\t'),
+                'v' => result.push(0x0B),
+                '?' => result.push(b'?'),
+                'x' | 'X' => {
+                    // \xHH or \XHH - 2 hex digits -> raw byte
+                    let h1 = chars.next()?;
+                    let h2 = chars.next()?;
+                    consumed += h1.len_utf8() + h2.len_utf8();
+                    let hex = format!("{}{}", h1, h2);
+                    let val = u8::from_str_radix(&hex, 16).ok()?;
+                    result.push(val);
+                }
+                'u' => {
+                    // \uXXXX - 4 hex digits -> encode as UTF-8 bytes
+                    let hex: String = chars.by_ref().take(4).collect();
+                    consumed += hex.len();
+                    if hex.len() != 4 {
+                        return None;
+                    }
+                    let val = u32::from_str_radix(&hex, 16).ok()?;
+                    let ch = char::from_u32(val)?;
+                    let mut buf = [0u8; 4];
+                    let encoded = ch.encode_utf8(&mut buf);
+                    result.extend_from_slice(encoded.as_bytes());
+                }
+                'U' => {
+                    // \UXXXXXXXX - 8 hex digits -> encode as UTF-8 bytes
+                    let hex: String = chars.by_ref().take(8).collect();
+                    consumed += hex.len();
+                    if hex.len() != 8 {
+                        return None;
+                    }
+                    let val = u32::from_str_radix(&hex, 16).ok()?;
+                    let ch = char::from_u32(val)?;
+                    let mut buf = [0u8; 4];
+                    let encoded = ch.encode_utf8(&mut buf);
+                    result.extend_from_slice(encoded.as_bytes());
+                }
+                c @ '0'..='3' => {
+                    // \DDD - octal (first digit 0-3, then 2 more digits) -> raw byte
+                    let d2 = chars.next()?;
+                    let d3 = chars.next()?;
+                    consumed += d2.len_utf8() + d3.len_utf8();
+                    if !matches!(d2, '0'..='7') || !matches!(d3, '0'..='7') {
+                        return None;
+                    }
+                    let octal = format!("{}{}{}", c, d2, d3);
+                    let val = u8::from_str_radix(&octal, 8).ok()?;
+                    result.push(val);
+                }
+                _ => return None, // Invalid escape
+            }
+        } else if c == '\n' {
+            // Newline not allowed in regular byte strings
+            return None;
+        } else {
+            // Regular character: encode as UTF-8 bytes
+            let mut buf = [0u8; 4];
+            let encoded = c.encode_utf8(&mut buf);
+            result.extend_from_slice(encoded.as_bytes());
+        }
+    }
+
+    None // Unclosed byte string
 }
 
 fn lex_bytes_triple_double(lex: &mut logos::Lexer<Token>) -> Option<Vec<u8>> {
-    lex_triple_string(lex, "\"\"\"").map(|s| s.into_bytes())
+    lex_triple_bytes(lex, "\"\"\"")
 }
 
 fn lex_bytes_triple_single(lex: &mut logos::Lexer<Token>) -> Option<Vec<u8>> {
-    lex_triple_string(lex, "'''").map(|s| s.into_bytes())
+    lex_triple_bytes(lex, "'''")
+}
+
+fn lex_triple_bytes(lex: &mut logos::Lexer<Token>, end_quote: &str) -> Option<Vec<u8>> {
+    let remainder = lex.remainder();
+    let end_bytes = end_quote.as_bytes();
+    let end_len = end_bytes.len();
+    let mut chars = remainder.chars().peekable();
+    let mut result = Vec::new();
+    let mut consumed = 0;
+
+    while consumed + end_len <= remainder.len() {
+        if &remainder.as_bytes()[consumed..consumed + end_len] == end_bytes {
+            lex.bump(consumed + end_len);
+            return Some(result);
+        }
+
+        let c = chars.next()?;
+        consumed += c.len_utf8();
+
+        if c == '\\' {
+            let escape_char = chars.next()?;
+            consumed += escape_char.len_utf8();
+            match escape_char {
+                '\\' => result.push(b'\\'),
+                '/' => result.push(b'/'),
+                '"' => result.push(b'"'),
+                '\'' => result.push(b'\''),
+                '`' => result.push(b'`'),
+                'a' => result.push(0x07),
+                'b' => result.push(0x08),
+                'f' => result.push(0x0C),
+                'n' => result.push(b'\n'),
+                'r' => result.push(b'\r'),
+                't' => result.push(b'\t'),
+                'v' => result.push(0x0B),
+                '?' => result.push(b'?'),
+                'x' | 'X' => {
+                    let h1 = chars.next()?;
+                    let h2 = chars.next()?;
+                    consumed += h1.len_utf8() + h2.len_utf8();
+                    let hex = format!("{}{}", h1, h2);
+                    let val = u8::from_str_radix(&hex, 16).ok()?;
+                    result.push(val);
+                }
+                'u' => {
+                    let hex: String = chars.by_ref().take(4).collect();
+                    consumed += hex.len();
+                    if hex.len() != 4 {
+                        return None;
+                    }
+                    let val = u32::from_str_radix(&hex, 16).ok()?;
+                    let ch = char::from_u32(val)?;
+                    let mut buf = [0u8; 4];
+                    let encoded = ch.encode_utf8(&mut buf);
+                    result.extend_from_slice(encoded.as_bytes());
+                }
+                'U' => {
+                    let hex: String = chars.by_ref().take(8).collect();
+                    consumed += hex.len();
+                    if hex.len() != 8 {
+                        return None;
+                    }
+                    let val = u32::from_str_radix(&hex, 16).ok()?;
+                    let ch = char::from_u32(val)?;
+                    let mut buf = [0u8; 4];
+                    let encoded = ch.encode_utf8(&mut buf);
+                    result.extend_from_slice(encoded.as_bytes());
+                }
+                c @ '0'..='3' => {
+                    let d2 = chars.next()?;
+                    let d3 = chars.next()?;
+                    consumed += d2.len_utf8() + d3.len_utf8();
+                    if !matches!(d2, '0'..='7') || !matches!(d3, '0'..='7') {
+                        return None;
+                    }
+                    let octal = format!("{}{}{}", c, d2, d3);
+                    let val = u8::from_str_radix(&octal, 8).ok()?;
+                    result.push(val);
+                }
+                _ => return None,
+            }
+        } else {
+            let mut buf = [0u8; 4];
+            let encoded = c.encode_utf8(&mut buf);
+            result.extend_from_slice(encoded.as_bytes());
+        }
+    }
+
+    if consumed < remainder.len()
+        && remainder.len() - consumed >= end_len
+        && &remainder.as_bytes()[consumed..consumed + end_len] == end_bytes
+    {
+        lex.bump(consumed + end_len);
+        return Some(result);
+    }
+
+    None
 }
 
 fn lex_raw_bytes_double(lex: &mut logos::Lexer<Token>) -> Option<Vec<u8>> {
@@ -415,11 +698,11 @@ fn lex_raw_bytes_single(lex: &mut logos::Lexer<Token>) -> Option<Vec<u8>> {
 }
 
 fn lex_raw_bytes_triple_double(lex: &mut logos::Lexer<Token>) -> Option<Vec<u8>> {
-    lex_triple_string(lex, "\"\"\"").map(|s| s.into_bytes())
+    lex_raw_triple_string(lex, "\"\"\"").map(|s| s.into_bytes())
 }
 
 fn lex_raw_bytes_triple_single(lex: &mut logos::Lexer<Token>) -> Option<Vec<u8>> {
-    lex_triple_string(lex, "'''").map(|s| s.into_bytes())
+    lex_raw_triple_string(lex, "'''").map(|s| s.into_bytes())
 }
 
 // === Public Lexer API ===

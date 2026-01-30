@@ -551,6 +551,36 @@ impl ValueMap {
         self.entries.contains_key(key)
     }
 
+    /// Get a value by key with cross-type numeric coercion.
+    /// Tries exact match first, then Int↔UInt coercion for in-range values.
+    pub fn get_with_numeric_coercion(&self, key: &MapKey) -> Option<&Value> {
+        if let Some(v) = self.entries.get(key) {
+            return Some(v);
+        }
+        match key {
+            MapKey::Int(i) => {
+                if *i >= 0 {
+                    self.entries.get(&MapKey::UInt(*i as u64))
+                } else {
+                    None
+                }
+            }
+            MapKey::UInt(u) => {
+                if *u <= i64::MAX as u64 {
+                    self.entries.get(&MapKey::Int(*u as i64))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// Check if a key exists with cross-type numeric coercion.
+    pub fn contains_key_with_numeric_coercion(&self, key: &MapKey) -> bool {
+        self.get_with_numeric_coercion(key).is_some()
+    }
+
     /// Get the number of entries.
     pub fn len(&self) -> usize {
         self.entries.len()
@@ -1198,6 +1228,49 @@ impl PartialEq for Value {
                 _ => false,
             },
             (Value::Proto(a), Value::Proto(b)) => a == b,
+            // Cross-type numeric equality (CEL spec: 42 == 42u == 42.0)
+            (Value::Int(a), Value::UInt(b)) => {
+                if *a < 0 {
+                    false
+                } else {
+                    *a as u64 == *b
+                }
+            }
+            (Value::UInt(a), Value::Int(b)) => {
+                if *b < 0 {
+                    false
+                } else {
+                    *a == *b as u64
+                }
+            }
+            (Value::Int(a), Value::Double(b)) => {
+                if b.is_nan() {
+                    return false;
+                }
+                let a_f64 = *a as f64;
+                a_f64 == *b && a_f64 as i64 == *a
+            }
+            (Value::Double(a), Value::Int(b)) => {
+                if a.is_nan() {
+                    return false;
+                }
+                let b_f64 = *b as f64;
+                *a == b_f64 && b_f64 as i64 == *b
+            }
+            (Value::UInt(a), Value::Double(b)) => {
+                if b.is_nan() {
+                    return false;
+                }
+                let a_f64 = *a as f64;
+                a_f64 == *b && a_f64 as u64 == *a
+            }
+            (Value::Double(a), Value::UInt(b)) => {
+                if a.is_nan() {
+                    return false;
+                }
+                let b_f64 = *b as f64;
+                *a == b_f64 && b_f64 as u64 == *b
+            }
             _ => false,
         }
     }
@@ -1315,7 +1388,9 @@ mod tests {
     fn test_value_equality() {
         assert_eq!(Value::Int(42), Value::Int(42));
         assert_ne!(Value::Int(42), Value::Int(43));
-        assert_ne!(Value::Int(42), Value::UInt(42));
+        // Cross-type numeric equality: 42 == 42u
+        assert_eq!(Value::Int(42), Value::UInt(42));
+        assert_ne!(Value::Int(-1), Value::UInt(1));
         let hello: Value = "hello".into();
         assert_eq!(hello, "hello".into());
     }
