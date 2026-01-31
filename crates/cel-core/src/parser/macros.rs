@@ -374,6 +374,22 @@ pub static STANDARD_MACROS: &[Macro] = &[
         "Tests whether exactly one element satisfies a condition (two-variable form)",
     ),
 
+    // existsOne - camelCase alias (cel-go compatibility)
+    Macro::with_description(
+        "existsOne",
+        MacroStyle::Receiver,
+        ArgCount::Exact(2),
+        expand_exists_one_2arg,
+        "Tests whether exactly one element satisfies a condition",
+    ),
+    Macro::with_description(
+        "existsOne",
+        MacroStyle::Receiver,
+        ArgCount::Exact(3),
+        expand_exists_one_3arg,
+        "Tests whether exactly one element satisfies a condition (two-variable form)",
+    ),
+
     // map - receiver, 2 or 3 args
     Macro::with_description(
         "map",
@@ -760,17 +776,7 @@ fn expand_exists_one_impl(
     let accu_var = ACCU_VAR.to_string();
     let accu_init = synthetic(ctx, Expr::Int(0), span.clone());
 
-    let accu_ref_cond = synthetic(ctx, Expr::Ident(accu_var.clone()), span.clone());
-    let one_cond = synthetic(ctx, Expr::Int(1), span.clone());
-    let loop_condition = synthetic(
-        ctx,
-        Expr::Binary {
-            op: BinaryOp::Le,
-            left: Box::new(accu_ref_cond),
-            right: Box::new(one_cond),
-        },
-        span.clone(),
-    );
+    let loop_condition = synthetic(ctx, Expr::Bool(true), span.clone());
 
     let accu_ref_then = synthetic(ctx, Expr::Ident(accu_var.clone()), span.clone());
     let one_step = synthetic(ctx, Expr::Int(1), span.clone());

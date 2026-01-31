@@ -474,6 +474,13 @@ impl<'a> Evaluator<'a> {
                 result.extend(b.iter().cloned());
                 Value::List(Arc::from(result))
             }
+            (Value::Map(a), Value::Map(b)) => {
+                let mut result = a.as_ref().clone();
+                for (key, value) in b.iter() {
+                    result.insert(key.clone(), value.clone());
+                }
+                Value::Map(Arc::new(result))
+            }
             (Value::Timestamp(t), Value::Duration(d)) => {
                 // Normalize: timestamp nanos are always 0..999_999_999
                 // Duration nanos can be negative for negative durations
@@ -2749,10 +2756,16 @@ impl<'a> Evaluator<'a> {
                         HierarchicalActivation::new(self.activation).with_binding(accu_var, accu.clone());
 
                     if !iter_var.is_empty() {
-                        iter_activation.insert(iter_var, elem.clone());
+                        if !iter_var2.is_empty() {
+                            // Two-variable form: iter_var = index, iter_var2 = element
+                            iter_activation.insert(iter_var, Value::Int(i as i64));
+                        } else {
+                            // Single-variable form: iter_var = element
+                            iter_activation.insert(iter_var, elem.clone());
+                        }
                     }
                     if !iter_var2.is_empty() {
-                        iter_activation.insert(iter_var2, Value::Int(i as i64));
+                        iter_activation.insert(iter_var2, elem.clone());
                     }
 
                     let iter_eval = self.child_evaluator(&iter_activation);
@@ -2762,7 +2775,7 @@ impl<'a> Evaluator<'a> {
                     match &cond {
                         Value::Bool(false) => break,
                         Value::Bool(true) => {}
-                        Value::Error(_) => return cond,
+                        Value::Error(_) => {} // continue iteration (not strictly false)
                         _ => {
                             return Value::error(EvalError::type_mismatch(
                                 "bool",
@@ -2773,9 +2786,6 @@ impl<'a> Evaluator<'a> {
 
                     // Compute next accumulator value
                     accu = iter_eval.eval_expr(loop_step);
-                    if accu.is_error() {
-                        return accu;
-                    }
                 }
             }
             Value::Map(map) => {
@@ -2797,7 +2807,7 @@ impl<'a> Evaluator<'a> {
                     match &cond {
                         Value::Bool(false) => break,
                         Value::Bool(true) => {}
-                        Value::Error(_) => return cond,
+                        Value::Error(_) => {} // continue iteration (not strictly false)
                         _ => {
                             return Value::error(EvalError::type_mismatch(
                                 "bool",
@@ -2808,9 +2818,6 @@ impl<'a> Evaluator<'a> {
 
                     // Compute next accumulator value
                     accu = iter_eval.eval_expr(loop_step);
-                    if accu.is_error() {
-                        return accu;
-                    }
                 }
             }
             _ => {

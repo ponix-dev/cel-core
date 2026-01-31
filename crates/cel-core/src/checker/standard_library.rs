@@ -30,7 +30,13 @@ fn build_standard_library() -> Vec<FunctionDecl> {
             ).with_type_params(vec!["T".to_string()]))
             .with_overload(OverloadDecl::function("add_timestamp_duration", vec![CelType::Timestamp, CelType::Duration], CelType::Timestamp))
             .with_overload(OverloadDecl::function("add_duration_timestamp", vec![CelType::Duration, CelType::Timestamp], CelType::Timestamp))
-            .with_overload(OverloadDecl::function("add_duration_duration", vec![CelType::Duration, CelType::Duration], CelType::Duration)),
+            .with_overload(OverloadDecl::function("add_duration_duration", vec![CelType::Duration, CelType::Duration], CelType::Duration))
+            .with_overload(OverloadDecl::function(
+                "add_map_map",
+                vec![CelType::map(CelType::type_param("K"), CelType::type_param("V")),
+                     CelType::map(CelType::type_param("K"), CelType::type_param("V"))],
+                CelType::map(CelType::type_param("K"), CelType::type_param("V")),
+            ).with_type_params(vec!["K".to_string(), "V".to_string()])),
     );
 
     // Arithmetic: _-_

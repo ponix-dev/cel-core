@@ -749,13 +749,25 @@ impl<'a> Checker<'a> {
         // Check iter_range in outer scope
         let range_type = self.check_expr(iter_range);
 
-        // Determine iteration variable type from range
-        let iter_type = match &range_type {
-            CelType::List(elem) => (**elem).clone(),
-            CelType::Map(key, _) => (**key).clone(),
-            CelType::Optional(inner) => (**inner).clone(), // For optMap/optFlatMap macros
-            CelType::Dyn => CelType::Dyn,
-            _ => CelType::Dyn,
+        // Determine iteration variable type(s) from range
+        let (iter_type, iter_type2) = if !iter_var2.is_empty() {
+            // Two-variable form: first var is index/key, second is value/element
+            match &range_type {
+                CelType::List(elem) => (CelType::Int, (**elem).clone()),
+                CelType::Map(key, value) => ((**key).clone(), (**value).clone()),
+                CelType::Dyn => (CelType::Dyn, CelType::Dyn),
+                _ => (CelType::Dyn, CelType::Dyn),
+            }
+        } else {
+            // Single-variable form
+            let t = match &range_type {
+                CelType::List(elem) => (**elem).clone(),
+                CelType::Map(key, _) => (**key).clone(),
+                CelType::Optional(inner) => (**inner).clone(), // For optMap/optFlatMap macros
+                CelType::Dyn => CelType::Dyn,
+                _ => CelType::Dyn,
+            };
+            (t, CelType::Dyn)
         };
 
         // Check accu_init in outer scope
@@ -767,11 +779,6 @@ impl<'a> Checker<'a> {
         // Bind iteration variable(s)
         self.scopes.add_variable(iter_var, iter_type.clone());
         if !iter_var2.is_empty() {
-            // For two-variable iteration (maps), bind second var
-            let iter_type2 = match &range_type {
-                CelType::Map(_, value) => (**value).clone(),
-                _ => CelType::Dyn,
-            };
             self.scopes.add_variable(iter_var2, iter_type2);
         }
 
