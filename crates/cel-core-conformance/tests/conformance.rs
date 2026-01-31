@@ -276,16 +276,24 @@ fn convert_bindings(
     Ok(result)
 }
 
-/// Run evaluation tests in a file and collect failures.
-fn run_eval_conformance_file(filename: &str) -> (usize, Vec<EvalTestFailure>) {
+/// Run evaluation tests in a file using a specific service, optionally filtering to named sections.
+fn run_eval_conformance_file_with_service(
+    filename: &str,
+    service: &CelConformanceService,
+    section_filter: Option<&[&str]>,
+) -> (usize, Vec<EvalTestFailure>) {
     let path = Path::new(TESTDATA_PATH).join(filename);
     let file = load_test_file(&path).expect(&format!("Failed to load {}", filename));
 
-    let service = CelConformanceService::new();
     let mut failures = Vec::new();
     let mut total_tests = 0;
 
     for section in &file.section {
+        if let Some(filter) = section_filter {
+            if !filter.contains(&section.name.as_str()) {
+                continue;
+            }
+        }
         for test in &section.test {
             let test_name = format!("{}/{}", section.name, test.name);
 
@@ -434,6 +442,12 @@ fn run_eval_conformance_file(filename: &str) -> (usize, Vec<EvalTestFailure>) {
     }
 
     (total_tests, failures)
+}
+
+/// Run evaluation tests in a file and collect failures.
+fn run_eval_conformance_file(filename: &str) -> (usize, Vec<EvalTestFailure>) {
+    let service = CelConformanceService::new();
+    run_eval_conformance_file_with_service(filename, &service, None)
 }
 
 /// Expected result type for evaluation tests.
@@ -658,7 +672,7 @@ conformance_test!(test_comparisons, "comparisons.textproto");
 conformance_test!(test_conversions, "conversions.textproto");
 conformance_test!(test_dynamic, "dynamic.textproto");
 conformance_test!(test_encoders_ext, "encoders_ext.textproto");
-conformance_test!(test_enums, "enums.textproto");
+// Enum tests are split into legacy/strong mode — see below
 conformance_test!(test_fields, "fields.textproto");
 conformance_test!(test_fp_math, "fp_math.textproto");
 conformance_test!(test_integer_math, "integer_math.textproto");
@@ -743,7 +757,7 @@ eval_conformance_test!(test_comparisons_eval, "comparisons.textproto");
 eval_conformance_test!(test_conversions_eval, "conversions.textproto");
 eval_conformance_test!(test_dynamic_eval, "dynamic.textproto");
 eval_conformance_test!(test_encoders_ext_eval, "encoders_ext.textproto");
-eval_conformance_test!(test_enums_eval, "enums.textproto");
+// Enum eval tests are split into legacy/strong mode — see below
 eval_conformance_test!(test_fields_eval, "fields.textproto");
 eval_conformance_test!(test_fp_math_eval, "fp_math.textproto");
 eval_conformance_test!(test_integer_math_eval, "integer_math.textproto");
@@ -765,3 +779,74 @@ eval_conformance_test!(test_timestamps_eval, "timestamps.textproto");
 eval_conformance_test!(test_type_deduction_eval, "type_deduction.textproto");
 eval_conformance_test!(test_unknowns_eval, "unknowns.textproto");
 eval_conformance_test!(test_wrappers_eval, "wrappers.textproto");
+
+// Enum conformance tests — split by legacy/strong mode
+//
+// The enums.textproto file has four sections:
+// - legacy_proto2, legacy_proto3: expect enum values as plain ints
+// - strong_proto2, strong_proto3: expect enum values as typed EnumValue
+
+// Parse+check tests run all sections (parse/check doesn't depend on enum mode)
+conformance_test!(test_enums, "enums.textproto");
+
+#[test]
+fn test_enums_legacy_eval() {
+    let service = CelConformanceService::with_strong_enums(false);
+    let sections = &["legacy_proto2", "legacy_proto3"];
+    let (total, failures) = run_eval_conformance_file_with_service(
+        "enums.textproto",
+        &service,
+        Some(sections),
+    );
+    let passed = total - failures.len();
+
+    println!(
+        "CONFORMANCE_RESULT eval enums.textproto(legacy) {}/{}",
+        passed, total
+    );
+
+    if !failures.is_empty() {
+        let failure_details: Vec<String> = failures
+            .iter()
+            .map(|f| format!("  {}: {} - {}", f.test_name, f.expr, f.reason))
+            .collect();
+        panic!(
+            "enums.textproto(legacy): {}/{} eval tests passed, {} failures:\n{}",
+            passed,
+            total,
+            failures.len(),
+            failure_details.join("\n")
+        );
+    }
+}
+
+#[test]
+fn test_enums_strong_eval() {
+    let service = CelConformanceService::new();
+    let sections = &["strong_proto2", "strong_proto3"];
+    let (total, failures) = run_eval_conformance_file_with_service(
+        "enums.textproto",
+        &service,
+        Some(sections),
+    );
+    let passed = total - failures.len();
+
+    println!(
+        "CONFORMANCE_RESULT eval enums.textproto(strong) {}/{}",
+        passed, total
+    );
+
+    if !failures.is_empty() {
+        let failure_details: Vec<String> = failures
+            .iter()
+            .map(|f| format!("  {}: {} - {}", f.test_name, f.expr, f.reason))
+            .collect();
+        panic!(
+            "enums.textproto(strong): {}/{} eval tests passed, {} failures:\n{}",
+            passed,
+            total,
+            failures.len(),
+            failure_details.join("\n")
+        );
+    }
+}

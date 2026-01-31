@@ -42,6 +42,9 @@ pub struct Evaluator<'a> {
     container: String,
     /// Abbreviations for qualified name shortcuts.
     abbreviations: Option<&'a HashMap<String, String>>,
+    /// Whether to use strong enum typing (default: true).
+    /// When false, enum values are returned as plain integers.
+    strong_enums: bool,
 }
 
 impl<'a> Evaluator<'a> {
@@ -54,6 +57,7 @@ impl<'a> Evaluator<'a> {
             proto_types: None,
             container: String::new(),
             abbreviations: None,
+            strong_enums: true,
         }
     }
 
@@ -93,6 +97,21 @@ impl<'a> Evaluator<'a> {
         self
     }
 
+    /// Use legacy (weak) enum mode where enum values are returned as plain integers.
+    pub fn with_legacy_enums(mut self) -> Self {
+        self.strong_enums = false;
+        self
+    }
+
+    /// Return an enum value or plain int depending on the strong_enums setting.
+    fn enum_or_int(&self, type_name: &str, value: i32) -> Value {
+        if self.strong_enums {
+            Value::Enum(super::EnumValue::new(type_name, value))
+        } else {
+            Value::Int(value as i64)
+        }
+    }
+
     /// Evaluate an expression.
     pub fn eval(&self, expr: &SpannedExpr) -> Value {
         self.eval_expr(expr)
@@ -116,6 +135,9 @@ impl<'a> Evaluator<'a> {
         if let Some(abbreviations) = self.abbreviations {
             eval = eval.with_abbreviations(abbreviations);
         }
+        if !self.strong_enums {
+            eval = eval.with_legacy_enums();
+        }
         eval
     }
 
@@ -124,13 +146,10 @@ impl<'a> Evaluator<'a> {
         if let Some(ref_map) = self.reference_map {
             if let Some(ref_info) = ref_map.get(&expr.id) {
                 if let Some(ref value) = ref_info.value {
-                    // If this is an enum value, produce Value::Enum
+                    // If this is an enum value, produce Value::Enum or Value::Int
                     if let Some(ref enum_type) = ref_info.enum_type {
                         if let crate::types::CelValue::Int(i) = value {
-                            return Value::Enum(super::EnumValue::new(
-                                enum_type.as_str(),
-                                *i as i32,
-                            ));
+                            return self.enum_or_int(enum_type.as_str(), *i as i32);
                         }
                     }
                     return Value::from(value.clone());
@@ -940,10 +959,7 @@ impl<'a> Evaluator<'a> {
             prost_reflect::Value::Bytes(b) => Value::Bytes(Arc::from(b.as_ref())),
             prost_reflect::Value::EnumNumber(n) => {
                 if let Kind::Enum(enum_desc) = field.kind() {
-                    Value::Enum(super::EnumValue::new(
-                        enum_desc.full_name(),
-                        *n,
-                    ))
+                    self.enum_or_int(enum_desc.full_name(), *n)
                 } else {
                     Value::Int(*n as i64)
                 }
@@ -995,10 +1011,7 @@ impl<'a> Evaluator<'a> {
             prost_reflect::Value::Bytes(b) => Value::Bytes(Arc::from(b.as_ref())),
             prost_reflect::Value::EnumNumber(n) => {
                 if let Kind::Enum(enum_desc) = kind {
-                    Value::Enum(super::EnumValue::new(
-                        enum_desc.full_name(),
-                        *n,
-                    ))
+                    self.enum_or_int(enum_desc.full_name(), *n)
                 } else {
                     Value::Int(*n as i64)
                 }
@@ -1374,14 +1387,14 @@ impl<'a> Evaluator<'a> {
                 if *i > i32::MAX as i64 || *i < i32::MIN as i64 {
                     Value::error(EvalError::overflow("int to enum overflow"))
                 } else {
-                    Value::Enum(super::EnumValue::new(enum_type_name, *i as i32))
+                    self.enum_or_int(enum_type_name, *i as i32)
                 }
             }
             Value::String(s) => {
                 // String → Enum: look up value by name in proto registry
                 if let Some(registry) = self.proto_types {
                     if let Some(value) = registry.get_enum_value(enum_type_name, s) {
-                        Value::Enum(super::EnumValue::new(enum_type_name, value))
+                        self.enum_or_int(enum_type_name, value)
                     } else {
                         Value::error(EvalError::invalid_argument(format!(
                             "unknown enum value '{}'",

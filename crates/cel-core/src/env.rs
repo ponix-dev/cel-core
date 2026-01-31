@@ -245,6 +245,9 @@ pub struct Env {
     proto_types: Option<Arc<ProtoTypeRegistry>>,
     /// Abbreviations for qualified name shortcuts.
     abbreviations: Abbreviations,
+    /// Whether to use strong enum typing (default: true).
+    /// When false, enum values are returned as plain integers (legacy behavior).
+    strong_enums: bool,
 }
 
 impl Env {
@@ -259,6 +262,7 @@ impl Env {
             container: String::new(),
             proto_types: None,
             abbreviations: Abbreviations::new(),
+            strong_enums: true,
         }
     }
 
@@ -391,6 +395,21 @@ impl Env {
     /// Get the abbreviations.
     pub fn abbreviations(&self) -> &Abbreviations {
         &self.abbreviations
+    }
+
+    /// Use legacy (weak) enum mode where enum values are returned as plain integers.
+    ///
+    /// By default, strong enum typing is enabled and enum values carry their
+    /// fully-qualified type name. In legacy mode, enum values are represented
+    /// as `Value::Int`, matching older CEL behavior.
+    pub fn with_legacy_enums(mut self) -> Self {
+        self.strong_enums = false;
+        self
+    }
+
+    /// Check if strong enum typing is enabled.
+    pub fn strong_enums(&self) -> bool {
+        self.strong_enums
     }
 
     /// Add an extension library to the environment (builder pattern).
@@ -586,7 +605,7 @@ impl Env {
         let has_proto_types = self.proto_types.is_some();
         let has_abbreviations = !self.abbreviations.is_empty();
 
-        let program = match (has_proto_types, has_abbreviations) {
+        let mut program = match (has_proto_types, has_abbreviations) {
             (true, true) => Program::with_proto_types_and_abbreviations(
                 Arc::new(ast.clone()),
                 Arc::new(registry),
@@ -605,6 +624,10 @@ impl Env {
             ),
             (false, false) => Program::new(Arc::new(ast.clone()), Arc::new(registry)),
         };
+
+        if !self.strong_enums {
+            program = program.with_legacy_enums();
+        }
 
         Ok(program)
     }

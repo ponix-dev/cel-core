@@ -21,6 +21,7 @@ pub struct Program {
     functions: Arc<FunctionRegistry>,
     proto_types: Option<Arc<ProtoTypeRegistry>>,
     abbreviations: Option<Arc<HashMap<String, String>>>,
+    strong_enums: bool,
 }
 
 impl Program {
@@ -31,6 +32,7 @@ impl Program {
             functions,
             proto_types: None,
             abbreviations: None,
+            strong_enums: true,
         }
     }
 
@@ -45,6 +47,7 @@ impl Program {
             functions,
             proto_types: Some(proto_types),
             abbreviations: None,
+            strong_enums: true,
         }
     }
 
@@ -59,6 +62,7 @@ impl Program {
             functions,
             proto_types: None,
             abbreviations: Some(Arc::new(abbreviations)),
+            strong_enums: true,
         }
     }
 
@@ -74,7 +78,14 @@ impl Program {
             functions,
             proto_types: Some(proto_types),
             abbreviations: Some(Arc::new(abbreviations)),
+            strong_enums: true,
         }
+    }
+
+    /// Use legacy (weak) enum mode where enum values are returned as plain integers.
+    pub fn with_legacy_enums(mut self) -> Self {
+        self.strong_enums = false;
+        self
     }
 
     /// Get the AST for this program.
@@ -123,6 +134,11 @@ impl Program {
         // Pass abbreviations
         if let Some(ref abbreviations) = self.abbreviations {
             evaluator = evaluator.with_abbreviations(abbreviations);
+        }
+
+        // Pass strong enum setting
+        if !self.strong_enums {
+            evaluator = evaluator.with_legacy_enums();
         }
 
         evaluator.eval(self.ast.expr())
