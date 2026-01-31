@@ -51,6 +51,11 @@ description = "Run CEL conformance tests"
 depends = ["conformance:setup"]
 run = "cargo test -p cel-core-conformance"
 
+[tasks."conformance:report"]
+description = "Run CEL conformance tests with machine-parseable output for reporting"
+depends = ["conformance:setup"]
+run = "cargo test -p cel-core-conformance -- --nocapture"
+
 [tasks."version:bump"]
 description = "Bump version based on conventional commits"
 run = "cog bump --auto"

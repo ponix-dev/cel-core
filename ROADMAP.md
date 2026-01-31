@@ -649,12 +649,12 @@ Register extension library function implementations in the evaluator runtime. Th
 - [x] Namespaced function dispatch in evaluator (required for `strings.quote`)
 
 ##### 5.1b Math Extension Functions (182 failures)
-- [ ] `math.greatest`, `math.least` — min/max across numeric types
-- [ ] `math.ceil`, `math.floor`, `math.round`, `math.trunc` — rounding
-- [ ] `math.abs`, `math.sign` — absolute value and sign
-- [ ] `math.isNaN`, `math.isInf`, `math.isFinite` — float classification
-- [ ] `math.bitAnd`, `math.bitOr`, `math.bitXor`, `math.bitNot` — bitwise ops
-- [ ] `math.bitShiftLeft`, `math.bitShiftRight` — bit shifting
+- [x] `math.greatest`, `math.least` — min/max across numeric types
+- [x] `math.ceil`, `math.floor`, `math.round`, `math.trunc` — rounding
+- [x] `math.abs`, `math.sign` — absolute value and sign
+- [x] `math.isNaN`, `math.isInf`, `math.isFinite` — float classification
+- [x] `math.bitAnd`, `math.bitOr`, `math.bitXor`, `math.bitNot` — bitwise ops
+- [x] `math.bitShiftLeft`, `math.bitShiftRight` — bit shifting
 
 ##### 5.1c Optional Extension Functions (60 failures)
 - [ ] `optional.of`, `optional.none`, `optional.ofNonZeroValue` — constructors via namespace
