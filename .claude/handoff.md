@@ -4,17 +4,20 @@
 2026-01-31
 
 ## Just Completed
-- [x] Type checker inference improvements (Milestone 5.8, partial)
-  - Scoped type parameter resolution: each overload match now gets unique scope IDs for type params, preventing cross-expression collision where `T` from one call would bleed into another
-  - Type parameter binding widening: when a type param is bound to `Null` or `Dyn` and a more specific type appears, the binding is widened to the concrete type
-  - Null assignability expanded: `Null` is now assignable to `Message`, `Timestamp`, `Duration`, `Optional`, and `Abstract` types (not just `Wrapper`)
-  - Custom function type declarations: conformance tests can now declare custom functions (`fn`, `tuple`, `sort`) via `FunctionTypeDecl` passed through the conformance service
-  - Comprehension accumulator type refinement: when the accumulator starts with an unresolved type (e.g., empty list from `map` macro), the loop step type refines it
-  - Type specificity-based `join_types`: instead of picking the first type, picks the most specific type that all others are assignable to
-  - Abstract type matching in overload resolution
-  - `optional_type` proto name fix for Optional type conversion (matching cel-go wire format)
-  - Key files: `checker.rs`, `overload.rs`, `types/mod.rs`, `type_conversion.rs`, `conformance/service.rs`, `conformance/tests/conformance.rs`
-  - Net conformance improvement: +5 parse+check, +22 type_check, +1 eval (type_deduction.textproto now fully passing)
+- [x] Two-variable macro forms (Milestone 5.3)
+  - All two-variable comprehension macros now work: `all(i, v, ...)`, `exists(i, v, ...)`, `exists_one(i, v, ...)`, `transformList(i, v, ...)`, `transformMap(k, v, ...)`
+  - Added `existsOne` camelCase alias for cel-go compatibility
+  - Fixed evaluator iter_var/iter_var2 binding order (iter_var=index, iter_var2=element for lists)
+  - Fixed checker to infer correct types for two-variable form (index=Int, value=element type)
+- [x] Map `+` operator (Milestone 5.2, partial)
+  - Implemented map merging via `+` operator in evaluator, needed by `transformMap` macro
+  - Added `add_map_map` overload to standard library for type checking
+- [x] Comprehension exhaustive evaluation (Milestone 5.11, partial)
+  - Loop condition errors no longer short-circuit (CEL "not strictly false" semantics)
+  - Loop step errors no longer return immediately; error propagates through accumulator
+  - `exists_one` now iterates all elements (loop condition changed from `accu <= 1` to `true`)
+- Key files: `evaluator.rs`, `macros.rs`, `checker.rs`, `standard_library.rs`
+- Net conformance improvement: +2 parse+check, +4 eval (macros 42→44, macros2 44→46 parse+check, 45→46 eval)
 
 ## Next Up: Encoders Extension Functions (5.1d)
 
