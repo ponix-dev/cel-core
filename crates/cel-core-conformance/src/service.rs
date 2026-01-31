@@ -42,6 +42,14 @@ pub struct CelConformanceService {
 
 impl CelConformanceService {
     pub fn new() -> Self {
+        Self::with_strong_enums(true)
+    }
+
+    /// Create a conformance service with explicit strong enum setting.
+    ///
+    /// When `strong` is true (default), enum values carry typed information.
+    /// When false, enum values are returned as plain integers (legacy behavior).
+    pub fn with_strong_enums(strong: bool) -> Self {
         // Create proto type registry with conformance test proto descriptors
         let mut registry = ProtoTypeRegistry::new();
 
@@ -63,11 +71,14 @@ impl CelConformanceService {
             .add_file_descriptor_set(cel_core_proto::gen::cel::expr::conformance::test::FILE_DESCRIPTOR_SET)
             .expect("Failed to add cel.expr.conformance.test descriptors");
 
-        Self {
-            env: Env::with_standard_library()
-                .with_all_extensions()
-                .with_proto_types(registry),
+        let mut env = Env::with_standard_library()
+            .with_all_extensions()
+            .with_proto_types(registry);
+        if !strong {
+            env = env.with_legacy_enums();
         }
+
+        Self { env }
     }
 }
 
@@ -441,6 +452,10 @@ fn value_to_proto_value(value: &Value) -> ProtoValue {
                 })
             }
         }
+        Value::Enum(e) => ProtoValueKind::EnumValue(cel_core_proto::gen::cel::expr::EnumValue {
+            r#type: e.type_name.to_string(),
+            value: e.value,
+        }),
         Value::Error(_) => {
             // Errors are handled at the ExprValue level
             ProtoValueKind::NullValue(0)

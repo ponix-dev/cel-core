@@ -15,3 +15,14 @@ prost-reflect.workspace = true
 prost.workspace = true
 regex.workspace = true
 
+[dev-dependencies]
+cel-core-proto.workspace = true
+
+[[example]]
+name = "enums_legacy"
+path = "examples/enums/legacy.rs"
+
+[[example]]
+name = "enums_strong"
+path = "examples/enums/strong.rs"
+

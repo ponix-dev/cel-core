@@ -345,6 +345,10 @@ impl CelType {
             // Underlying type accepts Wrapper (unboxing)
             (other, CelType::Wrapper(inner)) => other.is_assignable_from(inner.as_ref()),
 
+            // Enum types are assignable to/from Int (backward compat)
+            (CelType::Int, CelType::Enum(_)) => true,
+            (CelType::Enum(_), CelType::Int) => true,
+
             // Optional type assignability
             (CelType::Optional(self_inner), CelType::Optional(other_inner)) => {
                 self_inner.is_assignable_from(other_inner)

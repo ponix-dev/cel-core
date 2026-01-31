@@ -173,6 +173,7 @@ fn reference_info_from_proto(r: &Reference) -> ReferenceInfo {
         name: r.name.clone(),
         overload_ids: r.overload_id.clone(),
         value: r.value.as_ref().and_then(cel_value_from_proto),
+        enum_type: None,
     }
 }
 

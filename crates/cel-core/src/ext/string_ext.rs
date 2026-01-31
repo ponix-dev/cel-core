@@ -66,6 +66,7 @@ fn value_type_name(v: &Value) -> &str {
         Value::Type(_) => "type",
         Value::Optional(_) => "optional_type",
         Value::Proto(p) => p.type_name(),
+        Value::Enum(e) => &e.type_name,
         Value::Error(_) => "error",
     }
 }
