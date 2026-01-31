@@ -148,7 +148,7 @@ pub trait ConformanceService {
     ///
     /// # Returns
     /// A CheckResponse containing the checked expression or issues.
-    fn check(&self, parsed: &ParsedExpr, type_env: &[TypeDecl], container: &str) -> CheckResponse;
+    fn check(&self, parsed: &ParsedExpr, type_env: &[TypeDecl], func_decls: &[FunctionTypeDecl], container: &str) -> CheckResponse;
 
     /// Evaluate an expression with the given bindings.
     ///
@@ -160,7 +160,7 @@ pub trait ConformanceService {
     ///
     /// # Returns
     /// An EvalResponse containing the result or issues.
-    fn eval(&self, expr: &ParsedExpr, bindings: &[Binding], type_env: &[TypeDecl], container: &str) -> EvalResponse;
+    fn eval(&self, expr: &ParsedExpr, bindings: &[Binding], type_env: &[TypeDecl], func_decls: &[FunctionTypeDecl], container: &str) -> EvalResponse;
 }
 
 /// A type declaration for a variable in the type environment.
@@ -170,6 +170,15 @@ pub struct TypeDecl {
     pub name: String,
     /// The CEL type (using proto Type message).
     pub cel_type: cel_core_proto::gen::cel::expr::Type,
+}
+
+/// A function declaration for the type environment.
+#[derive(Debug, Clone)]
+pub struct FunctionTypeDecl {
+    /// The function name.
+    pub name: String,
+    /// The function's overloads (proto format).
+    pub overloads: Vec<cel_core_proto::gen::cel::expr::decl::function_decl::Overload>,
 }
 
 /// A variable binding for evaluation.

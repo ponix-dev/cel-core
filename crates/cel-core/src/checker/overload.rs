@@ -4,9 +4,13 @@
 //! based on argument types, following cel-go's approach.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use crate::types::{CelType, FunctionDecl};
+
+/// Counter for generating unique scope IDs for type parameter scoping.
+static SCOPE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Result of overload resolution.
 #[derive(Debug)]
@@ -56,16 +60,13 @@ pub fn resolve_overload(
             continue;
         }
 
-        // Try to match this overload
+        // Try to match this overload with scoped type params
         let mut local_subs = substitutions.clone();
-        if try_match_overload(&full_args, &overload.params, &overload.type_params, &mut local_subs) {
+        if let Some(res) = try_match_overload(&full_args, &overload.params, &overload.result, &overload.type_params, &mut local_subs) {
             matching_overloads.push(overload);
-
-            // Compute result type with substitutions
-            let res = substitute_type(&overload.result, &local_subs);
             result_type = Some(res);
 
-            // Update substitutions
+            // Update substitutions (only keep non-scoped bindings)
             *substitutions = local_subs;
         }
     }
@@ -83,29 +84,72 @@ pub fn resolve_overload(
     })
 }
 
+/// Rename type params in a type to scoped names using the given rename map.
+fn rename_type_params(ty: &CelType, rename_map: &HashMap<String, String>) -> CelType {
+    match ty {
+        CelType::TypeParam(name) => {
+            if let Some(scoped) = rename_map.get(name.as_ref()) {
+                CelType::TypeParam(Arc::from(scoped.as_str()))
+            } else {
+                ty.clone()
+            }
+        }
+        CelType::List(elem) => CelType::list(rename_type_params(elem, rename_map)),
+        CelType::Map(key, val) => CelType::map(
+            rename_type_params(key, rename_map),
+            rename_type_params(val, rename_map),
+        ),
+        CelType::Type(inner) => CelType::type_of(rename_type_params(inner, rename_map)),
+        CelType::Wrapper(inner) => CelType::wrapper(rename_type_params(inner, rename_map)),
+        CelType::Optional(inner) => CelType::optional(rename_type_params(inner, rename_map)),
+        CelType::Function { params, result } => CelType::Function {
+            params: Arc::from(
+                params.iter().map(|p| rename_type_params(p, rename_map)).collect::<Vec<_>>(),
+            ),
+            result: Arc::new(rename_type_params(result, rename_map)),
+        },
+        CelType::Abstract { name, params } => CelType::Abstract {
+            name: name.clone(),
+            params: Arc::from(
+                params.iter().map(|p| rename_type_params(p, rename_map)).collect::<Vec<_>>(),
+            ),
+        },
+        _ => ty.clone(),
+    }
+}
+
 /// Try to match argument types against parameter types, binding type parameters.
+///
+/// Returns the resolved result type if the overload matches, None otherwise.
+/// Uses scoped type parameter names to avoid cross-expression collision.
 fn try_match_overload(
     args: &[&CelType],
     params: &[CelType],
+    result: &CelType,
     type_params: &[String],
     substitutions: &mut HashMap<Arc<str>, CelType>,
-) -> bool {
-    // Initialize fresh type variables for type parameters
-    for param_name in type_params {
-        if !substitutions.contains_key(param_name.as_str()) {
-            substitutions.insert(Arc::from(param_name.as_str()), CelType::fresh_type_var());
+) -> Option<CelType> {
+    // Create scoped names for type parameters to prevent cross-expression collision
+    let scope_id = SCOPE_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let rename_map: HashMap<String, String> = type_params
+        .iter()
+        .map(|name| (name.clone(), format!("{}#{}", name, scope_id)))
+        .collect();
+
+    // Rename type params in parameter types and result type
+    let scoped_params: Vec<CelType> = params.iter().map(|p| rename_type_params(p, &rename_map)).collect();
+    let scoped_result = rename_type_params(result, &rename_map);
+
+    // Check each argument against its (scoped) parameter
+    // Don't substitute type params before is_assignable - let the TypeParam branch handle binding
+    for (arg, param) in args.iter().zip(scoped_params.iter()) {
+        if !is_assignable(arg, param, substitutions) {
+            return None;
         }
     }
 
-    // Check each argument against its parameter
-    for (arg, param) in args.iter().zip(params.iter()) {
-        let substituted_param = substitute_type(param, substitutions);
-        if !is_assignable(arg, &substituted_param, substitutions) {
-            return false;
-        }
-    }
-
-    true
+    // Compute result type with substitutions
+    Some(substitute_type(&scoped_result, substitutions))
 }
 
 /// Check if an argument type is assignable to a parameter type.
@@ -118,10 +162,25 @@ fn is_assignable(
     if let CelType::TypeParam(name) = param {
         if let Some(bound) = substitutions.get(name).cloned() {
             // Already bound - check compatibility
-            return is_types_compatible(&bound, arg, substitutions);
+            if is_types_compatible(&bound, arg, substitutions) {
+                // If bound is less specific than arg, widen to the arg type.
+                // Null widens to any nullable type, TypeVar/Dyn widen to concrete types.
+                if should_widen_binding(&bound, arg) {
+                    substitutions.insert(name.clone(), arg.clone());
+                }
+                return true;
+            }
+            // Incompatible types widen the param to Dyn
+            substitutions.insert(name.clone(), CelType::Dyn);
+            return true;
         } else {
             // Bind the type parameter
-            substitutions.insert(name.clone(), arg.clone());
+            // If arg contains TypeVars, bind to Dyn instead (concrete types will widen later)
+            if contains_type_var(arg) {
+                substitutions.insert(name.clone(), CelType::Dyn);
+            } else {
+                substitutions.insert(name.clone(), arg.clone());
+            }
             return true;
         }
     }
@@ -161,8 +220,13 @@ fn is_assignable(
         (CelType::Wrapper(arg_inner), CelType::Wrapper(param_inner)) => {
             is_assignable(arg_inner, param_inner, substitutions)
         }
-        // Null is assignable to wrapper types
+        // Null is assignable to wrapper types, message, duration, timestamp, optional, abstract
         (CelType::Null, CelType::Wrapper(_)) => true,
+        (CelType::Null, CelType::Message(_)) => true,
+        (CelType::Null, CelType::Timestamp) => true,
+        (CelType::Null, CelType::Duration) => true,
+        (CelType::Null, CelType::Optional(_)) => true,
+        (CelType::Null, CelType::Abstract { .. }) => true,
         // Underlying type is assignable to wrapper (boxing)
         (inner, CelType::Wrapper(param_inner)) => is_assignable(inner, param_inner, substitutions),
         // Wrapper is assignable to underlying type (unboxing)
@@ -171,8 +235,55 @@ fn is_assignable(
         (CelType::Optional(arg_inner), CelType::Optional(param_inner)) => {
             is_assignable(arg_inner, param_inner, substitutions)
         }
+        // Abstract types - match by name and parameter types
+        (
+            CelType::Abstract { name: arg_name, params: arg_params },
+            CelType::Abstract { name: param_name, params: param_params },
+        ) => {
+            arg_name == param_name
+                && arg_params.len() == param_params.len()
+                && arg_params.iter().zip(param_params.iter()).all(|(a, p)| {
+                    is_assignable(a, p, substitutions)
+                })
+        }
         _ => false,
     }
+}
+
+/// Check if a type contains any TypeVar.
+fn contains_type_var(ty: &CelType) -> bool {
+    match ty {
+        CelType::TypeVar(_) => true,
+        CelType::List(elem) => contains_type_var(elem),
+        CelType::Map(key, val) => contains_type_var(key) || contains_type_var(val),
+        CelType::Optional(inner) => contains_type_var(inner),
+        CelType::Wrapper(inner) => contains_type_var(inner),
+        CelType::Type(inner) => contains_type_var(inner),
+        _ => false,
+    }
+}
+
+/// Check if a binding should be widened from `bound` to `arg`.
+///
+/// This implements the cel-go behavior where less specific types
+/// (Null, Dyn, types with TypeVars) are replaced by more specific types.
+fn should_widen_binding(bound: &CelType, arg: &CelType) -> bool {
+    if bound == arg {
+        return false;
+    }
+    // Null should be widened to any non-null type
+    if matches!(bound, CelType::Null) && !matches!(arg, CelType::Null) {
+        return true;
+    }
+    // TypeVar/Dyn should be widened to concrete types
+    if (matches!(bound, CelType::TypeVar(_)) || matches!(bound, CelType::Dyn)) && !matches!(arg, CelType::TypeVar(_) | CelType::Dyn) {
+        return true;
+    }
+    // Types with TypeVars should be widened to types without
+    if contains_type_var(bound) && !contains_type_var(arg) {
+        return true;
+    }
+    false
 }
 
 /// Check if two types are compatible (for checking bound type parameters).

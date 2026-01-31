@@ -8,7 +8,7 @@
 //! - Eval tests: Verify evaluation produces expected results
 
 use cel_core_conformance::{
-    load_test_file, Binding, CelConformanceService, ConformanceService, SimpleTest, TypeDecl,
+    load_test_file, Binding, CelConformanceService, ConformanceService, FunctionTypeDecl, SimpleTest, TypeDecl,
 };
 use cel_core_proto::gen::cel::expr::conformance::test::simple_test::ResultMatcher;
 use cel_core_proto::gen::cel::expr::conformance::test::{ErrorSetMatcher, UnknownSetMatcher};
@@ -358,9 +358,10 @@ fn run_eval_conformance_file(filename: &str) -> (usize, Vec<EvalTestFailure>) {
 
             // Build type declarations from type_env
             let type_decls = build_type_decls(test);
+            let func_decls = build_function_decls(test);
 
             // Evaluate - always get a result to compare
-            let eval_result = service.eval(&parsed_expr, &bindings, &type_decls, &test.container);
+            let eval_result = service.eval(&parsed_expr, &bindings, &type_decls, &func_decls, &test.container);
             let actual_result = match &eval_result.result {
                 Some(r) => r,
                 None => {
@@ -459,11 +460,24 @@ fn build_type_decls(test: &SimpleTest) -> Vec<TypeDecl> {
                     });
                 }
             }
-            Some(DeclKind::Function(_func)) => {
-                // Function declarations are not yet supported in TypeDecl
-                // The checker would need to be extended to support custom functions
-            }
+            Some(DeclKind::Function(_)) => {}
             None => {}
+        }
+    }
+
+    decls
+}
+
+/// Build function declarations from test's type_env
+fn build_function_decls(test: &SimpleTest) -> Vec<FunctionTypeDecl> {
+    let mut decls = Vec::new();
+
+    for decl in &test.type_env {
+        if let Some(DeclKind::Function(func)) = &decl.decl_kind {
+            decls.push(FunctionTypeDecl {
+                name: decl.name.clone(),
+                overloads: func.overloads.clone(),
+            });
         }
     }
 
@@ -506,9 +520,10 @@ fn run_check_conformance_file(filename: &str) -> (usize, Vec<String>) {
 
             // Build type declarations from type_env
             let type_decls = build_type_decls(test);
+            let func_decls = build_function_decls(test);
 
             // Run the type checker with container from test
-            let check_result = service.check(&parsed_expr, &type_decls, &test.container);
+            let check_result = service.check(&parsed_expr, &type_decls, &func_decls, &test.container);
             if !check_result.is_ok() {
                 let errors: Vec<_> = check_result.issues.iter().map(|i| i.message.clone()).collect();
                 failures.push(format!("{}: check failed: {}", test_name, errors.join("; ")));
@@ -595,10 +610,11 @@ fn run_conformance_file(filename: &str) -> (usize, Vec<String>) {
 
             // Build type declarations from type_env
             let type_decls = build_type_decls(test);
+            let func_decls = build_function_decls(test);
 
             // Run type checker with container from test
             let parsed_expr = parse_result.parsed_expr.unwrap();
-            let check_result = service.check(&parsed_expr, &type_decls, &test.container);
+            let check_result = service.check(&parsed_expr, &type_decls, &func_decls, &test.container);
             if !check_result.is_ok() {
                 let error_msg = check_result
                     .issues

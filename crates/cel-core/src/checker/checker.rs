@@ -300,33 +300,32 @@ impl<'a> Checker<'a> {
     }
 
     /// Join multiple types into a common type.
+    ///
+    /// Prefers the most specific type among compatible candidates.
+    /// Specificity: concrete types > Dyn, deeper nesting > shallower.
     fn join_types(&self, types: &[CelType]) -> CelType {
         if types.is_empty() {
             return CelType::fresh_type_var();
         }
 
-        let first = &types[0];
-
-        // Check if all types are the same
-        if types.iter().all(|t| t == first || matches!(t, CelType::Dyn) || matches!(first, CelType::Dyn)) {
-            if matches!(first, CelType::Dyn) {
-                // If first is Dyn, try to find a concrete type
-                for t in types {
-                    if !matches!(t, CelType::Dyn) {
-                        return t.clone();
-                    }
+        // Find the most specific type that all others are assignable to
+        let mut best = &types[0];
+        for candidate in types {
+            if type_specificity(candidate) > type_specificity(best) {
+                // Check if all types are compatible with this more specific candidate
+                if types.iter().all(|t| candidate.is_assignable_from(t)) {
+                    best = candidate;
                 }
             }
-            return first.clone();
         }
 
-        // Check if all types are assignable to each other
+        // Verify all types are compatible with the best candidate
         let all_compatible = types.iter().all(|t| {
-            first.is_assignable_from(t) || t.is_assignable_from(first)
+            best.is_assignable_from(t) || t.is_assignable_from(best)
         });
 
         if all_compatible {
-            first.clone()
+            best.clone()
         } else {
             CelType::Dyn
         }
@@ -791,7 +790,13 @@ impl<'a> Checker<'a> {
         }
 
         // Check loop_step (should match accu type)
-        let _ = self.check_expr(loop_step);
+        let step_type = self.check_expr(loop_step);
+
+        // If the accumulator was an unresolved type (e.g., empty list from map macro),
+        // refine it using the loop step type which has concrete element info.
+        if contains_type_var_checker(&accu_type) && !contains_type_var_checker(&step_type) {
+            self.scopes.add_variable(accu_var, step_type);
+        }
 
         // Check result
         let result_type = self.check_expr(result);
@@ -905,6 +910,43 @@ pub fn check_with_proto_types_and_abbreviations(
         .with_proto_types(proto_types)
         .with_abbreviations(abbreviations);
     checker.check(expr)
+}
+
+/// Check if a type contains any TypeVar (for comprehension type refinement).
+fn contains_type_var_checker(ty: &CelType) -> bool {
+    match ty {
+        CelType::TypeVar(_) => true,
+        CelType::List(elem) => contains_type_var_checker(elem),
+        CelType::Map(key, val) => contains_type_var_checker(key) || contains_type_var_checker(val),
+        CelType::Optional(inner) => contains_type_var_checker(inner),
+        CelType::Wrapper(inner) => contains_type_var_checker(inner),
+        CelType::Type(inner) => contains_type_var_checker(inner),
+        _ => false,
+    }
+}
+
+/// Compute the specificity of a type for join_types ordering.
+///
+/// Higher values = more specific types that should be preferred.
+/// Dyn and TypeVar have specificity 0, concrete types have higher values,
+/// and nested/parameterized types get bonus specificity from their inner types.
+fn type_specificity(ty: &CelType) -> u32 {
+    match ty {
+        CelType::Dyn | CelType::TypeVar(_) => 0,
+        CelType::Null => 1,
+        CelType::Bool | CelType::Int | CelType::UInt | CelType::Double
+        | CelType::String | CelType::Bytes | CelType::Timestamp | CelType::Duration => 2,
+        CelType::Message(_) | CelType::Enum(_) => 2,
+        CelType::List(elem) => 2 + type_specificity(elem),
+        CelType::Map(key, val) => 2 + type_specificity(key) + type_specificity(val),
+        CelType::Optional(inner) => 2 + type_specificity(inner),
+        CelType::Wrapper(inner) => 3 + type_specificity(inner), // Wrappers get extra specificity
+        CelType::Type(inner) => 2 + type_specificity(inner),
+        CelType::Abstract { params, .. } => {
+            2 + params.iter().map(type_specificity).sum::<u32>()
+        }
+        _ => 1,
+    }
 }
 
 /// Convert a binary operator to its function name.
