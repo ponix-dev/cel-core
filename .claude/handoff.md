@@ -4,37 +4,48 @@
 2026-01-31
 
 ## Just Completed
-- [x] Two-variable macro forms (Milestone 5.3)
-  - All two-variable comprehension macros now work: `all(i, v, ...)`, `exists(i, v, ...)`, `exists_one(i, v, ...)`, `transformList(i, v, ...)`, `transformMap(k, v, ...)`
-  - Added `existsOne` camelCase alias for cel-go compatibility
-  - Fixed evaluator iter_var/iter_var2 binding order (iter_var=index, iter_var2=element for lists)
-  - Fixed checker to infer correct types for two-variable form (index=Int, value=element type)
-- [x] Map `+` operator (Milestone 5.2, partial)
-  - Implemented map merging via `+` operator in evaluator, needed by `transformMap` macro
-  - Added `add_map_map` overload to standard library for type checking
-- [x] Comprehension exhaustive evaluation (Milestone 5.11, partial)
-  - Loop condition errors no longer short-circuit (CEL "not strictly false" semantics)
-  - Loop step errors no longer return immediately; error propagates through accumulator
-  - `exists_one` now iterates all elements (loop condition changed from `accu <= 1` to `true`)
-- Key files: `evaluator.rs`, `macros.rs`, `checker.rs`, `standard_library.rs`
-- Net conformance improvement: +2 parse+check, +4 eval (macros 42→44, macros2 44→46 parse+check, 45→46 eval)
+- [x] Strong Enum Typing (Milestone 5.4)
+  - Added `Value::Enum(EnumValue)` variant with fully-qualified type name and i32 value
+  - Enum values from proto fields, checker references, and enum constructors now carry type info
+  - `type()` on enum values returns the enum type name (e.g., `cel.expr.conformance.proto3.GlobalEnum`)
+  - Enum constructor functions: `TestAllTypes.NestedEnum(1)` (int arg) and `GlobalEnum("BAZ")` (string arg)
+  - `int()` conversion from enum values extracts the numeric value
+  - Checker: `try_enum_constructor()` resolves enum constructor calls, stores `enum_type` in `ReferenceInfo`
+  - Evaluator: `eval_enum_constructor()` handles int and string arguments with proto registry lookup
+  - Conformance service: `value_to_proto_value` maps `Value::Enum` to proto `EnumValue`
+  - Key files: `eval/value.rs`, `eval/evaluator.rs`, `checker/checker.rs`, `checker/overload.rs`, `conformance/service.rs`
+- Net conformance improvement: +18 parse+check (enums), +8 eval (enums), +1 eval (proto3), total +57 passed/+60 total
 
-## Next Up: Encoders Extension Functions (5.1d)
+## Known Issues with This Change
+- **Legacy enum tests fail (25 failures)**: The `legacy_proto2` and `legacy_proto3` enum test sections expect `Int64Value` results, but we always return `EnumValue`. The conformance spec has a `strong_enums` flag that should control this behavior — when false, enums should behave as plain ints.
+- **Cross-type enum equality**: `EnumValue == Int` comparisons return `false` (e.g., `GlobalEnum.GAR == 1`). Need to implement cross-type equality between `Enum` and `Int` values.
+- **Enum arithmetic**: `TestAllTypes.NestedEnum.BAR + 3` fails because `_+_` has no overload for `Enum + Int`. Need to either auto-coerce enum to int in arithmetic or add overloads.
+- **Enum in list membership**: `0 in [EnumValue]` and `EnumValue in [0]` fail due to cross-type comparison gap.
+- **type_deduction regression (-1)**: `TestAllTypes{}.standalone_enum` returns `EnumValue` instead of `Int64Value` for a test that expects legacy behavior.
+
+## Next Up: Finish Enum Interop (5.4 remaining items)
 
 ### Why This Is Next
-Encoders extension functions account for 4 conformance failures — a small but complete extension library. All other extension categories (5.1a-c) are now done, making this the final extension to implement.
+The strong enum implementation is partially complete — the representation and constructors work, but backward-compatible interop with legacy (weak) enum mode is missing. This causes 25+ conformance failures that should be easy to fix.
 
-### Functions to Implement
-- `base64.encode` — encode bytes to base64 string
-- `base64.decode` — decode base64 string to bytes
+### Tasks
+1. **Cross-type equality**: Implement `Enum == Int` and `Int == Enum` in `PartialEq for Value`
+2. **Enum arithmetic**: Auto-coerce `Enum` to `Int` in arithmetic operators (or add overloads)
+3. **Legacy enum mode**: Use the `strong_enums` flag from conformance tests to return `Int64Value` when strong enums are disabled
+4. **Enum membership**: Ensure `Int in [Enum]` and `Enum in [Int]` work via cross-type comparison
 
 ### Key Files
-- `crates/cel-core/src/ext/encoders_ext.rs` — encoder extension declarations (needs `.with_impl(...)`)
-- Conformance test file: `encoders_ext.textproto`
+- `crates/cel-core/src/eval/value.rs` — `PartialEq` implementation, cross-type equality
+- `crates/cel-core/src/eval/evaluator.rs` — operator dispatch, coercion
+- `crates/cel-core-conformance/src/service.rs` — `strong_enums` flag handling
+- `crates/cel-core-conformance/src/lib.rs` — conformance service trait
 
 ### Potential Challenges
-- Need to determine which base64 variant to use (standard vs URL-safe, padding vs no-padding)
-- May need to add a `base64` crate dependency
+- Determining when to coerce enum→int automatically vs requiring explicit `int()` conversion
+- The `strong_enums` flag may need threading through the `Env`/`Program` configuration
+
+## Alternate Next: Encoders Extension (5.1d)
+If enum interop is deferred, the encoders extension (`base64.encode`/`base64.decode`) is a self-contained 4-failure fix.
 
 ## Open Questions
 - The overload resolution sometimes selects the wrong overload for `(UInt, Int)` args in bit shift functions — it picks `int_int` instead of `uint_int`. Worked around by handling both type combos in the first overload, but the root cause in overload resolution may need investigation.

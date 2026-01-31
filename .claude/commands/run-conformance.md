@@ -28,6 +28,18 @@ CONFORMANCE_RESULT <type> <file> <passed>/<total>
 
 Where `<type>` is one of: `parse_check`, `type_check`, `eval`.
 
+Compute per-type totals using this command (pipe the saved test output):
+
+```bash
+echo "$OUTPUT" | grep '^CONFORMANCE_RESULT' | awk -F'[ /]' '{
+  p[$2]+=$4; t[$2]+=$5
+} END {
+  for (k in p) printf "TOTAL %s %d/%d\n", k, p[k], t[k]
+}'
+```
+
+Save these TOTAL lines — use them for the summary table. Do NOT attempt to sum the numbers manually.
+
 Also capture the failure details from any panicking tests. The cargo test output includes:
 - Parse+check failures: `{file}: {count} parse failures:\n  {test_name}: {error_type}: {message}`
 - Type check failures: `{file}: {passed}/{total} type check tests passed, {count} failures:\n  {details}`
@@ -47,7 +59,7 @@ Then run the conformance report in the worktree via mise:
 cd /tmp/cel-core-conformance-baseline && mise run conformance:report 2>&1
 ```
 
-Parse the main branch output the same way.
+Parse the main branch output the same way, including running the awk command to compute TOTAL lines for the main branch.
 
 Clean up the worktree when done:
 
@@ -74,7 +86,7 @@ Branch: `{current_branch}` vs `main`
 |-----------|--------|-------|-----------|---------|
 
 - Rows: Parse+Check, Type Check, Eval, **Overall** (bold the overall row)
-- Sum all files' passed/total for each test type
+- Use the TOTAL lines computed by the awk command above for each test type. Do NOT sum manually.
 - Pass Rate = passed/total as percentage
 - vs Main = current passed minus main passed (show as `+N` or `-N`)
 

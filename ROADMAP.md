@@ -693,10 +693,12 @@ Implement two-variable comprehension macros (parser + evaluator).
 
 Represent enums as typed values rather than plain integers.
 
-- [ ] `EnumValue` representation with fully-qualified enum type name
-- [ ] Enum type conversion functions (`TestAllTypes.NestedEnum(2)`, `GlobalEnum(-33)`)
-- [ ] `type()` returns enum type name instead of `int`
-- [ ] Out-of-range enum value validation
+- [x] `EnumValue` representation with fully-qualified enum type name
+- [x] Enum type conversion functions (`TestAllTypes.NestedEnum(2)`, `GlobalEnum(-33)`)
+- [x] `type()` returns enum type name instead of `int`
+- [x] Out-of-range enum value validation
+- [ ] Legacy (weak) enum mode: `strong_enums=false` should return ints for `legacy_*` conformance tests
+- [ ] Enum-to-int cross-type equality (`EnumValue == Int` and `Int in [EnumValue]`)
 
 #### 5.5 Well-Known Type (WKT) Handling (~24 failures)
 
