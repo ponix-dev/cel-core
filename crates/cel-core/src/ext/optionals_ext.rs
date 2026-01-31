@@ -16,7 +16,31 @@
 //! - `.or(optional<T>) -> optional<T>` - Return first present optional
 //! - `.orValue(T) -> T` - Return value or default
 
+use crate::eval::{EvalError, OptionalValue, Value};
 use crate::types::{CelType, FunctionDecl, OverloadDecl};
+
+fn is_zero_value(value: &Value) -> bool {
+    match value {
+        Value::Null => true,
+        Value::Bool(false) => true,
+        Value::Int(0) => true,
+        Value::UInt(0) => true,
+        Value::Double(d) => *d == 0.0,
+        Value::String(s) => s.is_empty(),
+        Value::Bytes(b) => b.is_empty(),
+        Value::List(l) => l.is_empty(),
+        Value::Map(m) => m.is_empty(),
+        Value::Proto(proto) => {
+            // A proto message is zero-value if no fields are explicitly set
+            let result = proto
+                .descriptor()
+                .fields()
+                .all(|field_desc| !proto.message().has_field(&field_desc));
+            result
+        }
+        _ => false,
+    }
+}
 
 /// Returns the optionals extension library function declarations.
 pub fn optionals_extension() -> Vec<FunctionDecl> {
@@ -29,14 +53,18 @@ pub fn optionals_extension() -> Vec<FunctionDecl> {
                 vec![CelType::type_param("T")],
                 CelType::optional(CelType::type_param("T")),
             )
-            .with_type_params(vec!["T".to_string()]),
+            .with_type_params(vec!["T".to_string()])
+            .with_impl(|args| Value::optional_some(args[0].clone())),
         ),
         // optional.none() -> optional<dyn>
-        FunctionDecl::new("optional.none").with_overload(OverloadDecl::function(
-            "optional_none",
-            vec![],
-            CelType::optional(CelType::Dyn),
-        )),
+        FunctionDecl::new("optional.none").with_overload(
+            OverloadDecl::function(
+                "optional_none",
+                vec![],
+                CelType::optional(CelType::Dyn),
+            )
+            .with_impl(|_args| Value::optional_none()),
+        ),
         // optional.ofNonZeroValue(T) -> optional<T>
         FunctionDecl::new("optional.ofNonZeroValue").with_overload(
             OverloadDecl::function(
@@ -44,7 +72,14 @@ pub fn optionals_extension() -> Vec<FunctionDecl> {
                 vec![CelType::type_param("T")],
                 CelType::optional(CelType::type_param("T")),
             )
-            .with_type_params(vec!["T".to_string()]),
+            .with_type_params(vec!["T".to_string()])
+            .with_impl(|args| {
+                if is_zero_value(&args[0]) {
+                    Value::optional_none()
+                } else {
+                    Value::optional_some(args[0].clone())
+                }
+            }),
         ),
         // ===== Methods on optional<T> =====
         // .hasValue() -> bool
@@ -54,7 +89,11 @@ pub fn optionals_extension() -> Vec<FunctionDecl> {
                 vec![CelType::optional(CelType::type_param("T"))],
                 CelType::Bool,
             )
-            .with_type_params(vec!["T".to_string()]),
+            .with_type_params(vec!["T".to_string()])
+            .with_impl(|args| match &args[0] {
+                Value::Optional(opt) => Value::Bool(opt.is_present()),
+                _ => Value::error(EvalError::invalid_argument("expected optional")),
+            }),
         ),
         // .value() -> T
         FunctionDecl::new("value").with_overload(
@@ -63,7 +102,14 @@ pub fn optionals_extension() -> Vec<FunctionDecl> {
                 vec![CelType::optional(CelType::type_param("T"))],
                 CelType::type_param("T"),
             )
-            .with_type_params(vec!["T".to_string()]),
+            .with_type_params(vec!["T".to_string()])
+            .with_impl(|args| match &args[0] {
+                Value::Optional(OptionalValue::Some(v)) => *v.clone(),
+                Value::Optional(OptionalValue::None) => {
+                    Value::error(EvalError::invalid_argument("optional has no value"))
+                }
+                _ => Value::error(EvalError::invalid_argument("expected optional")),
+            }),
         ),
         // .or(optional<T>) -> optional<T>
         FunctionDecl::new("or").with_overload(
@@ -75,7 +121,12 @@ pub fn optionals_extension() -> Vec<FunctionDecl> {
                 ],
                 CelType::optional(CelType::type_param("T")),
             )
-            .with_type_params(vec!["T".to_string()]),
+            .with_type_params(vec!["T".to_string()])
+            .with_impl(|args| match &args[0] {
+                Value::Optional(OptionalValue::Some(_)) => args[0].clone(),
+                Value::Optional(OptionalValue::None) => args[1].clone(),
+                _ => Value::error(EvalError::invalid_argument("expected optional")),
+            }),
         ),
         // .orValue(T) -> T
         FunctionDecl::new("orValue").with_overload(
@@ -87,7 +138,12 @@ pub fn optionals_extension() -> Vec<FunctionDecl> {
                 ],
                 CelType::type_param("T"),
             )
-            .with_type_params(vec!["T".to_string()]),
+            .with_type_params(vec!["T".to_string()])
+            .with_impl(|args| match &args[0] {
+                Value::Optional(OptionalValue::Some(v)) => *v.clone(),
+                Value::Optional(OptionalValue::None) => args[1].clone(),
+                _ => Value::error(EvalError::invalid_argument("expected optional")),
+            }),
         ),
     ]
 }

@@ -217,6 +217,7 @@ impl<'a> Evaluator<'a> {
             "list" => return Value::Type(TypeValue::list_type()),
             "map" => return Value::Type(TypeValue::map_type()),
             "type" => return Value::Type(TypeValue::type_type()),
+            "optional_type" => return Value::Type(TypeValue::optional_type()),
             _ => {}
         }
 
@@ -837,6 +838,13 @@ impl<'a> Evaluator<'a> {
                                 }
                             }
                         }
+                        // For optional access, unset repeated/map fields return none
+                        if optional
+                            && (field_desc.is_list() || field_desc.is_map())
+                            && !proto.message().has_field(&field_desc)
+                        {
+                            return Value::optional_none();
+                        }
                         let proto_value = proto.message().get_field(&field_desc);
                         let cel_value = self.proto_reflect_to_value(proto_value, &field_desc);
                         if optional {
@@ -869,6 +877,25 @@ impl<'a> Evaluator<'a> {
                     }
                 }
             }
+            Value::Optional(opt) => match opt {
+                OptionalValue::Some(inner) => {
+                    // Only map/proto types support field access in optional-land.
+                    // For those types, missing fields become Optional(None).
+                    // For other types (null, int, etc.), propagate the error.
+                    match inner.as_ref() {
+                        Value::Map(_) | Value::Proto(_) => {
+                            let result = self.access_field(inner, field, false);
+                            if result.is_error() {
+                                Value::optional_none()
+                            } else {
+                                Value::optional_some(result)
+                            }
+                        }
+                        _ => self.access_field(inner, field, false),
+                    }
+                }
+                OptionalValue::None => Value::optional_none(),
+            },
             _ => {
                 if optional {
                     Value::optional_none()
@@ -1175,6 +1202,22 @@ impl<'a> Evaluator<'a> {
                     }
                 }
             }
+            Value::Optional(opt) => match opt {
+                OptionalValue::Some(inner) => {
+                    match inner.as_ref() {
+                        Value::List(_) | Value::Map(_) => {
+                            let result = self.access_index(inner, index, false);
+                            if result.is_error() {
+                                Value::optional_none()
+                            } else {
+                                Value::optional_some(result)
+                            }
+                        }
+                        _ => self.access_index(inner, index, false),
+                    }
+                }
+                OptionalValue::None => Value::optional_none(),
+            },
             _ => {
                 if optional {
                     Value::optional_none()
@@ -2826,6 +2869,31 @@ impl<'a> Evaluator<'a> {
                     }
                 }
             }
+            Value::Optional(opt) => match opt {
+                OptionalValue::Some(inner) => match inner.as_ref() {
+                    Value::Map(map) => {
+                        let key = MapKey::String(Arc::from(field));
+                        Value::Bool(map.contains_key(&key))
+                    }
+                    Value::Proto(proto) => {
+                        let descriptor = proto.descriptor();
+                        match descriptor.get_field_by_name(field) {
+                            Some(field_desc) => {
+                                if field_desc.supports_presence() {
+                                    Value::Bool(proto.message().has_field(&field_desc))
+                                } else {
+                                    let current = proto.message().get_field(&field_desc);
+                                    let default = field_desc.default_value();
+                                    Value::Bool(current.as_ref() != &default)
+                                }
+                            }
+                            None => Value::error(EvalError::field_not_found(field)),
+                        }
+                    }
+                    _ => Value::Bool(false),
+                },
+                OptionalValue::None => Value::Bool(false),
+            },
             _ => Value::Bool(false),
         }
     }

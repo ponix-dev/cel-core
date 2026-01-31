@@ -330,6 +330,9 @@ impl TypeValue {
     pub fn type_type() -> Self {
         Self::new("type")
     }
+    pub fn optional_type() -> Self {
+        Self::new("optional")
+    }
 }
 
 /// A CEL optional value.
