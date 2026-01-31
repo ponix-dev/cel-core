@@ -4,36 +4,33 @@
 2026-01-30
 
 ## Just Completed
-- [x] String extension function implementations (Milestone 5.1a)
-  - Implemented all string extension functions with runtime (`with_impl`) support: `charAt`, `indexOf`, `lastIndexOf`, `lowerAscii`, `upperAscii`, `replace`, `split`, `substring`, `trim`, `join`, `reverse`, `format`, `strings.quote`
-  - Added namespaced function dispatch in the evaluator — mirrors the checker's `try_qualified_function_name` logic so `strings.quote(...)`, `math.greatest(...)`, etc. resolve correctly at eval time
-  - All 216/216 string_ext conformance eval tests now pass (was 53/216)
-  - Key files: `crates/cel-core/src/ext/string_ext.rs` (function implementations), `crates/cel-core/src/eval/evaluator.rs` (namespace dispatch)
-  - The `format` function supports `%s`, `%d`, `%f`, `%e`, `%x`, `%o`, `%b` verbs with width/precision, plus locale-aware list/map formatting
-  - Unicode-correct code point handling throughout (charAt, indexOf, substring, reverse all operate on code points, not bytes)
+- [x] Math extension function implementations (Milestone 5.1b)
+  - Added `.with_impl(...)` runtime implementations to all math extension function overloads in `math_ext.rs`
+  - All 199/199 math_ext conformance eval tests now pass
+  - Key functions: `ceil`, `floor`, `round` (half away from zero), `trunc`, `abs` (with i64::MIN overflow check), `sign`, `isNaN`, `isInf`, `isFinite`, bitwise ops, bit shifts, `greatest`/`least`
+  - `greatest`/`least` use shared helper functions with cross-type numeric comparison (int/uint/double), NaN handling, list support, and empty-list errors
+  - Bit shifts use logical (unsigned) right shift per CEL spec; large shifts (>= 64) return 0; negative shifts return error
+  - Added fallback `(UInt, Int)` handling in `int_int` shift overloads to work around overload resolution selecting the wrong overload for uint operands
+  - Key file: `crates/cel-core/src/ext/math_ext.rs`
+  - Conformance score: 2083/2340 eval tests passing (89.0%)
 
-## Next Up: Math Extension Functions (5.1b)
+## Next Up: Optional Extension Functions (5.1c)
 
 ### Why This Is Next
-Math extension functions account for 182 conformance failures — the largest remaining category. The checker already declares all math functions; only the evaluator runtime implementations (`.with_impl(...)`) are missing. The namespaced function dispatch fix from this PR means `math.greatest(...)` etc. will work once implementations are added.
+Optional extension functions account for 60 conformance failures — the next largest extension category. The checker already declares optional types and functions; only the evaluator runtime implementations are missing.
 
 ### Functions to Implement
-- `math.greatest`, `math.least` — min/max across numeric types (variadic, 1-6 args + list)
-- `math.ceil`, `math.floor`, `math.round`, `math.trunc` — rounding (double → double)
-- `math.abs`, `math.sign` — absolute value and sign (int/uint/double)
-- `math.isNaN`, `math.isInf`, `math.isFinite` — float classification
-- `math.bitAnd`, `math.bitOr`, `math.bitXor`, `math.bitNot` — bitwise ops
-- `math.bitShiftLeft`, `math.bitShiftRight` — bit shifting
+- `optional.of`, `optional.none`, `optional.ofNonZeroValue` — constructors via namespace
+- `hasValue`, `value`, `orValue` — optional value access methods
+- Optional chaining support (`x.?y`, `x[?key]`) in evaluator
 
 ### Key Files
-- `crates/cel-core/src/ext/math_ext.rs` — add `.with_impl(...)` to each `OverloadDecl`
-- Conformance test file: `math_ext.textproto`
+- `crates/cel-core/src/ext/` — optional extension declarations
+- Conformance test file: `optionals.textproto`
 
 ### Potential Challenges
-- `math.greatest`/`math.least` have many overloads (unary, binary same-type, binary mixed-type, ternary through 6-ary, list variants) — each needs its own implementation
-- Mixed-type comparisons (int vs uint vs double) need careful handling to match CEL spec behavior
-- Bitwise operations on uint need to handle the full u64 range
+- Optional chaining (`x.?y`, `x[?key]`) requires evaluator changes beyond just function implementations
+- Need to handle the interaction between optionals and other types (e.g., optional field access on proto messages)
 
 ## Open Questions
-- The string `format` function was implemented inline in `string_ext.rs` (~300 lines). Consider whether math extension implementations should follow the same pattern or use a helper module.
-- Conformance score is now ~1632/2070 individual eval tests passing (~78.8%), up from ~1469 (71.0%)
+- The overload resolution sometimes selects the wrong overload for `(UInt, Int)` args in bit shift functions — it picks `int_int` instead of `uint_int`. Worked around by handling both type combos in the first overload, but the root cause in overload resolution may need investigation.
