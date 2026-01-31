@@ -120,8 +120,38 @@ pub enum Value {
     Optional(OptionalValue),
     /// Protobuf message value.
     Proto(ProtoValue),
+    /// Enum value with type information (strong enum typing).
+    Enum(EnumValue),
     /// Error value (evaluation errors propagate as values).
     Error(Arc<EvalError>),
+}
+
+/// A CEL enum value with type information.
+///
+/// Used for strong enum typing where enum values carry their
+/// fully qualified type name alongside the numeric value.
+#[derive(Debug, Clone)]
+pub struct EnumValue {
+    /// The fully qualified enum type name (e.g., "cel.expr.conformance.proto3.GlobalEnum").
+    pub type_name: Arc<str>,
+    /// The numeric enum value.
+    pub value: i32,
+}
+
+impl EnumValue {
+    /// Create a new enum value.
+    pub fn new(type_name: impl Into<Arc<str>>, value: i32) -> Self {
+        Self {
+            type_name: type_name.into(),
+            value,
+        }
+    }
+}
+
+impl PartialEq for EnumValue {
+    fn eq(&self, other: &Self) -> bool {
+        self.type_name == other.type_name && self.value == other.value
+    }
 }
 
 /// A CEL timestamp value.
@@ -1147,6 +1177,7 @@ impl Value {
                 OptionalValue::Some(v) => CelType::optional(v.cel_type()),
             },
             Value::Proto(proto) => CelType::message(proto.type_name()),
+            Value::Enum(ev) => CelType::enum_type(&ev.type_name),
             Value::Error(_) => CelType::Error,
         }
     }
@@ -1168,6 +1199,7 @@ impl Value {
             Value::Type(_) => TypeValue::type_type(),
             Value::Optional(_) => TypeValue::new("optional"),
             Value::Proto(proto) => TypeValue::new(proto.type_name()),
+            Value::Enum(ev) => TypeValue::new(ev.type_name.as_ref()),
             Value::Error(_) => TypeValue::new("error"),
         }
     }
@@ -1231,6 +1263,7 @@ impl PartialEq for Value {
                 _ => false,
             },
             (Value::Proto(a), Value::Proto(b)) => a == b,
+            (Value::Enum(a), Value::Enum(b)) => a == b,
             // Cross-type numeric equality (CEL spec: 42 == 42u == 42.0)
             (Value::Int(a), Value::UInt(b)) => {
                 if *a < 0 {
@@ -1378,6 +1411,7 @@ impl fmt::Display for Value {
                 OptionalValue::Some(v) => write!(f, "optional.of({})", v),
             },
             Value::Proto(p) => write!(f, "{}{{...}}", p.type_name()),
+            Value::Enum(e) => write!(f, "{}({})", e.type_name, e.value),
             Value::Error(e) => write!(f, "error({})", e),
         }
     }

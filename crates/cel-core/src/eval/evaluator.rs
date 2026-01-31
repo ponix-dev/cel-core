@@ -124,6 +124,15 @@ impl<'a> Evaluator<'a> {
         if let Some(ref_map) = self.reference_map {
             if let Some(ref_info) = ref_map.get(&expr.id) {
                 if let Some(ref value) = ref_info.value {
+                    // If this is an enum value, produce Value::Enum
+                    if let Some(ref enum_type) = ref_info.enum_type {
+                        if let crate::types::CelValue::Int(i) = value {
+                            return Value::Enum(super::EnumValue::new(
+                                enum_type.as_str(),
+                                *i as i32,
+                            ));
+                        }
+                    }
                     return Value::from(value.clone());
                 }
             }
@@ -165,7 +174,7 @@ impl<'a> Evaluator<'a> {
                 index,
                 optional,
             } => self.eval_index(expr, index, *optional),
-            Expr::Call { expr, args } => self.eval_call(expr, args),
+            Expr::Call { expr: callee, args } => self.eval_call(callee, args, expr),
             Expr::Struct { type_name, fields } => self.eval_struct(type_name, fields),
 
             // Comprehension
@@ -929,7 +938,16 @@ impl<'a> Evaluator<'a> {
             prost_reflect::Value::F64(f) => Value::Double(*f),
             prost_reflect::Value::String(s) => Value::String(Arc::from(s.as_str())),
             prost_reflect::Value::Bytes(b) => Value::Bytes(Arc::from(b.as_ref())),
-            prost_reflect::Value::EnumNumber(n) => Value::Int(*n as i64),
+            prost_reflect::Value::EnumNumber(n) => {
+                if let Kind::Enum(enum_desc) = field.kind() {
+                    Value::Enum(super::EnumValue::new(
+                        enum_desc.full_name(),
+                        *n,
+                    ))
+                } else {
+                    Value::Int(*n as i64)
+                }
+            }
             prost_reflect::Value::Message(msg) => {
                 // Unwrap well-known types
                 self.maybe_unwrap_well_known(msg.clone())
@@ -975,7 +993,16 @@ impl<'a> Evaluator<'a> {
             prost_reflect::Value::F64(f) => Value::Double(*f),
             prost_reflect::Value::String(s) => Value::String(Arc::from(s.as_str())),
             prost_reflect::Value::Bytes(b) => Value::Bytes(Arc::from(b.as_ref())),
-            prost_reflect::Value::EnumNumber(n) => Value::Int(*n as i64),
+            prost_reflect::Value::EnumNumber(n) => {
+                if let Kind::Enum(enum_desc) = kind {
+                    Value::Enum(super::EnumValue::new(
+                        enum_desc.full_name(),
+                        *n,
+                    ))
+                } else {
+                    Value::Int(*n as i64)
+                }
+            }
             prost_reflect::Value::Message(msg) => self.maybe_unwrap_well_known(msg.clone()),
             prost_reflect::Value::List(list) => {
                 let values: Vec<Value> = list
@@ -1238,7 +1265,18 @@ impl<'a> Evaluator<'a> {
         }
     }
 
-    fn eval_call(&self, expr: &SpannedExpr, args: &[SpannedExpr]) -> Value {
+    fn eval_call(&self, expr: &SpannedExpr, args: &[SpannedExpr], call_expr: &SpannedExpr) -> Value {
+        // Check reference_map for enum constructor calls
+        if let Some(ref_map) = self.reference_map {
+            if let Some(ref_info) = ref_map.get(&call_expr.id) {
+                if ref_info.overload_ids.iter().any(|id| id == "enum_constructor") {
+                    if let Some(ref enum_type) = ref_info.enum_type {
+                        return self.eval_enum_constructor(enum_type, args);
+                    }
+                }
+            }
+        }
+
         // Try namespaced function first (e.g., strings.quote, math.greatest)
         if let Expr::Member {
             expr: receiver,
@@ -1317,6 +1355,47 @@ impl<'a> Evaluator<'a> {
         }
     }
 
+    /// Evaluate an enum constructor call (e.g., `TestAllTypes.NestedEnum(1)` or `GlobalEnum("BAZ")`).
+    fn eval_enum_constructor(&self, enum_type_name: &str, args: &[SpannedExpr]) -> Value {
+        if args.len() != 1 {
+            return Value::error(EvalError::invalid_argument(
+                "enum constructor expects exactly 1 argument".to_string(),
+            ));
+        }
+
+        let arg = self.eval_expr(&args[0]);
+        if arg.is_error() {
+            return arg;
+        }
+
+        match &arg {
+            Value::Int(i) => {
+                // Int → Enum: range check i32
+                if *i > i32::MAX as i64 || *i < i32::MIN as i64 {
+                    Value::error(EvalError::overflow("int to enum overflow"))
+                } else {
+                    Value::Enum(super::EnumValue::new(enum_type_name, *i as i32))
+                }
+            }
+            Value::String(s) => {
+                // String → Enum: look up value by name in proto registry
+                if let Some(registry) = self.proto_types {
+                    if let Some(value) = registry.get_enum_value(enum_type_name, s) {
+                        Value::Enum(super::EnumValue::new(enum_type_name, value))
+                    } else {
+                        Value::error(EvalError::invalid_argument(format!(
+                            "unknown enum value '{}'",
+                            s
+                        )))
+                    }
+                } else {
+                    Value::error(EvalError::internal("no proto types available for enum lookup"))
+                }
+            }
+            _ => Value::error(EvalError::no_matching_overload("enum constructor")),
+        }
+    }
+
     fn call_function(&self, name: &str, args: &[Value], is_member: bool) -> Value {
         // Look up function
         let overloads = self.functions.find_overloads(name, args.len(), is_member);
@@ -1386,6 +1465,7 @@ impl<'a> Evaluator<'a> {
                 .map(Value::Int)
                 .unwrap_or_else(|_| Value::error(EvalError::invalid_conversion("string", "int"))),
             Value::Timestamp(t) => Value::Int(t.seconds),
+            Value::Enum(e) => Value::Int(e.value as i64),
             _ => Value::error(EvalError::invalid_conversion(
                 &value.cel_type().display_name(),
                 "int",
@@ -2341,7 +2421,14 @@ impl<'a> Evaluator<'a> {
             (Value::Int(i), Kind::Int64 | Kind::Sint64 | Kind::Sfixed64) => {
                 Ok(prost_reflect::Value::I64(*i))
             }
-            (Value::Int(i), Kind::Enum(_)) => Ok(prost_reflect::Value::EnumNumber(*i as i32)),
+            (Value::Int(i), Kind::Enum(_)) => {
+                if *i > i32::MAX as i64 || *i < i32::MIN as i64 {
+                    Err(Value::error(EvalError::overflow("int to enum overflow")))
+                } else {
+                    Ok(prost_reflect::Value::EnumNumber(*i as i32))
+                }
+            }
+            (Value::Enum(e), Kind::Enum(_)) => Ok(prost_reflect::Value::EnumNumber(e.value)),
             (Value::UInt(u), Kind::Uint32 | Kind::Fixed32) => {
                 if *u > u32::MAX as u64 {
                     Err(Value::error(EvalError::overflow("uint to uint32 overflow")))

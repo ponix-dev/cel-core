@@ -26,6 +26,8 @@ pub struct ReferenceInfo {
     pub overload_ids: Vec<String>,
     /// Constant value for enum constants.
     pub value: Option<CelValue>,
+    /// Enum type name (for strong enum typing).
+    pub enum_type: Option<String>,
 }
 
 impl ReferenceInfo {
@@ -35,6 +37,7 @@ impl ReferenceInfo {
             name: name.into(),
             overload_ids: Vec::new(),
             value: None,
+            enum_type: None,
         }
     }
 
@@ -44,6 +47,7 @@ impl ReferenceInfo {
             name: name.into(),
             overload_ids,
             value: None,
+            enum_type: None,
         }
     }
 }
@@ -470,11 +474,12 @@ impl<'a> Checker<'a> {
         let parts: Vec<&str> = name_to_resolve.split('.').collect();
 
         match registry.resolve_qualified(&parts, self.container)? {
-            ResolvedProtoType::EnumValue { enum_name: _, value } => {
+            ResolvedProtoType::EnumValue { enum_name, value } => {
                 self.set_reference(expr.id, ReferenceInfo {
                     name: name_to_resolve.to_string(),
                     overload_ids: vec![],
                     value: Some(CelValue::Int(value as i64)),
+                    enum_type: Some(enum_name),
                 });
                 Some(CelType::Int)
             }
@@ -486,6 +491,45 @@ impl<'a> Checker<'a> {
                 self.set_reference(expr.id, ReferenceInfo::ident(&name));
                 Some(cel_type)
             }
+        }
+    }
+
+    /// Try to resolve a call as an enum constructor.
+    ///
+    /// Handles patterns like `TestAllTypes.NestedEnum(1)` and `GlobalEnum("BAZ")`.
+    /// Enum constructors accept either an int or a string argument.
+    fn try_enum_constructor(&mut self, name: &str, args: &[SpannedExpr], expr: &SpannedExpr) -> Option<CelType> {
+        let registry = self.proto_types?;
+
+        // Try to expand abbreviations
+        let expanded_name = self.expand_abbreviation(name);
+        let name_to_resolve = expanded_name.as_deref().unwrap_or(name);
+        let parts: Vec<&str> = name_to_resolve.split('.').collect();
+
+        // Check if this resolves to an enum type
+        match registry.resolve_qualified(&parts, self.container)? {
+            ResolvedProtoType::Enum { name: enum_name, .. } => {
+                // Check args: expect exactly 1 arg that is int or string
+                if args.len() != 1 {
+                    return None;
+                }
+                let arg_type = self.check_expr(&args[0]);
+
+                match &arg_type {
+                    CelType::Int | CelType::String | CelType::Dyn => {
+                        // Store reference so evaluator knows this is an enum constructor
+                        self.set_reference(expr.id, ReferenceInfo {
+                            name: enum_name.clone(),
+                            overload_ids: vec!["enum_constructor".to_string()],
+                            value: None,
+                            enum_type: Some(enum_name),
+                        });
+                        Some(CelType::Int)
+                    }
+                    _ => None,
+                }
+            }
+            _ => None,
         }
     }
 
@@ -595,6 +639,11 @@ impl<'a> Checker<'a> {
                         let arg_types: Vec<_> = args.iter().map(|a| self.check_expr(a)).collect();
                         return self.resolve_function_call(&qualified_name, None, &arg_types, expr);
                     }
+
+                    // Try to resolve as an enum constructor (e.g., TestAllTypes.NestedEnum(1))
+                    if let Some(result) = self.try_enum_constructor(&qualified_name, args, expr) {
+                        return result;
+                    }
                 }
 
                 // Fall back to method call: receiver.method(args)
@@ -603,6 +652,11 @@ impl<'a> Checker<'a> {
                 self.resolve_function_call(func_name, Some(receiver_type), &arg_types, expr)
             }
             Expr::Ident(func_name) => {
+                // Try as enum constructor for top-level enums (e.g., GlobalEnum(1))
+                if let Some(result) = self.try_enum_constructor(func_name, args, expr) {
+                    return result;
+                }
+
                 // Standalone call: func(args)
                 let arg_types: Vec<_> = args.iter().map(|a| self.check_expr(a)).collect();
                 self.resolve_function_call(func_name, None, &arg_types, expr)

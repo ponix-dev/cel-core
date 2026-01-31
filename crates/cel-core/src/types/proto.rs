@@ -254,7 +254,7 @@ impl ProtoTypeRegistry {
             Kind::String => CelType::String,
             Kind::Bytes => CelType::Bytes,
             Kind::Message(msg) => proto_message_to_cel_type(msg.full_name()),
-            Kind::Enum(_) => CelType::Int, // Enum values are ints in CEL
+            Kind::Enum(_) => CelType::Int, // Enum values are ints in CEL type system
         }
     }
 

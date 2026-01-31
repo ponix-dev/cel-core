@@ -441,6 +441,10 @@ fn value_to_proto_value(value: &Value) -> ProtoValue {
                 })
             }
         }
+        Value::Enum(e) => ProtoValueKind::EnumValue(cel_core_proto::gen::cel::expr::EnumValue {
+            r#type: e.type_name.to_string(),
+            value: e.value,
+        }),
         Value::Error(_) => {
             // Errors are handled at the ExprValue level
             ProtoValueKind::NullValue(0)

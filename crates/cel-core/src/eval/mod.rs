@@ -43,4 +43,4 @@ pub use error::{EvalError, EvalErrorKind};
 pub use evaluator::Evaluator;
 pub use functions::{Function, FunctionImpl, FunctionRegistry, Overload};
 pub use program::Program;
-pub use value::{Duration, MapKey, OptionalValue, ProtoValue, Timestamp, TypeValue, Value, ValueError, ValueMap};
+pub use value::{Duration, EnumValue, MapKey, OptionalValue, ProtoValue, Timestamp, TypeValue, Value, ValueError, ValueMap};

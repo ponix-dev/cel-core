@@ -157,6 +157,7 @@ pub trait ConformanceService {
     /// * `bindings` - Variable bindings for evaluation
     /// * `type_env` - Type declarations for variables in the expression
     /// * `container` - Container namespace for qualified name resolution
+    /// * `strong_enums` - Whether to use strong enum typing
     ///
     /// # Returns
     /// An EvalResponse containing the result or issues.

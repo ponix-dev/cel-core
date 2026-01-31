@@ -227,6 +227,9 @@ fn is_assignable(
         (CelType::Null, CelType::Duration) => true,
         (CelType::Null, CelType::Optional(_)) => true,
         (CelType::Null, CelType::Abstract { .. }) => true,
+        // Enum types are assignable to/from Int
+        (CelType::Enum(_), CelType::Int) => true,
+        (CelType::Int, CelType::Enum(_)) => true,
         // Underlying type is assignable to wrapper (boxing)
         (inner, CelType::Wrapper(param_inner)) => is_assignable(inner, param_inner, substitutions),
         // Wrapper is assignable to underlying type (unboxing)

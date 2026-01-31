@@ -586,25 +586,27 @@ impl Env {
         let has_proto_types = self.proto_types.is_some();
         let has_abbreviations = !self.abbreviations.is_empty();
 
-        match (has_proto_types, has_abbreviations) {
-            (true, true) => Ok(Program::with_proto_types_and_abbreviations(
+        let program = match (has_proto_types, has_abbreviations) {
+            (true, true) => Program::with_proto_types_and_abbreviations(
                 Arc::new(ast.clone()),
                 Arc::new(registry),
                 Arc::clone(self.proto_types.as_ref().unwrap()),
                 self.abbreviations.as_map().clone(),
-            )),
-            (true, false) => Ok(Program::with_proto_types(
+            ),
+            (true, false) => Program::with_proto_types(
                 Arc::new(ast.clone()),
                 Arc::new(registry),
                 Arc::clone(self.proto_types.as_ref().unwrap()),
-            )),
-            (false, true) => Ok(Program::with_abbreviations(
+            ),
+            (false, true) => Program::with_abbreviations(
                 Arc::new(ast.clone()),
                 Arc::new(registry),
                 self.abbreviations.as_map().clone(),
-            )),
-            (false, false) => Ok(Program::new(Arc::new(ast.clone()), Arc::new(registry))),
-        }
+            ),
+            (false, false) => Program::new(Arc::new(ast.clone()), Arc::new(registry)),
+        };
+
+        Ok(program)
     }
 
     /// Build the function registry from this environment's function declarations.
