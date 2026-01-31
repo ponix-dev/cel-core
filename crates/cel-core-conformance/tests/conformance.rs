@@ -562,15 +562,17 @@ fn run_check_conformance_file(filename: &str) -> (usize, Vec<String>) {
 }
 
 /// Run all tests in a file and collect failures (parse + check)
-fn run_conformance_file(filename: &str) -> Vec<String> {
+fn run_conformance_file(filename: &str) -> (usize, Vec<String>) {
     let path = Path::new(TESTDATA_PATH).join(filename);
     let file = load_test_file(&path).expect(&format!("Failed to load {}", filename));
 
     let service = CelConformanceService::new();
     let mut failures = Vec::new();
+    let mut total_tests = 0;
 
     for section in &file.section {
         for test in &section.test {
+            total_tests += 1;
             let test_name = format!("{}/{}", section.name, test.name);
 
             // Parse the expression
@@ -609,14 +611,17 @@ fn run_conformance_file(filename: &str) -> Vec<String> {
         }
     }
 
-    failures
+    (total_tests, failures)
 }
 
 macro_rules! conformance_test {
     ($name:ident, $file:expr) => {
         #[test]
         fn $name() {
-            let failures = run_conformance_file($file);
+            let (total, failures) = run_conformance_file($file);
+            let passed = total - failures.len();
+
+            println!("CONFORMANCE_RESULT parse_check {} {}/{}", $file, passed, total);
 
             if !failures.is_empty() {
                 panic!(
@@ -668,6 +673,8 @@ macro_rules! check_conformance_test {
             let (total, failures) = run_check_conformance_file($file);
             let passed = total - failures.len();
 
+            println!("CONFORMANCE_RESULT type_check {} {}/{}", $file, passed, total);
+
             if !failures.is_empty() {
                 panic!(
                     "{}: {}/{} type check tests passed, {} failures:\n  {}",
@@ -691,6 +698,8 @@ macro_rules! eval_conformance_test {
         fn $name() {
             let (total, failures) = run_eval_conformance_file($file);
             let passed = total - failures.len();
+
+            println!("CONFORMANCE_RESULT eval {} {}/{}", $file, passed, total);
 
             if !failures.is_empty() {
                 let failure_details: Vec<String> = failures

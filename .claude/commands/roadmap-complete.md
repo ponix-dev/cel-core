@@ -14,6 +14,10 @@ First, review the changes made on the current branch:
 2. Run `git log main..HEAD` to see commits on this branch
 3. Run `git diff main` to review the actual changes
 
+## Run Conformance Tests
+
+Run `/run-conformance` to get a full conformance test report with regression comparison against main. Include the summary table and any regressions in the PR description under the Testing section.
+
 ## Update ROADMAP.md
 
 Update ROADMAP.md to mark completed milestone items:
@@ -84,7 +88,14 @@ Implements section {X.Y} ({Section Title}) from the CEL implementation roadmap.
 
 ## Testing
 - [How changes were tested]
-- [Conformance tests added/passing]
+- Conformance test results (from `/run-conformance` report):
+
+| Test Type | Passed | Total | Pass Rate | vs Main |
+|-----------|--------|-------|-----------|---------|
+| Parse+Check | X | Y | Z% | +/-N |
+| Type Check | X | Y | Z% | +/-N |
+| Eval | X | Y | Z% | +/-N |
+| **Overall** | **X** | **Y** | **Z%** | **+/-N** |
 
 ## Roadmap
 See ROADMAP.md section {X.Y} for full context.
