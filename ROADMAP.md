@@ -697,7 +697,7 @@ Represent enums as typed values rather than plain integers.
 - [x] Enum type conversion functions (`TestAllTypes.NestedEnum(2)`, `GlobalEnum(-33)`)
 - [x] `type()` returns enum type name instead of `int`
 - [x] Out-of-range enum value validation
-- [ ] Legacy (weak) enum mode: `strong_enums=false` should return ints for `legacy_*` conformance tests
+- [x] Legacy (weak) enum mode: `Env::with_legacy_enums()` threads `strong_enums=false` through `Program` → `Evaluator`, returning `Value::Int` at all enum creation sites
 - [ ] Enum-to-int cross-type equality (`EnumValue == Int` and `Int in [EnumValue]`)
 
 #### 5.5 Well-Known Type (WKT) Handling (~24 failures)
