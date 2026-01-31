@@ -656,10 +656,13 @@ Register extension library function implementations in the evaluator runtime. Th
 - [x] `math.bitAnd`, `math.bitOr`, `math.bitXor`, `math.bitNot` — bitwise ops
 - [x] `math.bitShiftLeft`, `math.bitShiftRight` — bit shifting
 
-##### 5.1c Optional Extension Functions (60 failures)
-- [ ] `optional.of`, `optional.none`, `optional.ofNonZeroValue` — constructors via namespace
-- [ ] `hasValue`, `value`, `orValue` — optional value access methods
-- [ ] Optional chaining support (`x.?y`, `x[?key]`) in evaluator
+##### 5.1c Optional Extension Functions (60 failures) ✅
+- [x] `optional.of`, `optional.none`, `optional.ofNonZeroValue` — constructors via namespace
+- [x] `hasValue`, `value`, `or`, `orValue` — optional value access methods
+- [x] Optional chaining support (`x.?y`, `x[?key]`) in evaluator
+- [x] `has()` on optional values (maps and protos)
+- [x] `is_zero_value` logic for `ofNonZeroValue`
+- [x] `optional_type` in type system
 
 ##### 5.1d Encoders Extension (4 failures)
 - [ ] `base64.encode`, `base64.decode` — base64 encoding via namespace
