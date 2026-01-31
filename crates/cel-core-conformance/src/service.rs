@@ -10,7 +10,7 @@ use prost_reflect::prost_types;
 use prost_reflect::DynamicMessage;
 
 use crate::{
-    Binding, CheckResponse, ConformanceService, EvalResponse, Issue, ParseResponse, TypeDecl,
+    Binding, CheckResponse, ConformanceService, EvalResponse, FunctionTypeDecl, Issue, ParseResponse, TypeDecl,
 };
 use cel_core::eval::wkt;
 use cel_core::eval::{MapActivation, MapKey, Value, ValueMap};
@@ -101,7 +101,7 @@ impl ConformanceService for CelConformanceService {
         ParseResponse { parsed_expr, issues }
     }
 
-    fn check(&self, parsed: &ParsedExpr, type_env: &[TypeDecl], container: &str) -> CheckResponse {
+    fn check(&self, parsed: &ParsedExpr, type_env: &[TypeDecl], func_decls: &[FunctionTypeDecl], container: &str) -> CheckResponse {
         // Convert ParsedExpr back to AST
         // cel_core_proto::from_parsed_expr returns cel_core::SpannedExpr directly now
         let ast = match from_parsed_expr(parsed) {
@@ -124,6 +124,11 @@ impl ConformanceService for CelConformanceService {
             // cel_type_from_proto now returns cel_core::CelType directly
             let cel_type = cel_type_from_proto(&decl.cel_type);
             env.add_variable(&decl.name, cel_type);
+        }
+
+        // Add custom function declarations
+        for func_decl in func_decls {
+            env.add_function(convert_function_decl(func_decl));
         }
 
         // Run the type checker using env
@@ -155,7 +160,7 @@ impl ConformanceService for CelConformanceService {
         }
     }
 
-    fn eval(&self, expr: &ParsedExpr, bindings: &[Binding], type_env: &[TypeDecl], container: &str) -> EvalResponse {
+    fn eval(&self, expr: &ParsedExpr, bindings: &[Binding], type_env: &[TypeDecl], func_decls: &[FunctionTypeDecl], container: &str) -> EvalResponse {
         // Convert ParsedExpr to AST
         let parsed_ast = match from_parsed_expr(expr) {
             Ok(ast) => ast,
@@ -198,6 +203,9 @@ impl ConformanceService for CelConformanceService {
             let cel_type = cel_type_from_proto(&decl.cel_type);
             env.add_variable(&decl.name, cel_type);
         }
+        for func_decl in func_decls {
+            env.add_function(convert_function_decl(func_decl));
+        }
 
         // Run the checker to get type info (needed for proto message construction)
         // We use the check result even if there are errors, as we still get useful
@@ -220,6 +228,29 @@ impl ConformanceService for CelConformanceService {
             },
         }
     }
+}
+
+/// Convert a proto FunctionTypeDecl to a cel_core FunctionDecl.
+fn convert_function_decl(proto: &FunctionTypeDecl) -> cel_core::types::FunctionDecl {
+    let mut func = cel_core::types::FunctionDecl::new(&proto.name);
+    for overload in &proto.overloads {
+        let params: Vec<_> = overload.params.iter().map(cel_type_from_proto).collect();
+        let result = overload
+            .result_type
+            .as_ref()
+            .map(cel_type_from_proto)
+            .unwrap_or(cel_core::CelType::Dyn);
+        let mut ovl = if overload.is_instance_function {
+            cel_core::types::OverloadDecl::method(&overload.overload_id, params, result)
+        } else {
+            cel_core::types::OverloadDecl::function(&overload.overload_id, params, result)
+        };
+        if !overload.type_params.is_empty() {
+            ovl = ovl.with_type_params(overload.type_params.clone());
+        }
+        func = func.with_overload(ovl);
+    }
+    func
 }
 
 /// Convert bindings to a MapActivation.
@@ -450,7 +481,7 @@ mod tests {
     fn test_check_literal() {
         let service = CelConformanceService::new();
         let parse_result = service.parse("42").parsed_expr.unwrap();
-        let check_result = service.check(&parse_result, &[], "");
+        let check_result = service.check(&parse_result, &[], &[], "");
         assert!(check_result.is_ok());
         assert!(check_result.checked_expr.is_some());
 
@@ -469,7 +500,7 @@ mod tests {
             cel_type: cel_type_to_proto(&CelType::Int),
         };
 
-        let check_result = service.check(&parse_result, &[type_decl], "");
+        let check_result = service.check(&parse_result, &[type_decl], &[], "");
         assert!(check_result.is_ok());
         assert!(check_result.checked_expr.is_some());
     }
@@ -478,7 +509,7 @@ mod tests {
     fn test_check_undefined_variable() {
         let service = CelConformanceService::new();
         let parse_result = service.parse("x").parsed_expr.unwrap();
-        let check_result = service.check(&parse_result, &[], "");
+        let check_result = service.check(&parse_result, &[], &[], "");
         assert!(!check_result.is_ok());
         assert!(check_result
             .issues
@@ -496,7 +527,7 @@ mod tests {
             cel_type: cel_type_to_proto(&CelType::Int),
         };
 
-        let check_result = service.check(&parse_result, &[type_decl], "");
+        let check_result = service.check(&parse_result, &[type_decl], &[], "");
         assert!(!check_result.is_ok());
         assert!(check_result
             .issues
@@ -508,7 +539,7 @@ mod tests {
     fn test_eval_literal() {
         let service = CelConformanceService::new();
         let parse_result = service.parse("42").parsed_expr.unwrap();
-        let eval_result = service.eval(&parse_result, &[], &[], "");
+        let eval_result = service.eval(&parse_result, &[], &[], &[], "");
         assert!(eval_result.is_ok(), "eval should succeed: {:?}", eval_result.issues);
         assert!(eval_result.result.is_some());
 
@@ -539,7 +570,7 @@ mod tests {
             },
         };
 
-        let eval_result = service.eval(&parse_result, &[binding], &[], "");
+        let eval_result = service.eval(&parse_result, &[binding], &[], &[], "");
         assert!(eval_result.is_ok(), "eval should succeed: {:?}", eval_result.issues);
 
         let result = eval_result.result.unwrap();
@@ -558,7 +589,7 @@ mod tests {
     fn test_eval_unknown_variable() {
         let service = CelConformanceService::new();
         let parse_result = service.parse("unknown_var").parsed_expr.unwrap();
-        let eval_result = service.eval(&parse_result, &[], &[], "");
+        let eval_result = service.eval(&parse_result, &[], &[], &[], "");
 
         // Should return an error result
         let result = eval_result.result.unwrap();

@@ -725,11 +725,16 @@ Fix variable and namespace resolution edge cases.
 
 Improve type parameter resolution and reduce unnecessary `dyn` fallback.
 
+- [x] Scoped type parameter resolution (prevent cross-expression type param collision)
+- [x] Type parameter binding widening (Null/Dyn/TypeVar widen to concrete types)
+- [x] Null assignability to message/duration/timestamp/optional/abstract parameter types
+- [x] Custom function type declarations (`fn`, `tuple`, `sort` in conformance tests)
+- [x] Comprehension accumulator type refinement from loop step
+- [x] Type specificity-based join_types (prefer concrete types over Dyn)
+- [x] Abstract type matching in overload resolution
+- [x] `optional_type` proto name for Optional type conversion
 - [ ] Parameterized type propagation through nested generics (`list<list<list<T>>>`)
-- [ ] Optional type narrowing (`optional<dyn>` → `optional_type<int>`)
 - [ ] Wrapper type promotion in type checker (`int` → `wrapper<int>`)
-- [ ] Null assignability to message/duration/timestamp/abstract parameter types
-- [ ] Custom function type declarations (`fn`, `tuple`, `sort` in conformance tests)
 
 #### 5.9 Proto Extensions (`proto.hasExt`/`getExt`) (~36 failures)
 

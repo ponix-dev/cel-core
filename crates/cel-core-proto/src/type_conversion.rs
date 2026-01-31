@@ -121,7 +121,7 @@ pub fn cel_type_from_proto(proto: &ProtoType) -> CelType {
         Some(ProtoTypeKind::Error(_)) => CelType::Error,
         Some(ProtoTypeKind::AbstractType(abs)) => {
             // Special case: "optional" abstract type maps to CelType::Optional
-            if abs.name == "optional" && abs.parameter_types.len() == 1 {
+            if (abs.name == "optional_type" || abs.name == "optional") && abs.parameter_types.len() == 1 {
                 let inner = cel_type_from_proto(&abs.parameter_types[0]);
                 return CelType::Optional(Arc::new(inner));
             }
@@ -186,9 +186,9 @@ pub fn cel_type_to_proto(cel_type: &CelType) -> ProtoType {
             };
             ProtoTypeKind::Wrapper(prim)
         }
-        // Optional is represented as an abstract type "optional" with a type parameter
+        // Optional is represented as an abstract type "optional_type" with a type parameter
         CelType::Optional(inner) => ProtoTypeKind::AbstractType(ProtoAbstractType {
-            name: "optional".to_string(),
+            name: "optional_type".to_string(),
             parameter_types: vec![cel_type_to_proto(inner)],
         }),
         CelType::Error => ProtoTypeKind::Error(()),

@@ -333,8 +333,13 @@ impl CelType {
                 self_key.is_assignable_from(other_key) && self_val.is_assignable_from(other_val)
             }
 
-            // Null is assignable to wrapper types
+            // Null is assignable to wrapper, message, duration, timestamp, optional, abstract types
             (CelType::Wrapper(_), CelType::Null) => true,
+            (CelType::Message(_), CelType::Null) => true,
+            (CelType::Timestamp, CelType::Null) => true,
+            (CelType::Duration, CelType::Null) => true,
+            (CelType::Optional(_), CelType::Null) => true,
+            (CelType::Abstract { .. }, CelType::Null) => true,
             // Wrapper accepts its underlying type (boxing)
             (CelType::Wrapper(inner), other) => inner.is_assignable_from(other),
             // Underlying type accepts Wrapper (unboxing)

@@ -4,17 +4,17 @@
 2026-01-31
 
 ## Just Completed
-- [x] Optional extension function implementations (Milestone 5.1c)
-  - Added `.with_impl(...)` runtime implementations to all optional extension function overloads in `optionals_ext.rs`
-  - All 70/70 optionals conformance eval tests now pass (up from 10/70)
-  - Key functions: `optional.of`, `optional.none`, `optional.ofNonZeroValue` (constructors), `hasValue`, `value`, `or`, `orValue` (methods)
-  - Implemented `is_zero_value()` helper for `ofNonZeroValue` — checks null, false, 0, 0.0, empty strings/bytes/lists/maps, and default proto messages
-  - Added optional chaining in evaluator: `x.?y` (field), `x[?key]` (index) — unwraps optional values, returns `optional.none()` on missing
-  - Added `has()` support for optional values — checks field presence on wrapped maps/protos
-  - Added `optional_type` to `TypeValue` for `type(optional.none())` expressions
-  - Handled unset repeated/map proto fields returning `optional.none()` in optional field access
-  - Key files: `crates/cel-core/src/ext/optionals_ext.rs`, `crates/cel-core/src/eval/evaluator.rs`, `crates/cel-core/src/eval/value.rs`
-  - Net conformance improvement: +59 eval tests (1753/1812, 96.7%)
+- [x] Type checker inference improvements (Milestone 5.8, partial)
+  - Scoped type parameter resolution: each overload match now gets unique scope IDs for type params, preventing cross-expression collision where `T` from one call would bleed into another
+  - Type parameter binding widening: when a type param is bound to `Null` or `Dyn` and a more specific type appears, the binding is widened to the concrete type
+  - Null assignability expanded: `Null` is now assignable to `Message`, `Timestamp`, `Duration`, `Optional`, and `Abstract` types (not just `Wrapper`)
+  - Custom function type declarations: conformance tests can now declare custom functions (`fn`, `tuple`, `sort`) via `FunctionTypeDecl` passed through the conformance service
+  - Comprehension accumulator type refinement: when the accumulator starts with an unresolved type (e.g., empty list from `map` macro), the loop step type refines it
+  - Type specificity-based `join_types`: instead of picking the first type, picks the most specific type that all others are assignable to
+  - Abstract type matching in overload resolution
+  - `optional_type` proto name fix for Optional type conversion (matching cel-go wire format)
+  - Key files: `checker.rs`, `overload.rs`, `types/mod.rs`, `type_conversion.rs`, `conformance/service.rs`, `conformance/tests/conformance.rs`
+  - Net conformance improvement: +5 parse+check, +22 type_check, +1 eval (type_deduction.textproto now fully passing)
 
 ## Next Up: Encoders Extension Functions (5.1d)
 
@@ -36,3 +36,4 @@ Encoders extension functions account for 4 conformance failures — a small but 
 ## Open Questions
 - The overload resolution sometimes selects the wrong overload for `(UInt, Int)` args in bit shift functions — it picks `int_int` instead of `uint_int`. Worked around by handling both type combos in the first overload, but the root cause in overload resolution may need investigation.
 - Map serialization ordering is non-deterministic, causing flaky conformance test failures in `dynamic.textproto` and `proto3.textproto` for struct literal tests. Not a correctness issue but affects test stability.
+- Remaining type_deduction improvements (parameterized type propagation through deep nesting, wrapper type promotion) are deferred — these would require deeper changes to the type inference engine.
