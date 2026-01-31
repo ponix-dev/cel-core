@@ -673,18 +673,21 @@ Fix standard library conversion functions and operator behavior to match spec.
 
 - [ ] `bool()` from string: accept `"1"`, `"0"`, `"t"`, `"f"`, `"TRUE"`, `"True"`, `"FALSE"`, `"False"` (not just `"true"`/`"false"`)
 - [ ] `int()` / `uint()` from out-of-range doubles: error instead of silent clamping
-- [ ] Map `+` operator for map merging (needed by `transformMap` macro)
+- [x] Map `+` operator for map merging (needed by `transformMap` macro)
 - [ ] Repeated map key detection in map literals
 
 #### 5.3 Two-Variable Macro Forms (~41 failures)
 
 Implement two-variable comprehension macros (parser + evaluator).
 
-- [ ] `.exists(i, v, ...)` — two-variable exists with index
-- [ ] `.all(i, v, ...)` — two-variable all with index
-- [ ] `.existsOne(i, v, ...)` — two-variable existsOne (currently unrecognized)
-- [ ] `.transformList(i, v, ...)` — list transform with index variable binding
-- [ ] `.transformMap(k, v, ...)` — map transform with key/value variable binding
+- [x] `.exists(i, v, ...)` — two-variable exists with index
+- [x] `.all(i, v, ...)` — two-variable all with index
+- [x] `.existsOne(i, v, ...)` — two-variable existsOne
+- [x] `.transformList(i, v, ...)` — list transform with index variable binding
+- [x] `.transformMap(k, v, ...)` — map transform with key/value variable binding
+- [x] `existsOne` camelCase alias (cel-go compatibility)
+- [x] Checker: two-variable comprehension type inference (index=Int, value=element type)
+- [x] Evaluator: iter_var/iter_var2 binding order fix (iter_var=index, iter_var2=element)
 
 #### 5.4 Strong Enum Typing (~51 failures)
 
@@ -758,7 +761,7 @@ Remaining edge cases across multiple test files.
 - [ ] `dyn()` type equality: different message types should not be equal
 - [ ] FloatValue precision: float32 vs float64 precision loss detection
 - [ ] `google.protobuf.Any` literal construction validation
-- [ ] Macro short-circuit semantics (`all` short-circuits before errors; `exists_one` does not)
+- [x] Comprehension exhaustive evaluation semantics (errors don't short-circuit; `exists_one` iterates all elements)
 - [ ] `has()` on explicitly-set message fields returns `true`
 - [ ] `has()` on optional map entries with `optional.none()` values
 - [ ] Deeply nested message field access (`NestedTestAllTypes.payload.single_int64`)
