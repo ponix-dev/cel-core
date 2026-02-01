@@ -14,6 +14,18 @@ Read these files first:
 
 The handoff file tracks continuity between sessions, documenting what was just completed and what should come next.
 
+## Find the Next GitHub Issue
+
+Query open milestone-5 issues to find the next work item:
+
+```bash
+gh issue list --label "milestone-5" --state open --sort created --json number,title
+```
+
+- If `$ARGUMENTS` specifies a topic or issue number, match it to the corresponding issue
+- Otherwise, pick the lowest-numbered open issue as the next work item
+- Store the issue number — reference it throughout as "Issue #N"
+
 ## Reference Sources
 
 When creating your plan, you MUST research these authoritative sources using the Task tool with the Explore agent:
@@ -66,13 +78,14 @@ Before beginning any implementation work, you MUST create a feature branch for t
 
 Your plan should include:
 
-1. **Target Milestone Item**: Which checkbox from ROADMAP.md we're implementing
-2. **cel-go Reference**: Key files/patterns from cel-go to follow
-3. **Specification Reference**: Relevant cel-spec sections
-4. **Implementation Steps**: Ordered list of changes
-5. **Files to Create/Modify**: Specific paths
-6. **Refactoring Required**: Any structural changes needed first
-7. **Success Criteria**: How we know it's done (conformance tests, etc.)
+1. **GitHub Issue**: #N — {title}
+2. **Target Milestone Item**: Which checkbox from ROADMAP.md we're implementing
+3. **cel-go Reference**: Key files/patterns from cel-go to follow
+4. **Specification Reference**: Relevant cel-spec sections
+5. **Implementation Steps**: Ordered list of changes
+6. **Files to Create/Modify**: Specific paths
+7. **Refactoring Required**: Any structural changes needed first
+8. **Success Criteria**: How we know it's done (conformance tests, etc.)
 
 ## Important Guidelines
 
@@ -81,6 +94,22 @@ Your plan should include:
 - If refactoring is needed to align with cel-go, do that first
 - Always check conformance tests for acceptance criteria
 - Consider how this change affects the LSP functionality
+
+## When Plan Is Accepted
+
+After the user approves the plan:
+
+1. **Post the plan as a comment on the GitHub issue:**
+   ```bash
+   gh issue comment <N> --body "<plan content>"
+   ```
+
+2. **Assign the issue:**
+   ```bash
+   gh issue edit <N> --add-assignee rallinator7
+   ```
+
+The project board automation will handle status transitions when PRs are opened/merged.
 
 ## User Request
 

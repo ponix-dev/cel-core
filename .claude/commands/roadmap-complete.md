@@ -14,6 +14,16 @@ First, review the changes made on the current branch:
 2. Run `git log main..HEAD` to see commits on this branch
 3. Run `git diff main` to review the actual changes
 
+## Identify the GitHub Issue
+
+Find the GitHub issue associated with this work:
+
+```bash
+gh issue list --assignee rallinator7 --state open --json number,title
+```
+
+Also check git log and branch name for issue references. Store the issue number as `ISSUE_NUM`. If no issue is found, check the milestone-5 label for related open issues.
+
 ## Run Conformance Tests
 
 Run `/run-conformance` to get a full conformance test report with regression comparison against main. Include the summary table and any regressions in the PR description under the Testing section.
@@ -37,12 +47,14 @@ Create or update `.claude/handoff.md` with the following template:
 [Today's date]
 
 ## Just Completed
+- GitHub Issue: #ISSUE_NUM
 - [x] Milestone item that was checked off
 - Summary of what was implemented
 - Key files added/modified
 - Any notable decisions or trade-offs made
 
 ## Next Up
+- GitHub Issue: #NEXT_ISSUE_NUM
 - [ ] Next milestone item to tackle
 - Why this is the logical next step
 - Any prerequisites or dependencies
@@ -78,6 +90,8 @@ After all changes are committed:
 ```markdown
 ## Summary
 Implements section {X.Y} ({Section Title}) from the CEL implementation roadmap.
+
+Closes #{ISSUE_NUM}
 
 [1-2 sentence description of what was added/changed]
 
