@@ -4,34 +4,30 @@
 2026-02-01
 
 ## Just Completed
-- GitHub Issue: #22 (Encoders Extension)
-- [x] Fix Flaky Conformance Tests (Milestone 5.6 handoff item)
-  - Root cause: `ObjectValue` comparison in `conformance.rs` used byte-level `a.value == e.value`, which fails when `HashMap` iteration order differs between runs for proto messages containing map fields (e.g., `google.protobuf.Struct`)
-  - Fix: Structural comparison via `DynamicMessage` decoding — both `Any` payloads are decoded using the shared descriptor pool, then compared with `PartialEq` (which handles map ordering correctly)
-  - Extracted `build_descriptor_pool()` from `loader.rs` for reuse in test comparisons
-  - `dynamic.textproto` eval results now stable at 224/226 across multiple runs (was ±2-3 jitter)
-  - Key files: `crates/cel-core-conformance/src/loader.rs`, `crates/cel-core-conformance/tests/conformance.rs`
+- GitHub Issue: #23 (5.2: Conversion & Operator Edge Cases)
+- Summary: Fixed three categories of conformance failures in the evaluator
+- Key file: `crates/cel-core/src/eval/evaluator.rs`
 
-- [x] Encoders Extension Runtime (Milestone 5.1d)
-  - Added `.with_impl()` to `base64.encode` and `base64.decode` overload declarations
-  - Made `base64_encode` in `wkt.rs` `pub(crate)` for reuse
-  - Implemented `base64_decode` with RFC 4648 support (padded and unpadded input)
-  - Encoders conformance: 0/4 → 4/4 (all passing)
-  - Key files: `crates/cel-core/src/ext/encoders_ext.rs`, `crates/cel-core/src/eval/wkt.rs`
+### Changes
+1. **`bool()` string conversion** — Accept `"TRUE"`, `"True"`, `"FALSE"`, `"False"`, `"t"`, `"f"`, `"1"`, `"0"` in addition to `"true"`/`"false"`
+2. **`int()`/`uint()` from out-of-range doubles** — Return overflow errors for NaN, infinity, and values outside the representable range instead of silently clamping
+3. **Repeated map key detection** — Map literal construction now checks for duplicate keys (with numeric coercion) and returns an error for `{1: "a", 1: "b"}` style expressions
 
-## Known Issues
-- **Dynamic regression**: `dynamic.textproto` eval at 224/226. The `float/literal_not_double` test expects `google.protobuf.FloatValue{value: 1.333} == 1.333` to be `false` (float32 precision loss), but we return `true`. Pre-existing float precision issue.
-- 12 conformance test suites still failing (pre-existing): block_ext, comparisons, conversions, dynamic, fields, namespace, proto2, proto2_ext, timestamps, type_deduction
+### Results
+- conversions.textproto: 96/109 → **109/109** (+13, now 100%)
+- fields.textproto: 54/60 → **56/60** (+2)
+- Overall: +15 eval tests, no regressions
 
-## Next Up: Cross-Type Enum Equality (5.4 remaining)
-- GitHub Issue: #24
-- Enum-to-int equality (`EnumValue == Int` and `Int in [EnumValue]`) — remaining item in strong enum typing milestone.
+## Next Up
+- GitHub Issue: #24 — Enum-to-int cross-type equality (5.4)
+- `EnumValue == Int` and `Int in [EnumValue]` comparisons
+- 1 known conformance failure in type_deduction.textproto (`standalone_enum` returns EnumValue instead of Int)
+- Logical next step: small, focused change in the evaluator's equality/comparison logic
 
-## Alternate Next: Conversion & Operator Edge Cases (5.2)
-- GitHub Issue: #23
-- `bool()` from string: accept `"1"`, `"0"`, `"t"`, `"f"`, `"TRUE"`, etc.
-- `int()` / `uint()` from out-of-range doubles: error instead of silent clamping
-- Repeated map key detection in map literals
+## Alternate Next
+- GitHub Issue: #25 — Any Type Support (5.6)
+- GitHub Issue: #26 — Namespace & Qualified Identifier Resolution (5.7)
+  - Would fix ~10 failures across namespace.textproto and fields.textproto
 
 ## Open Questions
 - The overload resolution sometimes selects the wrong overload for `(UInt, Int)` args in bit shift functions — it picks `int_int` instead of `uint_int`. Worked around by handling both type combos in the first overload, but the root cause in overload resolution may need investigation.
