@@ -539,7 +539,7 @@ impl AstConverter {
 
     fn struct_to_ast(
         &self,
-        _expr_id: i64,
+        expr_id: i64,
         s: &CreateStruct,
         source_info: &SourceInfo,
     ) -> Result<Expr, ConversionError> {
@@ -573,7 +573,7 @@ impl AstConverter {
         } else {
             // Struct literal
             let pos = 0; // We don't have position info for the type name
-            let type_name = build_type_name_expr(&s.message_name, pos);
+            let type_name = build_type_name_expr(&s.message_name, pos, expr_id);
 
             let fields: Result<Vec<_>, _> = s
                 .entries
@@ -677,21 +677,42 @@ fn extract_type_name(expr: &SpannedExpr) -> String {
 }
 
 /// Build a type name expression from a dotted string.
-/// Uses ID 0 for synthetic nodes created during proto->AST conversion.
-fn build_type_name_expr(name: &str, pos: usize) -> SpannedExpr {
+/// The outermost node uses `struct_id` (the parent struct expression's ID) so the
+/// checker can store the resolved type reference without colliding with other structs.
+/// Inner nodes use unique negative IDs derived from the struct ID.
+fn build_type_name_expr(name: &str, pos: usize, struct_id: i64) -> SpannedExpr {
     let span = pos..pos;
+
+    // Generate a unique negative ID for inner (non-outermost) nodes.
+    // We use -(struct_id * 1000 + offset) to avoid collisions between different structs.
+    let mut inner_offset: i64 = 1;
+    let mut next_inner_id = |sid: i64| -> i64 {
+        let id = -(sid.wrapping_mul(1000).wrapping_add(inner_offset));
+        inner_offset += 1;
+        id
+    };
 
     if let Some(rest) = name.strip_prefix('.') {
         // Root-scoped type
         let parts: Vec<&str> = rest.split('.').collect();
         if parts.len() == 1 {
-            Spanned::new(0, Expr::RootIdent(parts[0].to_string()), span)
+            Spanned::new(struct_id, Expr::RootIdent(parts[0].to_string()), span)
         } else {
             // .a.b.c -> Member(Member(RootIdent(a), b), c)
-            let mut expr = Spanned::new(0, Expr::RootIdent(parts[0].to_string()), span.clone());
-            for part in &parts[1..] {
+            let mut expr = Spanned::new(
+                next_inner_id(struct_id),
+                Expr::RootIdent(parts[0].to_string()),
+                span.clone(),
+            );
+            for (i, part) in parts[1..].iter().enumerate() {
+                let id = if i == parts.len() - 2 {
+                    // Outermost (last) node gets struct_id
+                    struct_id
+                } else {
+                    next_inner_id(struct_id)
+                };
                 expr = Spanned::new(
-                    0,
+                    id,
                     Expr::Member {
                         expr: Box::new(expr),
                         field: (*part).to_string(),
@@ -705,13 +726,23 @@ fn build_type_name_expr(name: &str, pos: usize) -> SpannedExpr {
     } else {
         let parts: Vec<&str> = name.split('.').collect();
         if parts.len() == 1 {
-            Spanned::new(0, Expr::Ident(parts[0].to_string()), span)
+            Spanned::new(struct_id, Expr::Ident(parts[0].to_string()), span)
         } else {
             // a.b.c -> Member(Member(Ident(a), b), c)
-            let mut expr = Spanned::new(0, Expr::Ident(parts[0].to_string()), span.clone());
-            for part in &parts[1..] {
+            let mut expr = Spanned::new(
+                next_inner_id(struct_id),
+                Expr::Ident(parts[0].to_string()),
+                span.clone(),
+            );
+            for (i, part) in parts[1..].iter().enumerate() {
+                let id = if i == parts.len() - 2 {
+                    // Outermost (last) node gets struct_id
+                    struct_id
+                } else {
+                    next_inner_id(struct_id)
+                };
                 expr = Spanned::new(
-                    0,
+                    id,
                     Expr::Member {
                         expr: Box::new(expr),
                         field: (*part).to_string(),
@@ -1150,19 +1181,23 @@ mod tests {
     #[test]
     fn test_build_type_name_expr() {
         // Simple name
-        let expr = build_type_name_expr("Foo", 0);
+        let expr = build_type_name_expr("Foo", 0, 1);
         assert!(matches!(expr.node, Expr::Ident(ref s) if s == "Foo"));
+        assert_eq!(expr.id, 1);
 
         // Dotted name
-        let expr = build_type_name_expr("a.b.c", 0);
+        let expr = build_type_name_expr("a.b.c", 0, 2);
         assert!(matches!(expr.node, Expr::Member { .. }));
+        assert_eq!(expr.id, 2); // Outermost node gets struct_id
 
         // Root-scoped name
-        let expr = build_type_name_expr(".Foo", 0);
+        let expr = build_type_name_expr(".Foo", 0, 3);
         assert!(matches!(expr.node, Expr::RootIdent(ref s) if s == "Foo"));
+        assert_eq!(expr.id, 3);
 
         // Root-scoped dotted name
-        let expr = build_type_name_expr(".a.b", 0);
+        let expr = build_type_name_expr(".a.b", 0, 4);
         assert!(matches!(expr.node, Expr::Member { .. }));
+        assert_eq!(expr.id, 4);
     }
 }

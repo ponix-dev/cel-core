@@ -2108,7 +2108,13 @@ impl<'a> Evaluator<'a> {
                 }
                 _ => Value::error(EvalError::type_mismatch("uint", &value.cel_type().display_name())),
             },
-            "google.protobuf.FloatValue" | "google.protobuf.DoubleValue" => match &value {
+            "google.protobuf.FloatValue" => match &value {
+                Value::Double(d) => Value::Double((*d as f32) as f64),
+                Value::Int(i) => Value::Double((*i as f32) as f64),
+                Value::UInt(u) => Value::Double((*u as f32) as f64),
+                _ => Value::error(EvalError::type_mismatch("double", &value.cel_type().display_name())),
+            },
+            "google.protobuf.DoubleValue" => match &value {
                 Value::Double(_) => value,
                 Value::Int(i) => Value::Double(*i as f64),
                 Value::UInt(u) => Value::Double(*u as f64),

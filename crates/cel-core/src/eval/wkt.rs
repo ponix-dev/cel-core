@@ -8,7 +8,7 @@ use std::sync::Arc;
 use prost::Message;
 use prost_reflect::{DynamicMessage, MessageDescriptor, ReflectMessage};
 
-use super::{Duration, EvalError, MapKey, ProtoValue, Timestamp, Value, ValueMap};
+use super::{time, Duration, EvalError, MapKey, ProtoValue, Timestamp, Value, ValueMap};
 use crate::types::ProtoTypeRegistry;
 
 // ==================== Well-Known Type Unwrapping ====================
@@ -310,12 +310,22 @@ pub fn cel_value_to_google_value(
             }
         }
         Value::Int(i) => {
-            if let Some(field) = value_desc.get_field_by_name("number_value") {
+            // Large integers that can't be represented exactly as f64 → string_value
+            if *i > (1i64 << 53) || *i < -(1i64 << 53) {
+                if let Some(field) = value_desc.get_field_by_name("string_value") {
+                    msg.set_field(&field, prost_reflect::Value::String(i.to_string()));
+                }
+            } else if let Some(field) = value_desc.get_field_by_name("number_value") {
                 msg.set_field(&field, prost_reflect::Value::F64(*i as f64));
             }
         }
         Value::UInt(u) => {
-            if let Some(field) = value_desc.get_field_by_name("number_value") {
+            // Large integers that can't be represented exactly as f64 → string_value
+            if *u > (1u64 << 53) {
+                if let Some(field) = value_desc.get_field_by_name("string_value") {
+                    msg.set_field(&field, prost_reflect::Value::String(u.to_string()));
+                }
+            } else if let Some(field) = value_desc.get_field_by_name("number_value") {
                 msg.set_field(&field, prost_reflect::Value::F64(*u as f64));
             }
         }
@@ -339,6 +349,59 @@ pub fn cel_value_to_google_value(
             let struct_msg = cel_map_to_struct(map, registry)?;
             if let Some(field) = value_desc.get_field_by_name("struct_value") {
                 msg.set_field(&field, prost_reflect::Value::Message(struct_msg));
+            }
+        }
+        Value::Bytes(b) => {
+            // Bytes → base64-encoded string in google.protobuf.Value (JSON mapping)
+            let encoded = base64_encode(b);
+            if let Some(field) = value_desc.get_field_by_name("string_value") {
+                msg.set_field(&field, prost_reflect::Value::String(encoded));
+            }
+        }
+        Value::Duration(d) => {
+            // Duration → "Xs" string format (protobuf JSON mapping)
+            let formatted = time::format_duration(d);
+            if let Some(field) = value_desc.get_field_by_name("string_value") {
+                msg.set_field(&field, prost_reflect::Value::String(formatted));
+            }
+        }
+        Value::Timestamp(ts) => {
+            // Timestamp → RFC 3339 format (protobuf JSON mapping)
+            let formatted = time::format_timestamp(ts);
+            if let Some(field) = value_desc.get_field_by_name("string_value") {
+                msg.set_field(&field, prost_reflect::Value::String(formatted));
+            }
+        }
+        Value::Proto(proto) => {
+            // Handle WKT proto messages that can be represented in google.protobuf.Value
+            match proto.message().descriptor().full_name() {
+                "google.protobuf.Empty" => {
+                    // Empty → empty struct_value
+                    let struct_desc = registry
+                        .get_message("google.protobuf.Struct")
+                        .ok_or_else(|| {
+                            Value::error(EvalError::internal(
+                                "google.protobuf.Struct not in registry",
+                            ))
+                        })?;
+                    let struct_msg = DynamicMessage::new(struct_desc.clone());
+                    if let Some(field) = value_desc.get_field_by_name("struct_value") {
+                        msg.set_field(&field, prost_reflect::Value::Message(struct_msg));
+                    }
+                }
+                "google.protobuf.FieldMask" => {
+                    // FieldMask → comma-separated paths string
+                    let paths = get_field_mask_paths(proto.message());
+                    if let Some(field) = value_desc.get_field_by_name("string_value") {
+                        msg.set_field(&field, prost_reflect::Value::String(paths));
+                    }
+                }
+                _ => {
+                    return Err(Value::error(EvalError::type_mismatch(
+                        "google.protobuf.Value",
+                        &value.cel_type().display_name(),
+                    )));
+                }
             }
         }
         _ => {
@@ -574,4 +637,56 @@ pub fn wrap_value_for_any(
     }
 
     Ok(any_msg)
+}
+
+// ==================== Helper Functions ====================
+
+/// Encode bytes as standard base64 (RFC 4648).
+fn base64_encode(data: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] =
+        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+    let mut result = String::with_capacity((data.len() + 2) / 3 * 4);
+    for chunk in data.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = if chunk.len() > 1 { chunk[1] as u32 } else { 0 };
+        let b2 = if chunk.len() > 2 { chunk[2] as u32 } else { 0 };
+        let triple = (b0 << 16) | (b1 << 8) | b2;
+
+        result.push(ALPHABET[((triple >> 18) & 0x3F) as usize] as char);
+        result.push(ALPHABET[((triple >> 12) & 0x3F) as usize] as char);
+        if chunk.len() > 1 {
+            result.push(ALPHABET[((triple >> 6) & 0x3F) as usize] as char);
+        } else {
+            result.push('=');
+        }
+        if chunk.len() > 2 {
+            result.push(ALPHABET[(triple & 0x3F) as usize] as char);
+        } else {
+            result.push('=');
+        }
+    }
+    result
+}
+
+/// Extract paths from a `google.protobuf.FieldMask` message as comma-separated string.
+fn get_field_mask_paths(message: &DynamicMessage) -> String {
+    let descriptor = message.descriptor();
+    if let Some(paths_field) = descriptor.get_field_by_name("paths") {
+        let val = message.get_field(&paths_field);
+        if let prost_reflect::Value::List(list) = val.as_ref() {
+            let paths: Vec<String> = list
+                .iter()
+                .filter_map(|v| {
+                    if let prost_reflect::Value::String(s) = v {
+                        Some(s.clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            return paths.join(",");
+        }
+    }
+    String::new()
 }

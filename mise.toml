@@ -52,9 +52,9 @@ depends = ["conformance:setup"]
 run = "cargo test -p cel-core-conformance"
 
 [tasks."conformance:report"]
-description = "Run CEL conformance tests with machine-parseable output for reporting"
+description = "Run CEL conformance tests and generate markdown report with baseline comparison"
 depends = ["conformance:setup"]
-run = "cargo test -p cel-core-conformance -- --nocapture"
+run = "bash scripts/conformance-report.sh --update-baseline"
 
 [tasks."version:bump"]
 description = "Bump version based on conventional commits"
