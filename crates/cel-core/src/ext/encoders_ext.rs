@@ -8,23 +8,107 @@
 //! - `base64.encode(bytes) -> string` - Encodes bytes to base64 string
 //! - `base64.decode(string) -> bytes` - Decodes base64 string to bytes
 
+use std::sync::Arc;
+
+use crate::eval::wkt::base64_encode;
+use crate::eval::{EvalError, Value};
 use crate::types::{CelType, FunctionDecl, OverloadDecl};
+
+/// Decode a standard base64 string (RFC 4648) to bytes.
+/// Supports both padded and unpadded input.
+fn base64_decode(input: &str) -> Result<Vec<u8>, String> {
+    const DECODE_TABLE: [u8; 256] = {
+        let mut table = [0xFFu8; 256];
+        let alphabet = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut i = 0;
+        while i < 64 {
+            table[alphabet[i] as usize] = i as u8;
+            i += 1;
+        }
+        table
+    };
+
+    // Strip padding
+    let input = input.trim_end_matches('=');
+    let len = input.len();
+
+    let mut result = Vec::with_capacity(len * 3 / 4);
+    let bytes = input.as_bytes();
+    let mut i = 0;
+
+    while i + 4 <= len {
+        let a = DECODE_TABLE[bytes[i] as usize];
+        let b = DECODE_TABLE[bytes[i + 1] as usize];
+        let c = DECODE_TABLE[bytes[i + 2] as usize];
+        let d = DECODE_TABLE[bytes[i + 3] as usize];
+        if a == 0xFF || b == 0xFF || c == 0xFF || d == 0xFF {
+            return Err("invalid base64 character".to_string());
+        }
+        let triple = (a as u32) << 18 | (b as u32) << 12 | (c as u32) << 6 | (d as u32);
+        result.push((triple >> 16) as u8);
+        result.push((triple >> 8) as u8);
+        result.push(triple as u8);
+        i += 4;
+    }
+
+    let remaining = len - i;
+    match remaining {
+        2 => {
+            let a = DECODE_TABLE[bytes[i] as usize];
+            let b = DECODE_TABLE[bytes[i + 1] as usize];
+            if a == 0xFF || b == 0xFF {
+                return Err("invalid base64 character".to_string());
+            }
+            let triple = (a as u32) << 18 | (b as u32) << 12;
+            result.push((triple >> 16) as u8);
+        }
+        3 => {
+            let a = DECODE_TABLE[bytes[i] as usize];
+            let b = DECODE_TABLE[bytes[i + 1] as usize];
+            let c = DECODE_TABLE[bytes[i + 2] as usize];
+            if a == 0xFF || b == 0xFF || c == 0xFF {
+                return Err("invalid base64 character".to_string());
+            }
+            let triple = (a as u32) << 18 | (b as u32) << 12 | (c as u32) << 6;
+            result.push((triple >> 16) as u8);
+            result.push((triple >> 8) as u8);
+        }
+        1 => return Err("invalid base64 input length".to_string()),
+        0 => {}
+        _ => unreachable!(),
+    }
+
+    Ok(result)
+}
 
 /// Returns the encoders extension library function declarations.
 pub fn encoders_extension() -> Vec<FunctionDecl> {
     vec![
         // base64.encode(bytes) -> string
-        FunctionDecl::new("base64.encode").with_overload(OverloadDecl::function(
-            "base64_encode_bytes",
-            vec![CelType::Bytes],
-            CelType::String,
-        )),
+        FunctionDecl::new("base64.encode").with_overload(
+            OverloadDecl::function("base64_encode_bytes", vec![CelType::Bytes], CelType::String)
+                .with_impl(|args| match &args[0] {
+                    Value::Bytes(b) => Value::String(Arc::from(base64_encode(b))),
+                    _ => Value::error(EvalError::type_mismatch(
+                        "bytes",
+                        &args[0].cel_type().display_name(),
+                    )),
+                }),
+        ),
         // base64.decode(string) -> bytes
-        FunctionDecl::new("base64.decode").with_overload(OverloadDecl::function(
-            "base64_decode_string",
-            vec![CelType::String],
-            CelType::Bytes,
-        )),
+        FunctionDecl::new("base64.decode").with_overload(
+            OverloadDecl::function("base64_decode_string", vec![CelType::String], CelType::Bytes)
+                .with_impl(|args| match &args[0] {
+                    Value::String(s) => match base64_decode(s) {
+                        Ok(bytes) => Value::Bytes(Arc::from(bytes)),
+                        Err(e) => Value::error(EvalError::internal(e)),
+                    },
+                    _ => Value::error(EvalError::type_mismatch(
+                        "string",
+                        &args[0].cel_type().display_name(),
+                    )),
+                }),
+        ),
     ]
 }
 
@@ -70,5 +154,27 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn test_base64_encode_impl() {
+        let result = base64_encode(b"hello");
+        assert_eq!(result, "aGVsbG8=");
+    }
+
+    #[test]
+    fn test_base64_decode_impl() {
+        // With padding
+        assert_eq!(base64_decode("aGVsbG8=").unwrap(), b"hello");
+        // Without padding
+        assert_eq!(base64_decode("aGVsbG8").unwrap(), b"hello");
+    }
+
+    #[test]
+    fn test_base64_roundtrip() {
+        let data = b"Hello World!";
+        let encoded = base64_encode(data);
+        let decoded = base64_decode(&encoded).unwrap();
+        assert_eq!(decoded, data);
     }
 }

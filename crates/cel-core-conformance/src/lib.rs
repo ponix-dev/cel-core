@@ -14,7 +14,7 @@ use cel_core_proto::gen::cel::expr::{CheckedExpr, ExprValue, ParsedExpr};
 pub use cel_core_proto::gen::cel::expr::conformance::test::{
     SimpleTest, SimpleTestFile, SimpleTestSection,
 };
-pub use loader::{load_test_file, LoadError};
+pub use loader::{build_descriptor_pool, load_test_file, LoadError};
 
 /// An issue encountered during parsing, checking, or evaluation.
 #[derive(Debug, Clone)]
