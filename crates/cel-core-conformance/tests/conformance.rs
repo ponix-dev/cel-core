@@ -8,7 +8,7 @@
 //! - Eval tests: Verify evaluation produces expected results
 
 use cel_core_conformance::{
-    load_test_file, Binding, CelConformanceService, ConformanceService, FunctionTypeDecl, SimpleTest, TypeDecl,
+    build_descriptor_pool, load_test_file, Binding, CelConformanceService, ConformanceService, FunctionTypeDecl, SimpleTest, TypeDecl,
 };
 use cel_core_proto::gen::cel::expr::conformance::test::simple_test::ResultMatcher;
 use cel_core_proto::gen::cel::expr::conformance::test::{ErrorSetMatcher, UnknownSetMatcher};
@@ -18,7 +18,13 @@ use cel_core_proto::gen::cel::expr::value::Kind as ValueKind;
 use cel_core_proto::gen::cel::expr::Type as ProtoType;
 use cel_core_proto::gen::cel::expr::{expr_value, ErrorSet, ExprValue, UnknownSet, Value as ProtoValue};
 use cel_core_proto::cel_type_from_proto;
+use prost_reflect::{DescriptorPool, DynamicMessage};
 use std::path::Path;
+use std::sync::LazyLock;
+
+static POOL: LazyLock<DescriptorPool> = LazyLock::new(|| {
+    build_descriptor_pool().expect("failed to build descriptor pool")
+});
 
 const TESTDATA_PATH: &str = "cel-spec/tests/simple/testdata";
 
@@ -211,9 +217,21 @@ fn values_equivalent(actual: &ProtoValue, expected: &ProtoValue) -> bool {
             a.r#type == e.r#type && a.value == e.value
         }
 
-        // Object values (proto messages) - compare Any type URLs and values
+        // Object values (proto messages) - structural comparison via DynamicMessage
         (Some(ValueKind::ObjectValue(a)), Some(ValueKind::ObjectValue(e))) => {
-            a.type_url == e.type_url && a.value == e.value
+            if a.type_url != e.type_url {
+                return false;
+            }
+            let type_name = a.type_url.strip_prefix("type.googleapis.com/").unwrap_or(&a.type_url);
+            if let Some(desc) = POOL.get_message_by_name(type_name) {
+                if let (Ok(a_msg), Ok(e_msg)) = (
+                    DynamicMessage::decode(desc.clone(), a.value.as_ref()),
+                    DynamicMessage::decode(desc, e.value.as_ref()),
+                ) {
+                    return a_msg == e_msg;
+                }
+            }
+            a.value == e.value
         }
 
         // None cases

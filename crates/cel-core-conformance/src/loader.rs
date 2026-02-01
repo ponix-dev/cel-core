@@ -10,31 +10,27 @@ use prost::Message;
 use prost_reflect::{DescriptorPool, DynamicMessage};
 use std::path::Path;
 
-/// Load a SimpleTestFile from a .textproto file.
-pub fn load_test_file(path: &Path) -> Result<SimpleTestFile, LoadError> {
-    // Start with the global pool which contains Google well-known types
+/// Build a DescriptorPool with all cel-spec descriptors loaded.
+pub fn build_descriptor_pool() -> Result<DescriptorPool, LoadError> {
     let mut pool = DescriptorPool::global();
 
-    // Add the cel-spec descriptors in dependency order:
-    // 1. cel/expr/*.proto (syntax.proto, checked.proto, etc.)
     pool.decode_file_descriptor_set(EXPR_FILE_DESCRIPTOR_SET)
         .map_err(|e| LoadError::DescriptorPool(e.to_string()))?;
-
-    // 2. cel/expr/conformance/*.proto (conformance_service.proto)
     pool.decode_file_descriptor_set(conformance::FILE_DESCRIPTOR_SET)
         .map_err(|e| LoadError::DescriptorPool(e.to_string()))?;
-
-    // 3. cel/expr/conformance/proto2/*.proto (test types)
     pool.decode_file_descriptor_set(conformance::proto2::FILE_DESCRIPTOR_SET)
         .map_err(|e| LoadError::DescriptorPool(e.to_string()))?;
-
-    // 4. cel/expr/conformance/proto3/*.proto (test types)
     pool.decode_file_descriptor_set(conformance::proto3::FILE_DESCRIPTOR_SET)
         .map_err(|e| LoadError::DescriptorPool(e.to_string()))?;
-
-    // 5. cel/expr/conformance/test/*.proto (simple.proto)
     pool.decode_file_descriptor_set(conformance::test::FILE_DESCRIPTOR_SET)
         .map_err(|e| LoadError::DescriptorPool(e.to_string()))?;
+
+    Ok(pool)
+}
+
+/// Load a SimpleTestFile from a .textproto file.
+pub fn load_test_file(path: &Path) -> Result<SimpleTestFile, LoadError> {
+    let pool = build_descriptor_pool()?;
 
     let message_desc = pool
         .get_message_by_name("cel.expr.conformance.test.SimpleTestFile")
