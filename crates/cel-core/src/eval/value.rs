@@ -426,9 +426,84 @@ impl PartialEq for ProtoValue {
         if self.type_name() != other.type_name() {
             return false;
         }
+        // For Any messages, compare by unpacking to the inner message
+        if self.type_name() == "google.protobuf.Any" {
+            return any_semantic_eq(&self.message, &other.message);
+        }
         // Use prost_reflect's equality
         self.message.as_ref() == other.message.as_ref()
     }
+}
+
+/// Compare two `google.protobuf.Any` messages by semantic equality.
+///
+/// Unpacks both Any messages to their inner message type and compares
+/// the decoded messages. Falls back to bytewise comparison if decoding fails.
+fn any_semantic_eq(
+    a: &prost_reflect::DynamicMessage,
+    b: &prost_reflect::DynamicMessage,
+) -> bool {
+    let descriptor = a.descriptor();
+
+    // Extract type_url from both
+    let type_url_field = match descriptor.get_field_by_name("type_url") {
+        Some(f) => f,
+        None => return a == b,
+    };
+    let value_field = match descriptor.get_field_by_name("value") {
+        Some(f) => f,
+        None => return a == b,
+    };
+
+    let type_url_a = match a.get_field(&type_url_field).into_owned() {
+        prost_reflect::Value::String(s) => s,
+        _ => return a == b,
+    };
+    let type_url_b = match b.get_field(&type_url_field).into_owned() {
+        prost_reflect::Value::String(s) => s,
+        _ => return a == b,
+    };
+
+    // Different type_urls means not equal
+    if type_url_a != type_url_b {
+        return false;
+    }
+
+    // Strip the prefix to get the message type name
+    let type_name = type_url_a
+        .strip_prefix("type.googleapis.com/")
+        .unwrap_or(&type_url_a);
+
+    // Look up the inner message descriptor
+    let inner_descriptor = match descriptor.parent_pool().get_message_by_name(type_name) {
+        Some(d) => d,
+        None => {
+            // Can't resolve type — fall back to bytewise comparison of value bytes
+            return a.get_field(&value_field) == b.get_field(&value_field);
+        }
+    };
+
+    // Extract value bytes from both
+    let bytes_a = match a.get_field(&value_field).into_owned() {
+        prost_reflect::Value::Bytes(b) => b,
+        _ => return a == b,
+    };
+    let bytes_b = match b.get_field(&value_field).into_owned() {
+        prost_reflect::Value::Bytes(b) => b,
+        _ => return a == b,
+    };
+
+    // Decode both into DynamicMessage and compare semantically
+    let msg_a = match prost_reflect::DynamicMessage::decode(inner_descriptor.clone(), bytes_a.as_ref()) {
+        Ok(m) => m,
+        Err(_) => return bytes_a == bytes_b,
+    };
+    let msg_b = match prost_reflect::DynamicMessage::decode(inner_descriptor, bytes_b.as_ref()) {
+        Ok(m) => m,
+        Err(_) => return bytes_a == bytes_b,
+    };
+
+    msg_a == msg_b
 }
 
 impl OptionalValue {
@@ -1247,7 +1322,7 @@ impl PartialEq for Value {
                     return false;
                 }
                 for (key, val_a) in a.iter() {
-                    match b.get(key) {
+                    match b.get_with_numeric_coercion(key) {
                         Some(val_b) if val_a == val_b => continue,
                         _ => return false,
                     }
