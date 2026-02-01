@@ -704,11 +704,14 @@ Represent enums as typed values rather than plain integers.
 
 Proper field access and value coercion for protobuf well-known types.
 
-- [ ] Wrapper type field access (`google.protobuf.BoolValue{value: true}.value`)
-- [ ] Wrapper type auto-unwrapping when assigned to `Any` or `Value` fields
-- [ ] Duration/Timestamp coercion to `google.protobuf.Value`
-- [ ] `google.protobuf.FieldMask` field access (`paths`)
-- [ ] `google.protobuf.Empty` to `Value` coercion
+- [x] Wrapper type field access (`google.protobuf.BoolValue{value: true}.value`)
+- [x] Wrapper type auto-unwrapping when assigned to `Any` or `Value` fields
+- [x] Duration/Timestamp coercion to `google.protobuf.Value`
+- [x] `google.protobuf.FieldMask` field access (`paths`)
+- [x] `google.protobuf.Empty` to `Value` coercion
+- [x] Bytes to base64-encoded string in `google.protobuf.Value`
+- [x] Large integer overflow to string_value (>2^53)
+- [x] Proto converter: struct type name expression IDs for proper checker resolution
 
 #### 5.6 Any Type Support (~12 failures)
 
