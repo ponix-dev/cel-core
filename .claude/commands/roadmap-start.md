@@ -8,8 +8,7 @@ You are beginning work on the next step in our CEL implementation. Our goal is t
 
 ## Context
 
-Read these files first:
-- @ROADMAP.md - Our implementation roadmap with phases and milestones
+Read this file first:
 - @.claude/handoff.md - Handoff notes from the previous session (if it exists)
 
 The handoff file tracks continuity between sessions, documenting what was just completed and what should come next.
@@ -55,7 +54,7 @@ Before beginning any implementation work, you MUST create a feature branch for t
 
 ## Planning Process
 
-1. **Identify the next implementation section** - Follow the numbered implementation sections in ROADMAP.md in order (1.1, 1.2, 1.3, 2.1, 2.2, etc.). Each section must be completed before moving to the next. Check the handoff file to see which section was last completed.
+1. **Identify the next work item** - Use the GitHub issue picked above and the handoff file to understand what needs to be implemented next.
 
 2. **Research the cel-go implementation** - Use agents to explore how cel-go implements this feature. Look at:
    - Package structure and file organization
@@ -79,7 +78,7 @@ Before beginning any implementation work, you MUST create a feature branch for t
 Your plan should include:
 
 1. **GitHub Issue**: #N — {title}
-2. **Target Milestone Item**: Which checkbox from ROADMAP.md we're implementing
+2. **Target**: What we're implementing
 3. **cel-go Reference**: Key files/patterns from cel-go to follow
 4. **Specification Reference**: Relevant cel-spec sections
 5. **Implementation Steps**: Ordered list of changes

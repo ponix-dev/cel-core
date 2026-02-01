@@ -300,6 +300,11 @@ impl<'a> Evaluator<'a> {
                 match value {
                     Value::Optional(OptionalValue::Some(v)) => {
                         if let Some(map_key) = MapKey::from_value(&key) {
+                            if map.contains_key_with_numeric_coercion(&map_key) {
+                                return Value::error(EvalError::invalid_argument(
+                                    "Failed with repeated key",
+                                ));
+                            }
                             map.insert(map_key, *v);
                         } else {
                             return Value::error(EvalError::type_mismatch(
@@ -311,6 +316,11 @@ impl<'a> Evaluator<'a> {
                     Value::Optional(OptionalValue::None) => {} // Skip absent optionals
                     _ => {
                         if let Some(map_key) = MapKey::from_value(&key) {
+                            if map.contains_key_with_numeric_coercion(&map_key) {
+                                return Value::error(EvalError::invalid_argument(
+                                    "Failed with repeated key",
+                                ));
+                            }
                             map.insert(map_key, value);
                         } else {
                             return Value::error(EvalError::type_mismatch(
@@ -322,6 +332,11 @@ impl<'a> Evaluator<'a> {
                 }
             } else {
                 if let Some(map_key) = MapKey::from_value(&key) {
+                    if map.contains_key_with_numeric_coercion(&map_key) {
+                        return Value::error(EvalError::invalid_argument(
+                            "Failed with repeated key",
+                        ));
+                    }
                     map.insert(map_key, value);
                 } else {
                     return Value::error(EvalError::type_mismatch(
@@ -1472,7 +1487,13 @@ impl<'a> Evaluator<'a> {
                     Value::Int(*u as i64)
                 }
             }
-            Value::Double(d) => Value::Int(*d as i64),
+            Value::Double(d) => {
+                if d.is_nan() || d.is_infinite() || *d >= (i64::MAX as f64) || *d <= (i64::MIN as f64) {
+                    Value::error(EvalError::overflow("double to int overflow"))
+                } else {
+                    Value::Int(*d as i64)
+                }
+            }
             Value::String(s) => s
                 .parse::<i64>()
                 .map(Value::Int)
@@ -1497,8 +1518,8 @@ impl<'a> Evaluator<'a> {
                 }
             }
             Value::Double(d) => {
-                if *d < 0.0 {
-                    Value::error(EvalError::overflow("negative double to uint"))
+                if d.is_nan() || d.is_infinite() || *d < 0.0 || *d >= (u64::MAX as f64) {
+                    Value::error(EvalError::overflow("double to uint overflow"))
                 } else {
                     Value::UInt(*d as u64)
                 }
@@ -1570,8 +1591,8 @@ impl<'a> Evaluator<'a> {
         match value {
             Value::Bool(b) => Value::Bool(*b),
             Value::String(s) => match s.as_ref() {
-                "true" => Value::Bool(true),
-                "false" => Value::Bool(false),
+                "true" | "True" | "TRUE" | "t" | "1" => Value::Bool(true),
+                "false" | "False" | "FALSE" | "f" | "0" => Value::Bool(false),
                 _ => Value::error(EvalError::invalid_conversion("string", "bool")),
             },
             _ => Value::error(EvalError::invalid_conversion(
