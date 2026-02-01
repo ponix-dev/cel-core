@@ -642,7 +642,7 @@ pub fn wrap_value_for_any(
 // ==================== Helper Functions ====================
 
 /// Encode bytes as standard base64 (RFC 4648).
-fn base64_encode(data: &[u8]) -> String {
+pub(crate) fn base64_encode(data: &[u8]) -> String {
     const ALPHABET: &[u8; 64] =
         b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
