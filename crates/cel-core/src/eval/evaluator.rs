@@ -20,7 +20,7 @@ use prost_reflect::{
 use super::{
     time::{self, TimestampComponent},
     wkt,
-    Activation, EvalError, FunctionRegistry, HierarchicalActivation, MapKey,
+    Activation, EvalError, EvalErrorKind, FunctionRegistry, HierarchicalActivation, MapKey,
     OptionalValue, TypeValue, Value, ValueMap,
 };
 use crate::checker::ReferenceInfo;
@@ -2231,7 +2231,16 @@ impl<'a> Evaluator<'a> {
             );
         }
 
-        Value::Proto(super::ProtoValue::new(msg))
+        // Empty Any (no type_url) is a conversion error
+        if type_url.is_empty() {
+            return Value::error(EvalError::new(
+                EvalErrorKind::InvalidConversion,
+                "conversion",
+            ));
+        }
+
+        // Auto-unpack Any to the contained message type
+        self.maybe_unwrap_well_known(msg)
     }
 
     /// Resolve a type name expression to a fully qualified name.

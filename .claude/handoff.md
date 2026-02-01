@@ -4,28 +4,34 @@
 2026-02-01
 
 ## Just Completed
-- GitHub Issue: #24 (5.4: Enum-to-int cross-type equality)
-- Summary: Implemented cross-type equality and ordering between enum values and numeric types (int, uint, double)
-- Key files: `crates/cel-core/src/eval/value.rs`, `crates/cel-core/src/eval/evaluator.rs`, `crates/cel-core-conformance/tests/conformance.rs`
+- GitHub Issue: #25 (5.6: Any Type Support)
+- [x] Any unpacking for equality comparison
+- [x] Bytewise fallback comparison for unknown Any types
+- [x] Empty Any literal validation (conversion error)
+- [x] Map key numeric coercion for equality
 
-### Changes
-1. **Enum-numeric equality** — `Value::PartialEq` now handles `Enum == Int`, `Enum == UInt`, and `Enum == Double` comparisons (and their symmetric forms), treating enum values as their underlying integer
-2. **Enum-numeric ordering** — `Value::compare` supports cross-type ordering between enums and all numeric types, enabling relational operators (`<`, `>`, `<=`, `>=`)
-3. **WKT field access fix** — Narrowed the evaluator's "is WKT" check from a blanket `google.protobuf.*` prefix to `wkt::is_wrapper_type()` plus explicit `Any`, so non-wrapper types (Struct, Value, ListValue) are handled correctly
-4. **Conformance test equivalence** — Added `EnumValue == Int64` matching in `values_equivalent` for conformance output comparison
+### Summary
+Added semantic equality for `google.protobuf.Any` messages and fixed map key comparison to use numeric coercion.
+
+### Key files modified
+- `crates/cel-core/src/eval/value.rs` — `any_semantic_eq` function, `ProtoValue::PartialEq`, map equality with `get_with_numeric_coercion`
+- `crates/cel-core/src/eval/evaluator.rs` — Empty Any validation and auto-unwrap via `maybe_unwrap_well_known`
+
+### Notable decisions
+- Any comparison unpacks both messages to their inner type and compares semantically; falls back to bytewise comparison if the type can't be resolved in the descriptor pool
+- Empty Any (no `type_url`) returns an `InvalidConversion` error rather than wrapping as a proto value
+- `type_url` field access on Any is not yet implemented (not needed for the fixed tests)
 
 ### Results
-- proto2.textproto: 106/108 → **108/108** (+2, now 100%)
-- type_deduction.textproto: 19/22 → **22/22** (+3, now 100%)
-- Overall: +5 eval tests, no regressions
+- comparisons.textproto: 401/406 -> **406/406** (+5, now 100%)
+- dynamic.textproto: 224/226 -> **226/226** (+2, now 100%)
+- Overall: +7 eval tests, no regressions
 
 ## Next Up
-- GitHub Issue: #25 — Any Type Support (5.6)
-  - Would fix ~7 failures across comparisons.textproto and dynamic.textproto
-  - Requires Any unpacking for equality comparison and empty Any literal validation
 - GitHub Issue: #26 — Namespace & Qualified Identifier Resolution (5.7)
   - Would fix ~10 failures across namespace.textproto and fields.textproto
   - Dotted variable names like `a.b.c` need to resolve against container namespaces
+  - Requires changes to evaluator identifier resolution and activation lookup
 
 ## Alternate Next
 - GitHub Issue: #29 — cel.block Extension (5.10)
@@ -35,4 +41,4 @@
 
 ## Open Questions
 - The overload resolution sometimes selects the wrong overload for `(UInt, Int)` args in bit shift functions — it picks `int_int` instead of `uint_int`. Worked around by handling both type combos in the first overload, but the root cause in overload resolution may need investigation.
-- Mixed-type map key equality (1 failure in comparisons.textproto) — map equality doesn't use cross-type numeric comparison for keys. This may need a dedicated fix.
+- `type_url` field access on Any values is not yet implemented — this was listed in #25 but wasn't needed for the conformance test fixes. May revisit if additional test cases require it.
