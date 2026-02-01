@@ -878,8 +878,9 @@ impl<'a> Evaluator<'a> {
                                         result
                                     };
                                 }
-                                let is_wkt = msg_name.starts_with("google.protobuf.");
-                                if is_wkt {
+                                if wkt::is_wrapper_type(&msg_desc)
+                                    || msg_name == "google.protobuf.Any"
+                                {
                                     if optional {
                                         return Value::optional_some(Value::Null);
                                     } else {

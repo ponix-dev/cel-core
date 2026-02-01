@@ -1307,6 +1307,24 @@ impl PartialEq for Value {
                 let b_f64 = *b as f64;
                 *a == b_f64 && b_f64 as u64 == *b
             }
+            // Enum-numeric cross-type equality (CEL spec: enums compare as their int value)
+            (Value::Enum(e), Value::Int(i)) | (Value::Int(i), Value::Enum(e)) => {
+                e.value as i64 == *i
+            }
+            (Value::Enum(e), Value::UInt(u)) | (Value::UInt(u), Value::Enum(e)) => {
+                if e.value < 0 {
+                    false
+                } else {
+                    e.value as u64 == *u
+                }
+            }
+            (Value::Enum(e), Value::Double(d)) | (Value::Double(d), Value::Enum(e)) => {
+                if d.is_nan() {
+                    return false;
+                }
+                let e_f64 = e.value as f64;
+                e_f64 == *d && e_f64 as i32 == e.value
+            }
             _ => false,
         }
     }
@@ -1352,6 +1370,25 @@ impl Value {
             (Value::Double(a), Value::Int(b)) => a.partial_cmp(&(*b as f64)),
             (Value::UInt(a), Value::Double(b)) => (*a as f64).partial_cmp(b),
             (Value::Double(a), Value::UInt(b)) => a.partial_cmp(&(*b as f64)),
+            // Enum-numeric cross-type ordering
+            (Value::Enum(e), Value::Int(i)) => (e.value as i64).partial_cmp(i),
+            (Value::Int(i), Value::Enum(e)) => i.partial_cmp(&(e.value as i64)),
+            (Value::Enum(e), Value::UInt(u)) => {
+                if e.value < 0 {
+                    Some(Ordering::Less)
+                } else {
+                    (e.value as u64).partial_cmp(u)
+                }
+            }
+            (Value::UInt(u), Value::Enum(e)) => {
+                if e.value < 0 {
+                    Some(Ordering::Greater)
+                } else {
+                    u.partial_cmp(&(e.value as u64))
+                }
+            }
+            (Value::Enum(e), Value::Double(d)) => (e.value as f64).partial_cmp(d),
+            (Value::Double(d), Value::Enum(e)) => d.partial_cmp(&(e.value as f64)),
             _ => None,
         }
     }
@@ -1833,6 +1870,54 @@ mod tests {
         } else {
             panic!("expected map");
         }
+    }
+
+    #[test]
+    fn test_enum_numeric_equality() {
+        let enum_val = Value::Enum(EnumValue::new("test.MyEnum", 1));
+
+        // Enum == Int
+        assert_eq!(enum_val, Value::Int(1));
+        assert_eq!(Value::Int(1), enum_val);
+        assert_ne!(enum_val, Value::Int(2));
+
+        // Enum == UInt
+        assert_eq!(enum_val, Value::UInt(1));
+        assert_eq!(Value::UInt(1), enum_val);
+
+        // Negative enum value != UInt
+        let neg_enum = Value::Enum(EnumValue::new("test.MyEnum", -1));
+        assert_ne!(neg_enum, Value::UInt(1));
+
+        // Enum == Double
+        assert_eq!(enum_val, Value::Double(1.0));
+        assert_eq!(Value::Double(1.0), enum_val);
+        assert_ne!(enum_val, Value::Double(1.5));
+
+        // NaN != Enum
+        assert_ne!(Value::Double(f64::NAN), enum_val);
+
+        // List membership: Int in [Enum] uses PartialEq
+        let list = Value::List(Arc::from(vec![Value::Enum(EnumValue::new("test.MyEnum", 1))]));
+        if let Value::List(items) = &list {
+            assert!(items.contains(&Value::Int(1)));
+        }
+    }
+
+    #[test]
+    fn test_enum_numeric_comparison() {
+        let enum_val = Value::Enum(EnumValue::new("test.MyEnum", 5));
+
+        assert_eq!(enum_val.compare(&Value::Int(3)), Some(Ordering::Greater));
+        assert_eq!(enum_val.compare(&Value::Int(5)), Some(Ordering::Equal));
+        assert_eq!(enum_val.compare(&Value::Int(10)), Some(Ordering::Less));
+
+        assert_eq!(enum_val.compare(&Value::UInt(3)), Some(Ordering::Greater));
+        assert_eq!(enum_val.compare(&Value::Double(5.0)), Some(Ordering::Equal));
+
+        // Negative enum vs UInt
+        let neg_enum = Value::Enum(EnumValue::new("test.MyEnum", -1));
+        assert_eq!(neg_enum.compare(&Value::UInt(0)), Some(Ordering::Less));
     }
 
     #[test]

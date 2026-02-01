@@ -217,6 +217,10 @@ fn values_equivalent(actual: &ProtoValue, expected: &ProtoValue) -> bool {
             a.r#type == e.r#type && a.value == e.value
         }
 
+        // Enum values are numerically equivalent to ints
+        (Some(ValueKind::EnumValue(a)), Some(ValueKind::Int64Value(e))) => a.value == *e as i32,
+        (Some(ValueKind::Int64Value(a)), Some(ValueKind::EnumValue(e))) => *a as i32 == e.value,
+
         // Object values (proto messages) - structural comparison via DynamicMessage
         (Some(ValueKind::ObjectValue(a)), Some(ValueKind::ObjectValue(e))) => {
             if a.type_url != e.type_url {
