@@ -254,15 +254,47 @@ impl<'a> Checker<'a> {
     }
 
     /// Check an identifier expression.
+    ///
+    /// Resolution order:
+    /// - If the name is a local variable (comprehension, bind), use it directly
+    ///   (local variables shadow container-prefixed names)
+    /// - Otherwise: container-prefixed first (most qualified → least), then as-is
     fn check_ident(&mut self, name: &str, expr: &SpannedExpr) -> CelType {
+        // Local variables (comprehension, bind) always take priority
+        if self.scopes.is_local(name) {
+            if let Some(decl) = self.scopes.resolve(name) {
+                let cel_type = decl.cel_type.clone();
+                self.set_reference(expr.id, ReferenceInfo::ident(name));
+                return cel_type;
+            }
+        }
+
+        // Try container-prefixed (namespace shadowing at global level)
+        if !self.container.is_empty() {
+            let mut container = self.container;
+            loop {
+                let qualified = format!("{}.{}", container, name);
+                if let Some(decl) = self.scopes.resolve(&qualified) {
+                    let cel_type = decl.cel_type.clone();
+                    self.set_reference(expr.id, ReferenceInfo::ident(&qualified));
+                    return cel_type;
+                }
+                match container.rfind('.') {
+                    Some(pos) => container = &container[..pos],
+                    None => break,
+                }
+            }
+        }
+
+        // Then try as-is
         if let Some(decl) = self.scopes.resolve(name) {
             let cel_type = decl.cel_type.clone();
             self.set_reference(expr.id, ReferenceInfo::ident(name));
-            cel_type
-        } else {
-            self.report_error(CheckError::undeclared_reference(name, expr.span.clone(), expr.id));
-            CelType::Error
+            return cel_type;
         }
+
+        self.report_error(CheckError::undeclared_reference(name, expr.span.clone(), expr.id));
+        CelType::Error
     }
 
     /// Check a list literal.
@@ -391,18 +423,22 @@ impl<'a> Checker<'a> {
 
     /// Check a member access expression.
     fn check_member(&mut self, obj: &SpannedExpr, field: &str, optional: bool, expr: &SpannedExpr) -> CelType {
-        // First, try to resolve as qualified identifier (e.g., pkg.Type)
-        if let Some(qualified_name) = self.try_qualified_name(obj, field) {
-            // Try variable/type resolution first
-            if let Some(decl) = self.resolve_qualified(&qualified_name) {
-                let cel_type = decl.cel_type.clone();
-                self.set_reference(expr.id, ReferenceInfo::ident(&qualified_name));
-                return cel_type;
-            }
+        // First, try to resolve as qualified identifier (e.g., pkg.Type),
+        // but only if the leftmost identifier doesn't resolve locally.
+        // This ensures comprehension variables shadow qualified names.
+        if !self.leftmost_ident_resolves(obj) {
+            if let Some(qualified_name) = self.try_qualified_name(obj, field) {
+                // Try variable/type resolution first
+                if let Some(decl) = self.resolve_qualified(&qualified_name) {
+                    let cel_type = decl.cel_type.clone();
+                    self.set_reference(expr.id, ReferenceInfo::ident(&qualified_name));
+                    return cel_type;
+                }
 
-            // Try proto type resolution (enum values, message types)
-            if let Some(resolved) = self.resolve_proto_qualified(&qualified_name, expr) {
-                return resolved;
+                // Try proto type resolution (enum values, message types)
+                if let Some(resolved) = self.resolve_proto_qualified(&qualified_name, expr) {
+                    return resolved;
+                }
             }
         }
 
@@ -554,6 +590,19 @@ impl<'a> Checker<'a> {
             }
         } else {
             None
+        }
+    }
+
+    /// Check if the leftmost identifier in a member chain resolves in scope.
+    ///
+    /// Used to skip qualified name resolution when the receiver is a known variable
+    /// (e.g., comprehension variables should shadow qualified names).
+    fn leftmost_ident_resolves(&self, expr: &SpannedExpr) -> bool {
+        match &expr.node {
+            Expr::Ident(name) => self.scopes.resolve(name).is_some(),
+            Expr::RootIdent(_) => false, // Leading dot always uses qualified resolution
+            Expr::Member { expr: inner, .. } => self.leftmost_ident_resolves(inner),
+            _ => true, // Non-identifier expressions always evaluate normally
         }
     }
 
