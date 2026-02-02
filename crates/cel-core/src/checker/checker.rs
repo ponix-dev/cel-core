@@ -325,6 +325,15 @@ impl<'a> Checker<'a> {
         for entry in entries {
             let key_type = self.check_expr(&entry.key);
             let value_type = self.check_expr(&entry.value);
+            // Optional entries have values of type optional<T>, but the map value type is T
+            let value_type = if entry.optional {
+                match value_type {
+                    CelType::Optional(inner) => (*inner).clone(),
+                    other => other,
+                }
+            } else {
+                value_type
+            };
             key_types.push(key_type);
             value_types.push(value_type);
         }

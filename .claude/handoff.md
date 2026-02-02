@@ -4,34 +4,38 @@
 2026-02-02
 
 ## Just Completed
-- GitHub Issue: #30 (5.11: Miscellaneous Behavioral Fixes) — partial
-- [x] Qualified proto message type resolution in evaluator
+- GitHub Issue: #29 (5.10: cel.block Extension)
+- [x] cel.block macro (nested Bind expansion)
+- [x] cel.index macro
+- [x] cel.iterVar macro
+- [x] cel.accuVar macro
+- [x] Fix checker: unwrap optional values in optional map entries
 
 ### Summary
-Added proto message type resolution to the evaluator's `resolve_qualified_identifier` function. When a qualified identifier (e.g., `google.protobuf.Timestamp`) is not found in the activation, the evaluator now checks if it matches a known proto message type in the registry and returns it as a `Value::Type`. This fixes 2 eval failures in timestamps.textproto.
+Implemented the `cel.block` extension which provides slot-based variable binding for common subexpression elimination. Added four test-only macros (`cel.block`, `cel.index`, `cel.iterVar`, `cel.accuVar`) that expand at parse time. `cel.block` expands into nested `Expr::Bind` nodes, reusing existing bind infrastructure. Also fixed a checker bug where optional map entries (`{?"key": value}`) weren't unwrapping the optional from the value type.
 
 ### Key files modified
-- `crates/cel-core/src/eval/evaluator.rs` — Added proto type registry lookup as fallback in `resolve_qualified_identifier`
-- `.claude/context/conformance-baseline.md` — Updated baseline (timestamps.textproto eval 74→76)
+- `crates/cel-core/src/parser/macros.rs` — Added 4 new macros + registered in STANDARD_MACROS
+- `crates/cel-core/src/checker/checker.rs` — Fixed `check_map` to unwrap optional value types for optional entries
+- `.claude/context/conformance-baseline.md` — Updated baseline (block_ext 0→37/37)
 
 ### Notable decisions
-- The proto type lookup is a fallback after activation lookup, so user-defined variables still take precedence over proto type names
-- Uses the existing `proto_types` registry and `resolve_message_name` with container support
+- `cel.block` expands to nested `Expr::Bind` nodes rather than a new AST variant — simpler, reuses existing checker/evaluator support
+- Eager evaluation (all slots evaluated even if unused) vs cel-go's lazy approach — correct for conformance, may optimize later
+- Code comment documents the future optimization path (flat `Vec<Option<Value>>` + lazy eval)
 
 ### Results
-- timestamps.textproto eval: 74/76 → **76/76** (+2, now 100%)
-- Overall: +2 conformance tests, no regressions
+- block_ext.textproto parse_check: 0/37 → **37/37** (+37)
+- block_ext.textproto eval: 0/37 → **37/37** (+37)
+- Overall: +74 conformance tests, no regressions
 
 ## Next Up
-- GitHub Issue: #30 — Miscellaneous Behavioral Fixes (5.11) — remaining tasks
-  - `dyn()` type equality: different message types should not be equal
-  - FloatValue precision: float32 vs float64 precision loss detection
-  - `google.protobuf.Any` literal construction validation
-  - `has()` on explicitly-set message fields returns `true`
-  - `has()` on optional map entries with `optional.none()` values
-  - Proto map key serialization ordering (deterministic output)
-- GitHub Issue: #29 — cel.block Extension (5.10)
-  - Would fix 74 failures in block_ext.textproto (largest single remaining block)
+- GitHub Issue: #50 — Decouple prost/prost-reflect from cel-core via trait abstraction
+  - Extract a trait-based interface so cel-core doesn't depend directly on prost/prost-reflect
+  - Enables alternative protobuf backends and cleaner dependency boundaries
+- GitHub Issue: #52 — Refactor: break down evaluator.rs into focused submodules
+  - Split the monolithic evaluator into smaller, focused modules
+  - Improve maintainability and readability of evaluation logic
 
 ## Open Questions
 - The overload resolution sometimes selects the wrong overload for `(UInt, Int)` args in bit shift functions — it picks `int_int` instead of `uint_int`. Worked around by handling both type combos in the first overload, but the root cause in overload resolution may need investigation.
