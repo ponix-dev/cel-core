@@ -113,6 +113,21 @@ impl ScopeStack {
         None
     }
 
+    /// Look up a variable only in local (non-root) scopes.
+    ///
+    /// This checks comprehension and bind scopes but NOT the root scope.
+    /// Returns true if the name is a local variable that should shadow
+    /// container-prefixed names.
+    pub fn is_local(&self, name: &str) -> bool {
+        // Check all scopes except the root (index 0)
+        for scope in self.scopes[1..].iter().rev() {
+            if scope.get(name).is_some() {
+                return true;
+            }
+        }
+        false
+    }
+
     /// Check if a variable is declared in any scope.
     #[allow(dead_code)]
     pub fn contains(&self, name: &str) -> bool {

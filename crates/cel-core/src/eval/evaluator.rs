@@ -33,6 +33,9 @@ use crate::types::{BinaryOp, Expr, ProtoTypeRegistry, SpannedExpr, UnaryOp};
 /// when configured with a proto type registry.
 pub struct Evaluator<'a> {
     activation: &'a dyn Activation,
+    /// Root activation (the outermost, non-hierarchical activation).
+    /// Used for leading-dot (RootIdent) resolution to bypass local scope.
+    root_activation: &'a dyn Activation,
     functions: &'a FunctionRegistry,
     /// Reference map from type checking (for qualified name resolution).
     reference_map: Option<&'a HashMap<i64, ReferenceInfo>>,
@@ -45,6 +48,10 @@ pub struct Evaluator<'a> {
     /// Whether to use strong enum typing (default: true).
     /// When false, enum values are returned as plain integers.
     strong_enums: bool,
+    /// Whether we're inside a local scope (comprehension, cel.bind).
+    /// When true, as-is resolution takes priority over container prefixing
+    /// because local variables should shadow namespace-resolved names.
+    in_local_scope: bool,
 }
 
 impl<'a> Evaluator<'a> {
@@ -52,12 +59,14 @@ impl<'a> Evaluator<'a> {
     pub fn new(activation: &'a dyn Activation, functions: &'a FunctionRegistry) -> Self {
         Self {
             activation,
+            root_activation: activation,
             functions,
             reference_map: None,
             proto_types: None,
             container: String::new(),
             abbreviations: None,
             strong_enums: true,
+            in_local_scope: false,
         }
     }
 
@@ -118,11 +127,18 @@ impl<'a> Evaluator<'a> {
     }
 
     /// Create a child evaluator with a new activation but preserving other settings.
+    ///
+    /// The root_activation is preserved from the parent, so leading-dot resolution
+    /// always refers to the outermost (global) scope.
     fn child_evaluator<'b>(&'b self, activation: &'b dyn Activation) -> Evaluator<'b>
     where
         'a: 'b,
     {
         let mut eval = Evaluator::new(activation, self.functions);
+        // Preserve root_activation from parent (don't reset to the child activation)
+        eval.root_activation = self.root_activation;
+        // Child evaluators are always in local scope (comprehension, bind)
+        eval.in_local_scope = true;
         if let Some(ref_map) = self.reference_map {
             eval = eval.with_reference_map(ref_map);
         }
@@ -167,7 +183,8 @@ impl<'a> Evaluator<'a> {
             Expr::Bytes(b) => Value::Bytes(Arc::from(b.as_slice())),
 
             // Identifiers
-            Expr::Ident(name) | Expr::RootIdent(name) => self.eval_ident(name),
+            Expr::Ident(name) => self.eval_ident(name, expr),
+            Expr::RootIdent(name) => self.eval_root_ident(name),
 
             // Collections
             Expr::List(elements) => self.eval_list(elements),
@@ -184,10 +201,10 @@ impl<'a> Evaluator<'a> {
 
             // Access
             Expr::Member {
-                expr,
+                expr: inner,
                 field,
                 optional,
-            } => self.eval_member(expr, field, *optional),
+            } => self.eval_member(inner, field, *optional, expr),
             Expr::Index {
                 expr,
                 index,
@@ -232,7 +249,7 @@ impl<'a> Evaluator<'a> {
         }
     }
 
-    fn eval_ident(&self, name: &str) -> Value {
+    fn eval_ident(&self, name: &str, expr: &SpannedExpr) -> Value {
         // Check for type constants
         match name {
             "null_type" => return Value::Type(TypeValue::null_type()),
@@ -249,8 +266,78 @@ impl<'a> Evaluator<'a> {
             _ => {}
         }
 
-        // Look up in activation
-        self.activation
+        // If we have a reference_map entry with a resolved name, use that
+        if let Some(ref_map) = self.reference_map {
+            if let Some(ref_info) = ref_map.get(&expr.id) {
+                if let Some(v) = self.activation.resolve(&ref_info.name) {
+                    return v;
+                }
+            }
+        }
+
+        // Try container-aware resolution (container-prefixed first for shadowing)
+        if let Some(v) = self.resolve_with_container(name) {
+            return v;
+        }
+
+        Value::error(EvalError::unknown_identifier(name))
+    }
+
+    /// Resolve a variable name using container namespace prefixing (C++ namespace rules).
+    ///
+    /// When in a local scope (comprehension, bind), tries as-is first so that
+    /// local variables shadow container-prefixed names. At the global level,
+    /// container-prefixed names shadow unqualified names per CEL spec.
+    fn resolve_with_container(&self, name: &str) -> Option<Value> {
+        if self.in_local_scope {
+            // In local scope: as-is first (local variables shadow container names)
+            if let Some(v) = self.activation.resolve(name) {
+                return Some(v);
+            }
+            // Then try container prefixes
+            if !self.container.is_empty() {
+                let mut container = self.container.as_str();
+                loop {
+                    let qualified = format!("{}.{}", container, name);
+                    if let Some(v) = self.activation.resolve(&qualified) {
+                        return Some(v);
+                    }
+                    match container.rfind('.') {
+                        Some(pos) => container = &container[..pos],
+                        None => break,
+                    }
+                }
+            }
+        } else {
+            // At global scope: container-prefixed first (namespace shadowing)
+            if !self.container.is_empty() {
+                let mut container = self.container.as_str();
+                loop {
+                    let qualified = format!("{}.{}", container, name);
+                    if let Some(v) = self.activation.resolve(&qualified) {
+                        return Some(v);
+                    }
+                    match container.rfind('.') {
+                        Some(pos) => container = &container[..pos],
+                        None => break,
+                    }
+                }
+            }
+            // Then try as-is
+            if let Some(v) = self.activation.resolve(name) {
+                return Some(v);
+            }
+        }
+
+        None
+    }
+
+    /// Resolve a RootIdent (leading dot, e.g. `.y`).
+    ///
+    /// Leading dot means "absolute/root namespace" — bypass container prefixing
+    /// and local scope, resolve from root activation only.
+    fn eval_root_ident(&self, name: &str) -> Value {
+        self.root_activation
             .resolve(name)
             .unwrap_or_else(|| Value::error(EvalError::unknown_identifier(name)))
     }
@@ -806,8 +893,40 @@ impl<'a> Evaluator<'a> {
         }
     }
 
-    fn eval_member(&self, expr: &SpannedExpr, field: &str, optional: bool) -> Value {
-        let value = self.eval_expr(expr);
+    fn eval_member(&self, receiver: &SpannedExpr, field: &str, optional: bool, member_expr: &SpannedExpr) -> Value {
+        // First, check reference_map for a pre-resolved qualified name (from checker)
+        if let Some(ref_map) = self.reference_map {
+            if let Some(ref_info) = ref_map.get(&member_expr.id) {
+                // The checker resolved this to a qualified variable name
+                if ref_info.overload_ids.is_empty() && ref_info.value.is_none() {
+                    if let Some(v) = self.activation.resolve(&ref_info.name) {
+                        return v;
+                    }
+                }
+            }
+        }
+
+        // Try qualified identifier resolution (e.g., a.b.c as a variable name),
+        // but only when the leftmost identifier does NOT resolve in the current scope.
+        // This ensures comprehension variables (local scope) shadow qualified names.
+        if !optional {
+            if let Some(qualified_name) = self.try_qualified_variable_name(receiver, field) {
+                let leftmost_resolves = self.leftmost_ident_resolves(receiver);
+                if !leftmost_resolves {
+                    if let Some(v) = self.try_longest_prefix_match(&qualified_name, false) {
+                        return v;
+                    }
+                } else if qualified_name.starts_with('.') {
+                    // Leading-dot chain: resolve from root namespace regardless
+                    if let Some(v) = self.try_longest_prefix_match(&qualified_name, true) {
+                        return v;
+                    }
+                }
+            }
+        }
+
+        // Fall through to normal field-access evaluation
+        let value = self.eval_expr(receiver);
 
         if value.is_error() {
             return value;
@@ -825,6 +944,97 @@ impl<'a> Evaluator<'a> {
         }
 
         self.access_field(&value, field, optional)
+    }
+
+    /// Try to build a qualified variable name from a Member chain.
+    ///
+    /// For `a.b.c`, builds the string "a.b.c".
+    /// For `.a.b`, builds the string ".a.b" (leading dot preserved).
+    /// Returns None if the chain contains non-identifier nodes.
+    fn try_qualified_variable_name(&self, obj: &SpannedExpr, field: &str) -> Option<String> {
+        match &obj.node {
+            Expr::Ident(name) => Some(format!("{}.{}", name, field)),
+            Expr::RootIdent(name) => Some(format!(".{}.{}", name, field)),
+            Expr::Member { expr: inner, field: inner_field, optional: false } => {
+                let prefix = self.try_qualified_variable_name(inner, inner_field)?;
+                Some(format!("{}.{}", prefix, field))
+            }
+            _ => None,
+        }
+    }
+
+    /// Check if the leftmost identifier in a member chain resolves in the current activation.
+    ///
+    /// This is used to determine whether to try qualified name resolution:
+    /// if the leftmost ident resolves (e.g., a comprehension variable), we should
+    /// use normal field access instead of qualified name lookup.
+    fn leftmost_ident_resolves(&self, expr: &SpannedExpr) -> bool {
+        match &expr.node {
+            Expr::Ident(name) => self.activation.resolve(name).is_some(),
+            Expr::RootIdent(_) => false, // Leading dot always uses qualified resolution
+            Expr::Member { expr: inner, .. } => self.leftmost_ident_resolves(inner),
+            _ => true, // Non-identifier expressions always evaluate normally
+        }
+    }
+
+    /// Try to resolve a qualified name using longest-prefix matching.
+    ///
+    /// For "a.b.c", tries:
+    ///   1. resolve("a.b.c") — full name as variable
+    ///   2. resolve("a.b") then field access ".c"
+    ///   3. resolve("a") then field access ".b.c"
+    ///
+    /// When `root_only` is true (for leading-dot chains), resolves against the
+    /// root activation without container prefixing.
+    fn try_longest_prefix_match(&self, qualified_name: &str, root_only: bool) -> Option<Value> {
+        // Handle leading dot prefix
+        let name = if let Some(stripped) = qualified_name.strip_prefix('.') {
+            stripped
+        } else {
+            qualified_name
+        };
+
+        // Collect all dot positions to try progressively shorter prefixes
+        let dots: Vec<usize> = name.match_indices('.').map(|(i, _)| i).collect();
+
+        // Try full name first, then progressively shorter prefixes
+        let candidates: Vec<(&str, &str)> = std::iter::once((name, ""))
+            .chain(dots.iter().rev().map(|&pos| (&name[..pos], &name[pos + 1..])))
+            .collect();
+
+        for (prefix, remainder) in &candidates {
+            let resolved = if root_only {
+                // Leading dot: resolve from root activation only, no container prefix
+                self.root_activation.resolve(prefix)
+            } else {
+                self.resolve_with_container(prefix)
+            };
+
+            if let Some(mut value) = resolved {
+                // Apply remaining field accesses
+                if !remainder.is_empty() {
+                    for field in remainder.split('.') {
+                        if value.is_error() {
+                            // Field access failed, try shorter prefix
+                            break;
+                        }
+                        let next = self.access_field(&value, field, false);
+                        if next.is_error() {
+                            value = next;
+                            break;
+                        }
+                        value = next;
+                    }
+                    // If field access chain failed, try shorter prefix
+                    if value.is_error() {
+                        continue;
+                    }
+                }
+                return Some(value);
+            }
+        }
+
+        None
     }
 
     fn access_field(&self, value: &Value, field: &str, optional: bool) -> Value {
