@@ -4,7 +4,7 @@ description: Complete work on a roadmap feature and create PR
 
 # CEL Implementation: Complete Feature
 
-You are wrapping up work on a CEL implementation feature. This command handles updating documentation, creating handoff notes, and submitting a pull request.
+You are wrapping up work on a CEL feature. This command handles running conformance tests, creating handoff notes, and submitting a pull request.
 
 ## Review Current Work
 
@@ -22,7 +22,7 @@ Find the GitHub issue associated with this work:
 gh issue list --assignee rallinator7 --state open --json number,title
 ```
 
-Also check git log and branch name for issue references. Store the issue number as `ISSUE_NUM`. If no issue is found, check the milestone-5 label for related open issues.
+Also check git log and branch name for issue references. Store the issue number as `ISSUE_NUM`. If no issue is found, check open issues for related work.
 
 ## Run Conformance Tests
 
@@ -36,15 +36,7 @@ If there are **compilation errors**, stop and report them to the user. Do not pr
 
 Include the script's stdout output verbatim in your response, followed by a brief analysis of regressions and improvements.
 
-**IMPORTANT: Do not stop here.** If there are **no regressions**, continue immediately with the remaining steps below (updating ROADMAP.md, creating handoff notes, committing, and creating the PR) without waiting for user input. Only stop and wait for user input if there are regressions in the conformance results.
-
-## Update ROADMAP.md
-
-Update ROADMAP.md to mark completed milestone items:
-
-1. Find the section you were working on
-2. Change `- [ ]` to `- [x]` for completed items
-3. Only mark items that are fully implemented and tested
+**IMPORTANT: Do not stop here.** If there are **no regressions**, continue immediately with the remaining steps below (creating handoff notes, committing, and creating the PR) without waiting for user input. Only stop and wait for user input if there are regressions in the conformance results.
 
 ## Create Handoff Notes
 
@@ -58,17 +50,16 @@ Create or update `.claude/handoff.md` with the following template:
 
 ## Just Completed
 - GitHub Issue: #ISSUE_NUM
-- [x] Milestone item that was checked off
-- Summary of what was implemented
+- [x] What was implemented
+- Summary of changes
 - Key files added/modified
 - Any notable decisions or trade-offs made
 
 ## Next Up
-- GitHub Issue: #NEXT_ISSUE_NUM
-- [ ] Next milestone item to tackle
+- GitHub Issue: #NEXT_ISSUE_NUM (if known)
+- What should be tackled next
 - Why this is the logical next step
 - Any prerequisites or dependencies
-- Potential challenges to watch for
 
 ## Open Questions
 - Any unresolved design decisions
@@ -99,8 +90,6 @@ After all changes are committed:
 
 ```markdown
 ## Summary
-Implements section {X.Y} ({Section Title}) from the CEL implementation roadmap.
-
 Closes #{ISSUE_NUM}
 
 [1-2 sentence description of what was added/changed]
@@ -112,17 +101,14 @@ Closes #{ISSUE_NUM}
 
 ## Testing
 - [How changes were tested]
-- Conformance test results (from `/run-conformance` report):
+- Conformance test results:
 
-| Test Type | Passed | Total | Pass Rate | vs Main |
-|-----------|--------|-------|-----------|---------|
+| Test Type | Passed | Total | Pass Rate | vs Baseline |
+|-----------|--------|-------|-----------|-------------|
 | Parse+Check | X | Y | Z% | +/-N |
 | Type Check | X | Y | Z% | +/-N |
 | Eval | X | Y | Z% | +/-N |
 | **Overall** | **X** | **Y** | **Z%** | **+/-N** |
-
-## Roadmap
-See ROADMAP.md section {X.Y} for full context.
 ```
 
 3. **PR Title Format**: Brief description of the feature
@@ -134,4 +120,4 @@ $ARGUMENTS
 
 ## Action
 
-Review the current branch changes, update ROADMAP.md and handoff.md, then create the pull request.
+Review the current branch changes, create handoff notes, then create the pull request.

@@ -28,10 +28,15 @@
 //! ```
 
 mod activation;
+mod builtins;
+mod conversions;
 mod error;
 mod evaluator;
 mod functions;
+mod operators;
 mod program;
+mod proto;
+mod resolve;
 pub mod time;
 mod value;
 pub mod wkt;
