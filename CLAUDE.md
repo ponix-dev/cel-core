@@ -79,10 +79,15 @@ This is a multi-crate Cargo workspace:
     - `types/` - CelType, CelValue, AST types, declarations
     - `parser/` - Lexer (using `logos`), recursive descent parser, macro expansion
     - `checker/` - Type checker, overload resolution, standard library
+    - `eval/` - Evaluator, `Value` type, trait abstractions (`TypeRegistry`, `MessageValue`)
     - `ext/` - Extension libraries (strings, math, encoders, optionals)
+  - No dependency on prost/prost-reflect — proto support is provided via trait abstractions
   - Re-exports common types for convenience
 
-- **`cel-core-proto`**: Protobuf types and conversion (optional)
+- **`cel-core-proto`**: Protobuf runtime and AST conversion (optional)
+  - `ProstTypeRegistry` — implements `TypeRegistry` trait using prost-reflect
+  - `ProstMessage` — implements `MessageValue` trait wrapping `DynamicMessage`
+  - Proto-to-CEL and CEL-to-proto value conversion (`eval_proto.rs`, `wkt.rs`)
   - Generated protobuf types from cel-spec
   - Bidirectional conversion between AST and proto format
   - Wire compatibility with other CEL implementations (cel-go, cel-cpp)

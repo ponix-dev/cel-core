@@ -4,44 +4,41 @@
 2026-02-02
 
 ## Just Completed
-- GitHub Issue: #52 — Refactor: break down evaluator.rs into focused submodules
-- [x] Extract `proto.rs` — proto-to-CEL/CEL-to-proto conversions, struct construction, WKT/Any handling
-- [x] Extract `conversions.rs` — type conversion dispatcher and all `convert_to_*` functions
-- [x] Extract `operators.rs` — arithmetic, comparison, and unary operators
-- [x] Extract `builtins.rs` — built-in function dispatch and timestamp accessors
-- [x] Extract `resolve.rs` — identifier resolution, container/scope logic
-- [x] Update mod.rs to register new submodules
+- GitHub Issue: #50 — Decouple prost/prost-reflect from cel-core via trait abstraction
+- [x] Define `MessageValue` trait in `cel-core::eval::message` — runtime proto message abstraction
+- [x] Define `TypeRegistry` trait in `cel-core::eval::type_registry` — type resolution and message construction
+- [x] Move `ProtoValue` to `cel-core-proto` as `ProstMessage` implementing `MessageValue`
+- [x] Move `ProtoTypeRegistry` to `cel-core-proto` as `ProstTypeRegistry` implementing `TypeRegistry`
+- [x] Move WKT handling (`wkt.rs`) and proto evaluation logic (`proto.rs`) from cel-core to cel-core-proto
+- [x] Update `Value::Proto(ProtoValue)` → `Value::Message(Box<dyn MessageValue>)`
+- [x] Update evaluator, checker, program, and env to use trait-based APIs
+- [x] Remove `prost` and `prost-reflect` from cel-core's Cargo.toml
 
 ### Summary
-Split the monolithic `evaluator.rs` (3,505 lines) into 5 focused submodules plus a slimmed-down core (1,349 lines). Each submodule contains `impl Evaluator<'a>` blocks in separate files within `crates/cel-core/src/eval/`. Methods called cross-module use `pub(super)` visibility. No public API changes — only internal file reorganization.
+Decoupled cel-core from prost/prost-reflect by introducing two trait abstractions: `MessageValue` (for runtime proto message values) and `TypeRegistry` (for type resolution, field access, message construction, and WKT handling). The prost-backed implementations now live in cel-core-proto. This removes ~1,700 lines of prost-specific code from cel-core (proto.rs and wkt.rs deleted entirely) and eliminates the prost/prost-reflect dependency from the core crate.
 
 ### Key files added/modified
-- `crates/cel-core/src/eval/proto.rs` (999 lines) — new
-- `crates/cel-core/src/eval/conversions.rs` (223 lines) — new
-- `crates/cel-core/src/eval/operators.rs` (402 lines) — new
-- `crates/cel-core/src/eval/builtins.rs` (314 lines) — new
-- `crates/cel-core/src/eval/resolve.rs` (277 lines) — new
-- `crates/cel-core/src/eval/evaluator.rs` — slimmed from 3,505 to 1,349 lines
-- `crates/cel-core/src/eval/mod.rs` — added 5 new module declarations
+- `crates/cel-core/src/eval/message.rs` — new `MessageValue` trait
+- `crates/cel-core/src/eval/type_registry.rs` — new `TypeRegistry` trait with `StructFieldValue`
+- `crates/cel-core-proto/src/message.rs` — `ProstMessage` implementing `MessageValue`
+- `crates/cel-core-proto/src/registry.rs` — `ProstTypeRegistry` implementing `TypeRegistry`
+- `crates/cel-core-proto/src/eval_proto.rs` — proto-to-CEL value conversion (moved from eval/proto.rs)
+- `crates/cel-core-proto/src/wkt.rs` — well-known type handling (moved from eval/wkt.rs)
+- `crates/cel-core/src/eval/value.rs` — `Value::Proto` → `Value::Message`
+- `crates/cel-core/src/eval/evaluator.rs` — uses trait methods instead of direct prost calls
+- `crates/cel-core/Cargo.toml` — removed prost, prost-reflect dependencies
 
 ### Notable decisions
-- All extracted code stays as `impl Evaluator<'a>` blocks — Rust allows multiple impl blocks across files in the same crate
-- Tests remain in `evaluator.rs` since they exercise the full evaluator
-- `eval_and` and `eval_or` stay in evaluator.rs (control flow/short-circuiting tied to core dispatch) but are `pub(super)` so `operators.rs` can delegate to them
-- Struct fields on `Evaluator` are `pub(super)` so submodule files can access them
-
-### Results
-- 100% conformance maintained (4752/4752 tests passing, +0 vs baseline)
-- All unit and integration tests passing
-- evaluator.rs reduced by 62% (3,505 → 1,349 lines)
+- Used `Box<dyn MessageValue>` for type-erased message storage in `Value` enum rather than generics to avoid propagating type parameters throughout the evaluator
+- `MessageValue` includes `as_any()` for downcasting and `clone_boxed()` for clonability
+- `TypeRegistry` uses `&dyn` trait objects passed through the evaluator, keeping the public API simple
+- WKT handling (Any unpacking, Timestamp/Duration construction) moved entirely into the `TypeRegistry` implementation
 
 ## Next Up
-- GitHub Issue: #50 — Decouple prost/prost-reflect from cel-core via trait abstraction
-  - Extract a trait-based interface so cel-core doesn't depend directly on prost/prost-reflect
-  - Enables alternative protobuf backends and cleaner dependency boundaries
-  - The new `proto.rs` submodule makes this refactoring easier since proto logic is now isolated
 - GitHub Issue: #48 — Move proto value conversion logic from conformance layer to cel-core-proto
-  - Related to #50; conversion logic is now cleanly separated in proto.rs
+  - `proto_value_to_value()` and `value_to_proto_value()` in conformance service.rs should become public API in cel-core-proto
+  - `bindings_to_activation()` and `convert_function_decl()` should also move
+  - This completes the proto interop story for external users
 
 ## Open Questions
 - The overload resolution sometimes selects the wrong overload for `(UInt, Int)` args in bit shift functions — it picks `int_int` instead of `uint_int`. Worked around by handling both type combos in the first overload, but the root cause in overload resolution may need investigation.

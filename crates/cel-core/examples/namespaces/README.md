@@ -55,7 +55,7 @@ This two-stage approach means type checking catches errors early, and evaluation
 
 ```rust
 let env = Env::with_standard_library()
-    .with_proto_types(registry)
+    .with_type_registry(Arc::new(registry))
     .with_container("google.protobuf");
 
 // "Timestamp" resolves to "google.protobuf.Timestamp"
@@ -70,7 +70,7 @@ let abbrevs = Abbreviations::new()
     .add("google.protobuf.Duration")?;
 
 let env = Env::with_standard_library()
-    .with_proto_types(registry)
+    .with_type_registry(Arc::new(registry))
     .with_abbreviations(abbrevs);
 
 // "Timestamp" resolves via abbreviation
@@ -86,7 +86,7 @@ let abbrevs = Abbreviations::from_qualified_names(&[
 ])?;
 
 let env = Env::with_standard_library()
-    .with_proto_types(registry)
+    .with_type_registry(Arc::new(registry))
     .with_container("myapp.models")      // Domain types resolve here first
     .with_abbreviations(abbrevs);        // Well-known types via abbreviation
 ```
