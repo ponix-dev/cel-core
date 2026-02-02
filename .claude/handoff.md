@@ -4,35 +4,35 @@
 2026-02-02
 
 ## Just Completed
-- GitHub Issue: #28 (5.9: Proto Extensions)
-- [x] `proto.hasExt(msg, ext)` macro — expands to `has(msg.ext)` presence test
-- [x] `proto.getExt(msg, ext)` macro — expands to `msg.ext` select expression
-- [x] Qualified identifier validation for extension field arguments
+- GitHub Issue: #30 (5.11: Miscellaneous Behavioral Fixes) — partial
+- [x] Qualified proto message type resolution in evaluator
 
 ### Summary
-Implemented `proto.hasExt` and `proto.getExt` as standard macros in the parser. These macros handle proto2 extension field access by expanding at parse time: `proto.getExt(msg, pkg.ExtField)` becomes a member select `msg.pkg.ExtField`, and `proto.hasExt(msg, pkg.ExtField)` becomes a presence test `has(msg.pkg.ExtField)`. Both validate that the second argument is a qualified identifier (ident or dotted member chain).
+Added proto message type resolution to the evaluator's `resolve_qualified_identifier` function. When a qualified identifier (e.g., `google.protobuf.Timestamp`) is not found in the activation, the evaluator now checks if it matches a known proto message type in the registry and returns it as a `Value::Type`. This fixes 2 eval failures in timestamps.textproto.
 
 ### Key files modified
-- `crates/cel-core/src/parser/macros.rs` — Added `proto.hasExt` and `proto.getExt` macro definitions, `validate_qualified_identifier` helper, expansion functions, and unit tests
+- `crates/cel-core/src/eval/evaluator.rs` — Added proto type registry lookup as fallback in `resolve_qualified_identifier`
+- `.claude/context/conformance-baseline.md` — Updated baseline (timestamps.textproto eval 74→76)
 
 ### Notable decisions
-- Implemented as macros (not runtime functions) matching the CEL spec approach where proto extensions are resolved at parse/check time
-- The second argument is validated as a qualified identifier at macro expansion time, rejecting non-identifier expressions (e.g., literals, calls)
-- `proto.getExt` expands to `Expr::Member` and `proto.hasExt` expands to `Expr::MemberTestOnly`, reusing existing AST nodes
+- The proto type lookup is a fallback after activation lookup, so user-defined variables still take precedence over proto type names
+- Uses the existing `proto_types` registry and `resolve_message_name` with container support
 
 ### Results
-- proto2_ext.textproto: 0/18 -> **18/18** (+18, now 100%)
-- Overall: +36 conformance tests (18 parse+check, 18 eval), no regressions
+- timestamps.textproto eval: 74/76 → **76/76** (+2, now 100%)
+- Overall: +2 conformance tests, no regressions
 
 ## Next Up
+- GitHub Issue: #30 — Miscellaneous Behavioral Fixes (5.11) — remaining tasks
+  - `dyn()` type equality: different message types should not be equal
+  - FloatValue precision: float32 vs float64 precision loss detection
+  - `google.protobuf.Any` literal construction validation
+  - `has()` on explicitly-set message fields returns `true`
+  - `has()` on optional map entries with `optional.none()` values
+  - Proto map key serialization ordering (deterministic output)
 - GitHub Issue: #29 — cel.block Extension (5.10)
   - Would fix 74 failures in block_ext.textproto (largest single remaining block)
-  - Requires `cel.block` and `cel.index` function implementations
-  - `cel.block` takes a list of bindings and an expression body, `cel.index(N)` references the Nth binding
-- GitHub Issue: #30 — Miscellaneous Behavioral Fixes (5.11)
-  - Various small fixes and edge cases
 
 ## Open Questions
-- `google.protobuf.Timestamp` and `google.protobuf.Duration` as type identifiers still fail (2 eval tests in timestamps.textproto) — these qualified proto type names need to be resolvable as values in the evaluator.
 - The overload resolution sometimes selects the wrong overload for `(UInt, Int)` args in bit shift functions — it picks `int_int` instead of `uint_int`. Worked around by handling both type combos in the first overload, but the root cause in overload resolution may need investigation.
 - `type_url` field access on Any values is not yet implemented — may revisit if additional test cases require it.
