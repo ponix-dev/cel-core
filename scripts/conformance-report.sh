@@ -14,7 +14,7 @@ set -euo pipefail
 # --- Argument parsing -------------------------------------------------------
 
 UPDATE_BASELINE=false
-BASELINE_PATH=".claude/context/conformance-baseline.md"
+BASELINE_PATH="crates/cel-core-conformance/conformance-baseline.md"
 
 while [ $# -gt 0 ]; do
     case "$1" in

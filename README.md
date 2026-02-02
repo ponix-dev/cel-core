@@ -1,75 +1,143 @@
 # CEL-Core
 
-A complete [Common Expression Language](https://github.com/google/cel-spec) (CEL) implementation in Rust, validated through the official cel-spec conformance test suite.
+A spec-complete [Common Expression Language](https://github.com/google/cel-spec) (CEL) implementation written in rust.
 
-CEL-Core provides the full CEL processing pipeline—parsing, type checking, and proto wire format conversion—with the goal of achieving implementation parity with [cel-go](https://github.com/google/cel-go), the reference implementation.
-
-> **Note:** This project is a work in progress. See the [Roadmap](ROADMAP.md) for implementation status and the [conformance tests](crates/cel-core-conformance) for cel-spec compatibility.
-
-Built on top of the core implementation is a Language Server Protocol (LSP) server that brings CEL support to any LSP-compatible editor.
-
-## Features
-
-### CEL Implementation
-- **Parser** - Full CEL syntax support with error recovery
-- **Type Checker** - Type inference, overload resolution, and validation
-- **Evaluator** - Runtime expression evaluation with variable bindings
-- **Standard Library** - All standard CEL functions and operators
-- **Extensions** - String, math, encoders, and optionals extensions
-- **Proto Types** - Support for protobuf message types in expressions
-- **Conformance Testing** - Validated against the official cel-spec test suite
-
-### Language Server
-- **Syntax Highlighting** - Semantic tokens for accurate code coloring
-- **Error Diagnostics** - Real-time parsing and type checking errors
-- **Hover Information** - Type and function documentation on hover
-- **Protovalidate Support** - CEL validation in `.proto` files
+CEL-Core provides the full CEL pipeline — parsing, type checking, and evaluation — with wire compatibility to [cel-go](https://github.com/google/cel-go) and [cel-cpp](https://github.com/google/cel-cpp) through protobuf AST conversion. Built on top of the core library is a Language Server Protocol (LSP) server for IDE support.
 
 ## Installation
-
-Add `cel-core` to your `Cargo.toml`:
 
 ```toml
 [dependencies]
 cel-core = "0.1"
 
-# Optional: for proto wire format interop with cel-go/cel-cpp
+# Optional: proto wire format interop with cel-go/cel-cpp
 cel-core-proto = "0.1"
 ```
 
-## Usage
+## The CEL Environment
 
-### Quick Start
+The `Env` is the entry point for working with CEL expressions. It holds variable declarations, function definitions, and extensions, then compiles expressions into type-checked ASTs and evaluable programs.
 
 ```rust
 use cel_core::{Env, CelType, Value, MapActivation};
 
-// 1. Create an environment with the standard library and declare variables
 let env = Env::with_standard_library()
     .with_variable("user", CelType::String)
     .with_variable("age", CelType::Int);
 
-// 2. Compile the expression (parse + type-check)
 let ast = env.compile("age >= 21 && user.startsWith('admin')")?;
-
-// 3. Create a program from the compiled AST
 let program = env.program(&ast)?;
 
-// 4. Set up variable bindings for evaluation
 let mut activation = MapActivation::new();
-activation.insert("user", "admin_alice");  // &str converts automatically
-activation.insert("age", 25);              // integers widen automatically
+activation.insert("user", "admin_alice");
+activation.insert("age", 25);
 
-// 5. Evaluate the expression
 let result = program.eval(&activation);
 assert_eq!(result, Value::Bool(true));
 ```
 
-> See the [examples](crates/cel-core/examples/) folder for more usage patterns including lists, maps, error handling, timestamps/durations, and extensions.
+### Compile once, evaluate many
 
-### Proto Wire Format (Interop with cel-go/cel-cpp)
+Compilation (parsing + type checking) is the expensive step. Once you have a `Program`, evaluation is fast and can be called repeatedly with different variable bindings.
 
-For wire compatibility with other CEL implementations, use `cel-core-proto`:
+```rust
+let ast = env.compile("age >= threshold")?;
+let program = env.program(&ast)?;
+
+for threshold in [18, 21, 65] {
+    let mut activation = MapActivation::new();
+    activation.insert("age", 25);
+    activation.insert("threshold", threshold);
+    let result = program.eval(&activation);
+    println!("threshold {}: {}", threshold, result);
+}
+```
+
+### Extensions
+
+CEL-Core implements the standard CEL extension libraries. Enable them individually or all at once:
+
+```rust
+use cel_core::ext;
+
+// All extensions
+let env = Env::with_standard_library()
+    .with_all_extensions();
+
+// Or individually
+let env = Env::with_standard_library()
+    .with_extension(ext::string_extension())
+    .with_extension(ext::math_extension())
+    .with_extension(ext::encoders_extension())
+    .with_extension(ext::optionals_extension());
+```
+
+**String extension** — `charAt`, `indexOf`, `lastIndexOf`, `substring`, `split`, `join`, `strings.quote`, `lowerAscii`, `upperAscii`, `replace`, `trim`, `reverse`, `format`
+
+**Math extension** — `math.greatest`, `math.least`, `math.abs`, `math.sign`, `math.isNaN`, `math.isFinite`, `math.isInf`, `math.bitAnd`, `math.bitOr`, `math.bitNot`, `math.bitXor`, `math.bitShiftLeft`, `math.bitShiftRight`, `math.ceil`, `math.floor`, `math.round`, `math.trunc`
+
+**Encoders extension** — `base64.encode`, `base64.decode`
+
+**Optionals extension** — `optional.of`, `optional.none`, `optional.ofNonZeroValue`, `hasValue`, `value`, `or`, `orValue`
+
+### Working with values
+
+Variable bindings accept any type that implements `Into<Value>`. Results can be extracted back into Rust types with `TryFrom`:
+
+```rust
+let mut activation = MapActivation::new();
+activation.insert("items", Value::list([1, 2, 3]));
+activation.insert("config", Value::map([("host", "localhost"), ("port", "8080")]));
+
+let result = program.eval(&activation);
+
+// Extract Rust types from results
+let n: i64 = (&result).try_into()?;
+let s: &str = (&result).try_into()?;
+let b: bool = (&result).try_into()?;
+let list: &[Value] = (&result).try_into()?;
+let map: &ValueMap = (&result).try_into()?;
+```
+
+### Proto message types
+
+CEL expressions can operate on protobuf messages. Register a `ProtoTypeRegistry` to enable proto type checking and field access:
+
+```rust
+let env = Env::with_standard_library()
+    .with_proto_types(registry)
+    .with_variable("request", CelType::message("my.package.Request"));
+```
+
+### Containers and abbreviations
+
+Containers set a namespace for resolving qualified names. Abbreviations create shorthand aliases for fully-qualified type names:
+
+```rust
+let env = Env::with_standard_library()
+    .with_container("my.package")
+    .with_abbreviations(
+        Abbreviations::from_qualified_names(&["my.package.Request"])?
+    );
+```
+
+### Error handling
+
+CEL treats errors as values — evaluation never panics. Errors propagate through expressions following CEL's error semantics, including short-circuit behavior with logical operators:
+
+```rust
+let result = program.eval(&activation);
+match &result {
+    Value::Error(err) => println!("evaluation error: {}", err),
+    value => println!("result: {}", value),
+}
+```
+
+> See the [examples](crates/cel-core/examples/) directory for more usage patterns including lists, maps, timestamps/durations, enums, namespaces, and error handling.
+
+## Proto Wire Format
+
+The `cel-core-proto` crate provides bidirectional conversion between cel-core's AST and the cel-spec protobuf format. This enables wire compatibility with cel-go and cel-cpp — you can compile an expression in Rust and send the serialized AST to a Go or C++ service for evaluation, or vice versa.
 
 ```rust
 use cel_core::{Env, CelType};
@@ -81,117 +149,61 @@ let env = Env::with_standard_library()
 
 let ast = env.compile("x + 1")?;
 
-// Convert to proto format
+// Convert to cel-spec proto format
 let parsed_expr = ast.to_parsed_expr();
 let checked_expr = ast.to_checked_expr()?;
 
-// Serialize to bytes with prost (wire-compatible with cel-go/cel-cpp)
-let parsed_bytes = parsed_expr.encode_to_vec();
-let checked_bytes = checked_expr.encode_to_vec();
+// Serialize to bytes (wire-compatible with cel-go/cel-cpp)
+let bytes = checked_expr.encode_to_vec();
 
-// Deserialize from bytes
-use cel_core_proto::{ParsedExpr, CheckedExpr};
-let decoded_parsed = ParsedExpr::decode(parsed_bytes.as_slice())?;
-let decoded_checked = CheckedExpr::decode(checked_bytes.as_slice())?;
+// Deserialize from bytes received from another implementation
+use cel_core_proto::CheckedExpr;
+let decoded = CheckedExpr::decode(bytes.as_slice())?;
 ```
+
+## Language Server
+
+The `cel-core-lsp` crate provides a Language Server Protocol implementation for CEL, built with `tower-lsp`. It works with any LSP-compatible editor.
+
+- **Diagnostics** — Real-time parse and type checking errors as you type
+- **Hover** — Type information and function documentation
+- **Semantic tokens** — Accurate syntax highlighting
+- **Protovalidate** — CEL validation support in `.proto` files
+
+### Install
+
+```bash
+cargo install --path crates/cel-core-lsp
+```
+
+## Conformance
+
+CEL-Core passes **100% of the official cel-spec conformance tests** across all 29 test files and all three test phases (parse, check, eval), including tests that cel-go itself currently skips. The project maintains a zero-regression policy against the conformance baseline.
+
+For details on what is tested and how to run the conformance suite, see the [conformance README](crates/cel-core-conformance/README.md).
 
 ## Crate Structure
 
-This project is organized as a Cargo workspace:
-
 | Crate | Description |
 |-------|-------------|
-| **cel-core** | Main CEL library with parser, type checker, and standard library. This is the primary public API. |
-| **cel-core-proto** | Protobuf types and bidirectional conversion between AST and cel-spec proto format. Enables wire compatibility with cel-go/cel-cpp. |
-| **cel-core-lsp** | Language Server Protocol implementation using `tower-lsp`. Provides diagnostics, hover, and semantic tokens for IDE integration. |
-| **cel-core-conformance** | Conformance testing against the official [cel-spec](https://github.com/google/cel-spec) test suite. Not published to crates.io. |
-
-```
-crates/
-  cel-core/              # Main library (parser, checker, types, extensions)
-  cel-core-proto/        # Proto wire format conversion
-  cel-core-lsp/          # Language Server Protocol implementation
-  cel-core-conformance/  # Conformance testing against cel-spec
-```
-
-## Roadmap
-
-CEL-Core is working toward full CEL implementation parity with cel-go. See [ROADMAP.md](ROADMAP.md) for the detailed implementation plan.
-
-### Current Status
-
-| Component | Status | Notes |
-|-----------|--------|-------|
-| **Lexer** | Complete | Logos-based, all CEL tokens |
-| **Parser** | Complete | Recursive descent, error recovery, macros |
-| **Type Checker** | Complete | Type inference, overload resolution |
-| **Evaluator** | Partial | Core evaluation working, see conformance status |
-| **Standard Library** | Complete | All standard functions and operators |
-| **Extensions** | Partial | Strings, math, encoders, optionals (eval in progress) |
-| **Proto Conversion** | Complete | `ParsedExpr` and `CheckedExpr` |
-| **LSP** | Partial | Diagnostics, hover, semantic tokens |
-
-### Conformance Testing
-
-CEL-Core is validated against the official [cel-spec](https://github.com/google/cel-spec) conformance test suite:
-
-| Test Category | Status |
-|--------------|--------|
-| integer_math | ✅ 100% |
-| fp_math | ✅ 100% |
-| basic | 98% |
-| string | 98% |
-| logic | 93% |
-| macros | 95% |
-| comparisons | 76% |
-| lists | 79% |
-| Proto messages | In progress |
-| Timestamps/Durations | In progress |
-
-### Milestones
-
-1. ~~**Parser** - Full CEL syntax with error recovery~~
-2. ~~**Type Checker** - Type inference and `CheckedExpr` production~~
-3. ~~**Extensions** - String, math, encoder, and optional extensions~~
-4. ~~**Evaluation** - Runtime execution with variable bindings~~
-5. **Full Conformance** - Pass all cel-spec conformance tests
+| [**cel-core**](crates/cel-core) | CEL environment, parser, type checker, evaluator, and standard library |
+| [**cel-core-proto**](crates/cel-core-proto) | Protobuf AST conversion for wire compatibility with cel-go/cel-cpp |
+| [**cel-core-lsp**](crates/cel-core-lsp) | Language Server Protocol implementation for IDE support |
+| [**cel-core-conformance**](crates/cel-core-conformance) | Conformance testing against the official cel-spec test suite |
 
 ## Development
-
-### First-time Setup
 
 This project uses [mise](https://mise.jdx.dev/) for tool management and task running.
 
 ```bash
-# Trust and install mise tools
-mise trust
-mise install
+# First-time setup
+mise trust && mise install
+mise run conformance:setup  # initialize cel-spec submodule
 
-# Initialize git submodules (required for conformance tests)
-mise run conformance:setup
-```
-
-### Testing
-
-```bash
-# Run all tests
-mise run test
-
-# Run unit tests only
-mise run test:unit
-
-# Run integration tests
-mise run test:integration
-
-# Run conformance tests (requires submodule setup)
-mise run conformance:test
-```
-
-### Protobuf Generation
-
-```bash
-# Regenerate Rust code from cel-spec protobuf definitions
-mise run proto:generate
+# Testing
+mise run test               # all tests (excludes conformance)
+mise run conformance:test   # cel-spec conformance tests
+mise run conformance:report # conformance report with baseline comparison
 ```
 
 ## License
@@ -205,6 +217,6 @@ at your option.
 
 ## References
 
-- [CEL Spec](https://github.com/google/cel-spec) - Official specification and test suite
-- [cel-go](https://github.com/google/cel-go) - Reference implementation
-- [CEL Language Definition](https://github.com/google/cel-spec/blob/master/doc/langdef.md)
+- [CEL Spec](https://github.com/google/cel-spec) — Official specification and test suite
+- [cel-go](https://github.com/google/cel-go) — Reference implementation in Go
+- [CEL Language Definition](https://github.com/google/cel-spec/blob/master/doc/langdef.md) — Language syntax and semantics
