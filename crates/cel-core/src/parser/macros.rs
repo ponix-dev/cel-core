@@ -486,6 +486,38 @@ pub static STANDARD_MACROS: &[Macro] = &[
         expand_proto_get_ext,
         "Gets the value of a proto extension field",
     ),
+    // cel.block - global, 2 args
+    Macro::with_description(
+        "cel.block",
+        MacroStyle::Global,
+        ArgCount::Exact(2),
+        expand_cel_block,
+        "Binds a list of slot expressions for common subexpression elimination",
+    ),
+    // cel.index - global, 1 arg
+    Macro::with_description(
+        "cel.index",
+        MacroStyle::Global,
+        ArgCount::Exact(1),
+        expand_cel_index,
+        "References a slot variable by index in a cel.block",
+    ),
+    // cel.iterVar - global, 2 args
+    Macro::with_description(
+        "cel.iterVar",
+        MacroStyle::Global,
+        ArgCount::Exact(2),
+        expand_cel_iter_var,
+        "References an iterator variable for nested comprehensions",
+    ),
+    // cel.accuVar - global, 2 args
+    Macro::with_description(
+        "cel.accuVar",
+        MacroStyle::Global,
+        ArgCount::Exact(2),
+        expand_cel_accu_var,
+        "References an accumulator variable for nested comprehensions",
+    ),
 ];
 
 // === Helper Functions ===
@@ -1592,6 +1624,200 @@ fn expand_proto_has_ext(
             expr: Box::new(msg),
             field: ext_name,
         },
+        span,
+    ))
+}
+
+// === cel.block Extension Macros ===
+//
+// cel.block provides slot-based variable binding for common subexpression elimination.
+// We expand `cel.block([e0, e1, e2], result)` into nested `Expr::Bind` nodes:
+//
+//   Bind { var: "@index0", init: e0,
+//     body: Bind { var: "@index1", init: e1,
+//       body: Bind { var: "@index2", init: e2,
+//         body: result } } }
+//
+// This reuses existing Bind infrastructure (parser, checker, evaluator) with no new AST nodes.
+//
+// Future optimization path (equivalent to cel-go's dynamicBlock):
+// - Add Expr::Block with flat Vec<(String, SpannedExpr)> + result expression
+// - Add BlockActivation with Vec<Option<Value>> for O(1) lookup + lazy evaluation
+// - Current approach eagerly evaluates all slots and has O(N) lookup for inner slots
+
+/// Expand `cel.block([e0, e1, ...], result)` into nested `Expr::Bind` nodes.
+fn expand_cel_block(
+    ctx: &mut MacroContext,
+    span: Span,
+    _receiver: Option<SpannedExpr>,
+    args: Vec<SpannedExpr>,
+) -> MacroExpansion {
+    if args.len() != 2 {
+        return MacroExpansion::Error(format!(
+            "cel.block() requires 2 arguments, got {}",
+            args.len()
+        ));
+    }
+
+    let slots = match &args[0].node {
+        Expr::List(elements) => {
+            if elements.is_empty() {
+                return MacroExpansion::Error(
+                    "cel.block() first argument must be a non-empty list".to_string(),
+                );
+            }
+            elements.clone()
+        }
+        _ => {
+            return MacroExpansion::Error(
+                "cel.block() first argument must be a list literal".to_string(),
+            )
+        }
+    };
+
+    let result = args[1].clone();
+    let call_id = ctx.next_id();
+    ctx.store_macro_call(call_id, &span, &args[0], "cel.block", &args);
+
+    // Build nested Bind from innermost to outermost
+    let mut body = result;
+    for (i, slot) in slots.into_iter().enumerate().rev() {
+        let var_name = format!("@index{}", i);
+        body = synthetic(
+            ctx,
+            Expr::Bind {
+                var_name,
+                init: Box::new(slot.expr),
+                body: Box::new(body),
+            },
+            span.clone(),
+        );
+    }
+
+    // Replace the outermost node's ID with the call_id for macro tracking
+    body.id = call_id;
+    MacroExpansion::Expanded(body)
+}
+
+/// Extract an integer literal value from an expression.
+fn extract_int_literal(expr: &SpannedExpr) -> Option<i64> {
+    match &expr.node {
+        Expr::Int(n) => Some(*n),
+        _ => None,
+    }
+}
+
+/// Expand `cel.index(N)` to `Expr::Ident("@indexN")`.
+fn expand_cel_index(
+    ctx: &mut MacroContext,
+    span: Span,
+    _receiver: Option<SpannedExpr>,
+    args: Vec<SpannedExpr>,
+) -> MacroExpansion {
+    if args.len() != 1 {
+        return MacroExpansion::Error(format!(
+            "cel.index() requires 1 argument, got {}",
+            args.len()
+        ));
+    }
+
+    let index = match extract_int_literal(&args[0]) {
+        Some(n) => n,
+        None => {
+            return MacroExpansion::Error(
+                "cel.index() argument must be an integer literal".to_string(),
+            )
+        }
+    };
+
+    let call_id = ctx.next_id();
+    ctx.store_macro_call(call_id, &span, &args[0], "cel.index", &args);
+
+    MacroExpansion::Expanded(Spanned::new(
+        call_id,
+        Expr::Ident(format!("@index{}", index)),
+        span,
+    ))
+}
+
+/// Expand `cel.iterVar(N, M)` to `Expr::Ident("@it:N:M")`.
+fn expand_cel_iter_var(
+    ctx: &mut MacroContext,
+    span: Span,
+    _receiver: Option<SpannedExpr>,
+    args: Vec<SpannedExpr>,
+) -> MacroExpansion {
+    if args.len() != 2 {
+        return MacroExpansion::Error(format!(
+            "cel.iterVar() requires 2 arguments, got {}",
+            args.len()
+        ));
+    }
+
+    let n = match extract_int_literal(&args[0]) {
+        Some(n) => n,
+        None => {
+            return MacroExpansion::Error(
+                "cel.iterVar() first argument must be an integer literal".to_string(),
+            )
+        }
+    };
+    let m = match extract_int_literal(&args[1]) {
+        Some(m) => m,
+        None => {
+            return MacroExpansion::Error(
+                "cel.iterVar() second argument must be an integer literal".to_string(),
+            )
+        }
+    };
+
+    let call_id = ctx.next_id();
+    ctx.store_macro_call(call_id, &span, &args[0], "cel.iterVar", &args);
+
+    MacroExpansion::Expanded(Spanned::new(
+        call_id,
+        Expr::Ident(format!("@it:{}:{}", n, m)),
+        span,
+    ))
+}
+
+/// Expand `cel.accuVar(N, M)` to `Expr::Ident("@ac:N:M")`.
+fn expand_cel_accu_var(
+    ctx: &mut MacroContext,
+    span: Span,
+    _receiver: Option<SpannedExpr>,
+    args: Vec<SpannedExpr>,
+) -> MacroExpansion {
+    if args.len() != 2 {
+        return MacroExpansion::Error(format!(
+            "cel.accuVar() requires 2 arguments, got {}",
+            args.len()
+        ));
+    }
+
+    let n = match extract_int_literal(&args[0]) {
+        Some(n) => n,
+        None => {
+            return MacroExpansion::Error(
+                "cel.accuVar() first argument must be an integer literal".to_string(),
+            )
+        }
+    };
+    let m = match extract_int_literal(&args[1]) {
+        Some(m) => m,
+        None => {
+            return MacroExpansion::Error(
+                "cel.accuVar() second argument must be an integer literal".to_string(),
+            )
+        }
+    };
+
+    let call_id = ctx.next_id();
+    ctx.store_macro_call(call_id, &span, &args[0], "cel.accuVar", &args);
+
+    MacroExpansion::Expanded(Spanned::new(
+        call_id,
+        Expr::Ident(format!("@ac:{}:{}", n, m)),
         span,
     ))
 }
