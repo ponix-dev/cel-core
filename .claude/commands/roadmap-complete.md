@@ -26,7 +26,17 @@ Also check git log and branch name for issue references. Store the issue number 
 
 ## Run Conformance Tests
 
-Run `/run-conformance` to get a full conformance test report with regression comparison against main. Include the summary table and any regressions in the PR description under the Testing section.
+Run the conformance report using mise (do NOT invoke `/run-conformance` as a separate skill):
+
+```bash
+mise run conformance:report 2>&1
+```
+
+If there are **compilation errors**, stop and report them to the user. Do not proceed.
+
+Include the script's stdout output verbatim in your response, followed by a brief analysis of regressions and improvements.
+
+**IMPORTANT: Do not stop here.** If there are **no regressions**, continue immediately with the remaining steps below (updating ROADMAP.md, creating handoff notes, committing, and creating the PR) without waiting for user input. Only stop and wait for user input if there are regressions in the conformance results.
 
 ## Update ROADMAP.md
 
