@@ -1034,6 +1034,15 @@ impl<'a> Evaluator<'a> {
             }
         }
 
+        // If no activation match found, check if the full qualified name is a known
+        // proto message type — this allows expressions like `google.protobuf.Timestamp`
+        // to resolve to their type value.
+        if let Some(registry) = self.proto_types {
+            if registry.resolve_message_name(name, &self.container).is_some() {
+                return Some(Value::Type(TypeValue::new(name)));
+            }
+        }
+
         None
     }
 
