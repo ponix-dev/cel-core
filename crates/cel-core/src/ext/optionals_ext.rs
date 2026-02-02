@@ -30,13 +30,9 @@ fn is_zero_value(value: &Value) -> bool {
         Value::Bytes(b) => b.is_empty(),
         Value::List(l) => l.is_empty(),
         Value::Map(m) => m.is_empty(),
-        Value::Proto(proto) => {
+        Value::Message(msg) => {
             // A proto message is zero-value if no fields are explicitly set
-            let result = proto
-                .descriptor()
-                .fields()
-                .all(|field_desc| !proto.message().has_field(&field_desc));
-            result
+            msg.is_default()
         }
         _ => false,
     }

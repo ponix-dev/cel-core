@@ -2,16 +2,18 @@
 //!
 //! Run with: cargo run -p cel-core --example containers
 
+use std::sync::Arc;
+
 use cel_core::eval::MapActivation;
-use cel_core::types::ProtoTypeRegistry;
 use cel_core::Env;
+use cel_core_proto::ProstTypeRegistry;
 
 fn main() {
-    let registry = ProtoTypeRegistry::new();
+    let registry = ProstTypeRegistry::new();
 
     // With container "google.protobuf", we can use short type names
     let env = Env::with_standard_library()
-        .with_proto_types(registry)
+        .with_type_registry(Arc::new(registry))
         .with_container("google.protobuf");
 
     // Construct a Timestamp using short name (instead of google.protobuf.Timestamp)

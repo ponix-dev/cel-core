@@ -63,8 +63,8 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
 
-use prost_reflect::{DynamicMessage, ReflectMessage};
 
+use super::message::MessageValue;
 use super::EvalError;
 use crate::types::{CelType, CelValue};
 
@@ -119,7 +119,7 @@ pub enum Value {
     /// Optional value (present or absent).
     Optional(OptionalValue),
     /// Protobuf message value.
-    Proto(ProtoValue),
+    Message(Box<dyn MessageValue>),
     /// Enum value with type information (strong enum typing).
     Enum(EnumValue),
     /// Error value (evaluation errors propagate as values).
@@ -372,138 +372,6 @@ pub enum OptionalValue {
     None,
     /// A present optional value.
     Some(Box<Value>),
-}
-
-/// A protobuf message value.
-///
-/// Wraps a `prost_reflect::DynamicMessage` for runtime proto handling.
-/// Uses Arc for cheap cloning.
-#[derive(Clone)]
-pub struct ProtoValue {
-    /// The dynamic message instance.
-    message: Arc<DynamicMessage>,
-    /// Cached type name for efficient access.
-    type_name: Arc<str>,
-}
-
-impl ProtoValue {
-    /// Create a new proto value from a dynamic message.
-    pub fn new(message: DynamicMessage) -> Self {
-        let type_name = Arc::from(message.descriptor().full_name());
-        Self {
-            message: Arc::new(message),
-            type_name,
-        }
-    }
-
-    /// Get a reference to the underlying dynamic message.
-    pub fn message(&self) -> &DynamicMessage {
-        &self.message
-    }
-
-    /// Get the fully qualified type name of this message.
-    pub fn type_name(&self) -> &str {
-        &self.type_name
-    }
-
-    /// Get the message descriptor.
-    pub fn descriptor(&self) -> prost_reflect::MessageDescriptor {
-        self.message.descriptor()
-    }
-}
-
-impl std::fmt::Debug for ProtoValue {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ProtoValue")
-            .field("type_name", &self.type_name())
-            .finish()
-    }
-}
-
-impl PartialEq for ProtoValue {
-    fn eq(&self, other: &Self) -> bool {
-        // Messages are equal if same type and all fields equal
-        if self.type_name() != other.type_name() {
-            return false;
-        }
-        // For Any messages, compare by unpacking to the inner message
-        if self.type_name() == "google.protobuf.Any" {
-            return any_semantic_eq(&self.message, &other.message);
-        }
-        // Use prost_reflect's equality
-        self.message.as_ref() == other.message.as_ref()
-    }
-}
-
-/// Compare two `google.protobuf.Any` messages by semantic equality.
-///
-/// Unpacks both Any messages to their inner message type and compares
-/// the decoded messages. Falls back to bytewise comparison if decoding fails.
-fn any_semantic_eq(
-    a: &prost_reflect::DynamicMessage,
-    b: &prost_reflect::DynamicMessage,
-) -> bool {
-    let descriptor = a.descriptor();
-
-    // Extract type_url from both
-    let type_url_field = match descriptor.get_field_by_name("type_url") {
-        Some(f) => f,
-        None => return a == b,
-    };
-    let value_field = match descriptor.get_field_by_name("value") {
-        Some(f) => f,
-        None => return a == b,
-    };
-
-    let type_url_a = match a.get_field(&type_url_field).into_owned() {
-        prost_reflect::Value::String(s) => s,
-        _ => return a == b,
-    };
-    let type_url_b = match b.get_field(&type_url_field).into_owned() {
-        prost_reflect::Value::String(s) => s,
-        _ => return a == b,
-    };
-
-    // Different type_urls means not equal
-    if type_url_a != type_url_b {
-        return false;
-    }
-
-    // Strip the prefix to get the message type name
-    let type_name = type_url_a
-        .strip_prefix("type.googleapis.com/")
-        .unwrap_or(&type_url_a);
-
-    // Look up the inner message descriptor
-    let inner_descriptor = match descriptor.parent_pool().get_message_by_name(type_name) {
-        Some(d) => d,
-        None => {
-            // Can't resolve type — fall back to bytewise comparison of value bytes
-            return a.get_field(&value_field) == b.get_field(&value_field);
-        }
-    };
-
-    // Extract value bytes from both
-    let bytes_a = match a.get_field(&value_field).into_owned() {
-        prost_reflect::Value::Bytes(b) => b,
-        _ => return a == b,
-    };
-    let bytes_b = match b.get_field(&value_field).into_owned() {
-        prost_reflect::Value::Bytes(b) => b,
-        _ => return a == b,
-    };
-
-    // Decode both into DynamicMessage and compare semantically
-    let msg_a = match prost_reflect::DynamicMessage::decode(inner_descriptor.clone(), bytes_a.as_ref()) {
-        Ok(m) => m,
-        Err(_) => return bytes_a == bytes_b,
-    };
-    let msg_b = match prost_reflect::DynamicMessage::decode(inner_descriptor, bytes_b.as_ref()) {
-        Ok(m) => m,
-        Err(_) => return bytes_a == bytes_b,
-    };
-
-    msg_a == msg_b
 }
 
 impl OptionalValue {
@@ -1251,7 +1119,7 @@ impl Value {
                 OptionalValue::None => CelType::optional(CelType::Dyn),
                 OptionalValue::Some(v) => CelType::optional(v.cel_type()),
             },
-            Value::Proto(proto) => CelType::message(proto.type_name()),
+            Value::Message(msg) => CelType::message(msg.type_name()),
             Value::Enum(ev) => CelType::enum_type(&ev.type_name),
             Value::Error(_) => CelType::Error,
         }
@@ -1273,7 +1141,7 @@ impl Value {
             Value::Duration(_) => TypeValue::duration_type(),
             Value::Type(_) => TypeValue::type_type(),
             Value::Optional(_) => TypeValue::new("optional"),
-            Value::Proto(proto) => TypeValue::new(proto.type_name()),
+            Value::Message(msg) => TypeValue::new(msg.type_name()),
             Value::Enum(ev) => TypeValue::new(ev.type_name.as_ref()),
             Value::Error(_) => TypeValue::new("error"),
         }
@@ -1295,7 +1163,7 @@ impl Value {
     pub fn is_truthy(&self) -> Option<bool> {
         match self {
             Value::Bool(b) => Some(*b),
-            Value::Proto(_) => Some(true), // Proto messages are always truthy
+            Value::Message(_) => Some(true), // Proto messages are always truthy
             _ => None,
         }
     }
@@ -1337,7 +1205,7 @@ impl PartialEq for Value {
                 (OptionalValue::Some(va), OptionalValue::Some(vb)) => va == vb,
                 _ => false,
             },
-            (Value::Proto(a), Value::Proto(b)) => a == b,
+            (Value::Message(a), Value::Message(b)) => a.eq_message(b.as_ref()),
             (Value::Enum(a), Value::Enum(b)) => a == b,
             // Cross-type numeric equality (CEL spec: 42 == 42u == 42.0)
             (Value::Int(a), Value::UInt(b)) => {
@@ -1522,7 +1390,7 @@ impl fmt::Display for Value {
                 OptionalValue::None => write!(f, "optional.none()"),
                 OptionalValue::Some(v) => write!(f, "optional.of({})", v),
             },
-            Value::Proto(p) => write!(f, "{}{{...}}", p.type_name()),
+            Value::Message(m) => write!(f, "{}{{...}}", m.type_name()),
             Value::Enum(e) => write!(f, "{}({})", e.type_name, e.value),
             Value::Error(e) => write!(f, "error({})", e),
         }

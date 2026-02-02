@@ -33,13 +33,13 @@ mod conversions;
 mod error;
 mod evaluator;
 mod functions;
+pub mod message;
 mod operators;
 mod program;
-mod proto;
 mod resolve;
 pub mod time;
+pub mod type_registry;
 mod value;
-pub mod wkt;
 
 pub use activation::{
     Activation, EmptyActivation, HierarchicalActivation, MapActivation, SharedActivation,
@@ -47,5 +47,7 @@ pub use activation::{
 pub use error::{EvalError, EvalErrorKind};
 pub use evaluator::Evaluator;
 pub use functions::{Function, FunctionImpl, FunctionRegistry, Overload};
+pub use message::MessageValue;
 pub use program::Program;
-pub use value::{Duration, EnumValue, MapKey, OptionalValue, ProtoValue, Timestamp, TypeValue, Value, ValueError, ValueMap};
+pub use type_registry::{StructFieldValue, TypeRegistry};
+pub use value::{Duration, EnumValue, MapKey, OptionalValue, Timestamp, TypeValue, Value, ValueError, ValueMap};

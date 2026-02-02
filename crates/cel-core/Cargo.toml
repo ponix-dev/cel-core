@@ -11,8 +11,6 @@ description = "High-level API for the Common Expression Language (CEL)"
 chrono = "0.4"
 chrono-tz = "0.10"
 logos.workspace = true
-prost-reflect.workspace = true
-prost.workspace = true
 regex.workspace = true
 
 [dev-dependencies]
@@ -25,4 +23,16 @@ path = "examples/enums/legacy.rs"
 [[example]]
 name = "enums_strong"
 path = "examples/enums/strong.rs"
+
+[[example]]
+name = "containers"
+path = "examples/namespaces/containers.rs"
+
+[[example]]
+name = "abbreviations"
+path = "examples/namespaces/abbreviations.rs"
+
+[[example]]
+name = "combined"
+path = "examples/namespaces/combined.rs"
 

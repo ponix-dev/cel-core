@@ -2,20 +2,22 @@
 //!
 //! Run with: cargo run -p cel-core --example enums_legacy
 
+use std::sync::Arc;
+
 use cel_core::eval::MapActivation;
-use cel_core::types::ProtoTypeRegistry;
 use cel_core::Env;
+use cel_core_proto::ProstTypeRegistry;
 
 fn main() {
     // Build a proto registry with the conformance test descriptors (which contain enums)
-    let mut registry = ProtoTypeRegistry::new();
+    let mut registry = ProstTypeRegistry::new();
     registry
         .add_file_descriptor_set(cel_core_proto::gen::cel::expr::conformance::proto3::FILE_DESCRIPTOR_SET)
         .expect("Failed to add proto3 descriptors");
 
     // Legacy mode: enums behave as plain integers
     let env = Env::with_standard_library()
-        .with_proto_types(registry)
+        .with_type_registry(Arc::new(registry))
         .with_container("cel.expr.conformance.proto3")
         .with_legacy_enums();
 

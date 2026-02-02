@@ -192,7 +192,7 @@ impl<'a> Evaluator<'a> {
         // If no activation match found, check if the full qualified name is a known
         // proto message type — this allows expressions like `google.protobuf.Timestamp`
         // to resolve to their type value.
-        if let Some(registry) = self.proto_types {
+        if let Some(registry) = self.type_registry {
             if registry.resolve_message_name(name, &self.container).is_some() {
                 return Some(Value::Type(TypeValue::new(name)));
             }
@@ -247,7 +247,7 @@ impl<'a> Evaluator<'a> {
         let name_to_resolve = expanded_name.as_ref().unwrap_or(&name);
 
         // If we have a proto registry, try to resolve using container
-        if let Some(registry) = self.proto_types {
+        if let Some(registry) = self.type_registry {
             // Use container-based resolution (C++ namespace rules)
             if let Some(fq_name) = registry.resolve_message_name(name_to_resolve, &self.container) {
                 return Some(fq_name);

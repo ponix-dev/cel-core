@@ -10,9 +10,36 @@
 
 use std::sync::Arc;
 
-use crate::eval::wkt::base64_encode;
 use crate::eval::{EvalError, Value};
 use crate::types::{CelType, FunctionDecl, OverloadDecl};
+
+/// Encode bytes as standard base64 (RFC 4648).
+fn base64_encode(data: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] =
+        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+    let mut result = String::with_capacity((data.len() + 2) / 3 * 4);
+    for chunk in data.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = if chunk.len() > 1 { chunk[1] as u32 } else { 0 };
+        let b2 = if chunk.len() > 2 { chunk[2] as u32 } else { 0 };
+        let triple = (b0 << 16) | (b1 << 8) | b2;
+
+        result.push(ALPHABET[((triple >> 18) & 0x3F) as usize] as char);
+        result.push(ALPHABET[((triple >> 12) & 0x3F) as usize] as char);
+        if chunk.len() > 1 {
+            result.push(ALPHABET[((triple >> 6) & 0x3F) as usize] as char);
+        } else {
+            result.push('=');
+        }
+        if chunk.len() > 2 {
+            result.push(ALPHABET[(triple & 0x3F) as usize] as char);
+        } else {
+            result.push('=');
+        }
+    }
+    result
+}
 
 /// Decode a standard base64 string (RFC 4648) to bytes.
 /// Supports both padded and unpadded input.

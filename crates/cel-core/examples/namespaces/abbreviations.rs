@@ -2,12 +2,14 @@
 //!
 //! Run with: cargo run -p cel-core --example abbreviations
 
+use std::sync::Arc;
+
 use cel_core::eval::{Duration, MapActivation, Timestamp, Value};
-use cel_core::types::ProtoTypeRegistry;
 use cel_core::{Abbreviations, CelType, Env};
+use cel_core_proto::ProstTypeRegistry;
 
 fn main() {
-    let registry = ProtoTypeRegistry::new();
+    let registry = ProstTypeRegistry::new();
 
     let abbrevs = Abbreviations::new()
         .add("google.protobuf.Timestamp")
@@ -16,7 +18,7 @@ fn main() {
         .unwrap();
 
     let env = Env::with_standard_library()
-        .with_proto_types(registry)
+        .with_type_registry(Arc::new(registry))
         .with_abbreviations(abbrevs)
         .with_variable("event_time", CelType::Timestamp)
         .with_variable("timeout", CelType::Duration);
