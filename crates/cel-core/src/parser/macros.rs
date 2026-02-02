@@ -470,6 +470,22 @@ pub static STANDARD_MACROS: &[Macro] = &[
         expand_opt_flat_map,
         "Chains optional operations",
     ),
+    // proto.hasExt - global, 2 args
+    Macro::with_description(
+        "proto.hasExt",
+        MacroStyle::Global,
+        ArgCount::Exact(2),
+        expand_proto_has_ext,
+        "Tests whether a proto extension field is set",
+    ),
+    // proto.getExt - global, 2 args
+    Macro::with_description(
+        "proto.getExt",
+        MacroStyle::Global,
+        ArgCount::Exact(2),
+        expand_proto_get_ext,
+        "Gets the value of a proto extension field",
+    ),
 ];
 
 // === Helper Functions ===
@@ -1483,6 +1499,103 @@ fn expand_opt_flat_map(
     ))
 }
 
+// === proto.hasExt() and proto.getExt() Macros ===
+
+/// Recursively walk a select expression chain to produce a fully-qualified name.
+///
+/// - `Expr::Ident("a")` → `"a"`
+/// - `Expr::Member { expr: Ident("a"), field: "b" }` → `"a.b"`
+/// - Nested members: `a.b.c.d` → `"a.b.c.d"`
+///
+/// Returns `None` for anything other than identifiers and member accesses.
+fn validate_qualified_identifier(expr: &SpannedExpr) -> Option<String> {
+    match &expr.node {
+        Expr::Ident(name) => Some(name.clone()),
+        Expr::Member { expr, field, .. } => {
+            let prefix = validate_qualified_identifier(expr)?;
+            Some(format!("{}.{}", prefix, field))
+        }
+        _ => None,
+    }
+}
+
+/// Expand `proto.getExt(msg, pkg.ExtField)` to `msg.pkg.ExtField` (a select expression).
+fn expand_proto_get_ext(
+    ctx: &mut MacroContext,
+    span: Span,
+    _receiver: Option<SpannedExpr>,
+    args: Vec<SpannedExpr>,
+) -> MacroExpansion {
+    if args.len() != 2 {
+        return MacroExpansion::Error(format!(
+            "proto.getExt() requires 2 arguments, got {}",
+            args.len()
+        ));
+    }
+
+    let ext_name = match validate_qualified_identifier(&args[1]) {
+        Some(name) => name,
+        None => {
+            return MacroExpansion::Error(
+                "proto.getExt() second argument must be a qualified identifier (e.g., pkg.ExtField)"
+                    .to_string(),
+            )
+        }
+    };
+
+    let msg = args[0].clone();
+    let call_id = ctx.next_id();
+    ctx.store_macro_call(call_id, &span, &msg, "proto.getExt", &args);
+
+    MacroExpansion::Expanded(Spanned::new(
+        call_id,
+        Expr::Member {
+            expr: Box::new(msg),
+            field: ext_name,
+            optional: false,
+        },
+        span,
+    ))
+}
+
+/// Expand `proto.hasExt(msg, pkg.ExtField)` to `has(msg.pkg.ExtField)` (a presence test).
+fn expand_proto_has_ext(
+    ctx: &mut MacroContext,
+    span: Span,
+    _receiver: Option<SpannedExpr>,
+    args: Vec<SpannedExpr>,
+) -> MacroExpansion {
+    if args.len() != 2 {
+        return MacroExpansion::Error(format!(
+            "proto.hasExt() requires 2 arguments, got {}",
+            args.len()
+        ));
+    }
+
+    let ext_name = match validate_qualified_identifier(&args[1]) {
+        Some(name) => name,
+        None => {
+            return MacroExpansion::Error(
+                "proto.hasExt() second argument must be a qualified identifier (e.g., pkg.ExtField)"
+                    .to_string(),
+            )
+        }
+    };
+
+    let msg = args[0].clone();
+    let call_id = ctx.next_id();
+    ctx.store_macro_call(call_id, &span, &msg, "proto.hasExt", &args);
+
+    MacroExpansion::Expanded(Spanned::new(
+        call_id,
+        Expr::MemberTestOnly {
+            expr: Box::new(msg),
+            field: ext_name,
+        },
+        span,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1611,5 +1724,149 @@ mod tests {
         let registry = MacroRegistry::standard();
         assert!(registry.contains("optMap"));
         assert!(registry.contains("optFlatMap"));
+    }
+
+    #[test]
+    fn test_proto_has_ext_macro_registered() {
+        let registry = MacroRegistry::standard();
+        assert!(registry.lookup("proto.hasExt", 2, false).is_some());
+        assert!(registry.lookup("proto.hasExt", 2, true).is_none());
+        assert!(registry.lookup("proto.hasExt", 1, false).is_none());
+    }
+
+    #[test]
+    fn test_proto_get_ext_macro_registered() {
+        let registry = MacroRegistry::standard();
+        assert!(registry.lookup("proto.getExt", 2, false).is_some());
+        assert!(registry.lookup("proto.getExt", 2, true).is_none());
+        assert!(registry.lookup("proto.getExt", 1, false).is_none());
+    }
+
+    #[test]
+    fn test_validate_qualified_identifier() {
+        // Simple ident
+        let ident = Spanned::new(1, Expr::Ident("a".to_string()), 0..1);
+        assert_eq!(validate_qualified_identifier(&ident), Some("a".to_string()));
+
+        // Dotted ident: a.b
+        let dotted = Spanned::new(
+            2,
+            Expr::Member {
+                expr: Box::new(Spanned::new(1, Expr::Ident("a".to_string()), 0..1)),
+                field: "b".to_string(),
+                optional: false,
+            },
+            0..3,
+        );
+        assert_eq!(validate_qualified_identifier(&dotted), Some("a.b".to_string()));
+
+        // Deeply nested: a.b.c.d
+        let deep = Spanned::new(
+            4,
+            Expr::Member {
+                expr: Box::new(Spanned::new(
+                    3,
+                    Expr::Member {
+                        expr: Box::new(Spanned::new(
+                            2,
+                            Expr::Member {
+                                expr: Box::new(Spanned::new(1, Expr::Ident("a".to_string()), 0..1)),
+                                field: "b".to_string(),
+                                optional: false,
+                            },
+                            0..3,
+                        )),
+                        field: "c".to_string(),
+                        optional: false,
+                    },
+                    0..5,
+                )),
+                field: "d".to_string(),
+                optional: false,
+            },
+            0..7,
+        );
+        assert_eq!(validate_qualified_identifier(&deep), Some("a.b.c.d".to_string()));
+
+        // Non-identifier returns None
+        let non_ident = Spanned::new(1, Expr::Int(42), 0..2);
+        assert_eq!(validate_qualified_identifier(&non_ident), None);
+    }
+
+    #[test]
+    fn test_proto_get_ext_expansion() {
+        let mut id = 10i64;
+        let mut next_id = || -> i64 { id += 1; id };
+        let mut ctx = MacroContext::new(&mut next_id, None);
+
+        let msg = Spanned::new(1, Expr::Ident("msg".to_string()), 0..3);
+        let ext = Spanned::new(
+            2,
+            Expr::Member {
+                expr: Box::new(Spanned::new(1, Expr::Ident("pkg".to_string()), 4..7)),
+                field: "ExtField".to_string(),
+                optional: false,
+            },
+            4..16,
+        );
+
+        let result = expand_proto_get_ext(&mut ctx, 0..20, None, vec![msg, ext]);
+        match result {
+            MacroExpansion::Expanded(expr) => match &expr.node {
+                Expr::Member { expr, field, optional } => {
+                    assert_eq!(field, "pkg.ExtField");
+                    assert!(!optional);
+                    assert!(matches!(&expr.node, Expr::Ident(name) if name == "msg"));
+                }
+                other => panic!("expected Member, got {:?}", other),
+            },
+            MacroExpansion::Error(e) => panic!("unexpected error: {}", e),
+        }
+    }
+
+    #[test]
+    fn test_proto_has_ext_expansion() {
+        let mut id = 10i64;
+        let mut next_id = || -> i64 { id += 1; id };
+        let mut ctx = MacroContext::new(&mut next_id, None);
+
+        let msg = Spanned::new(1, Expr::Ident("msg".to_string()), 0..3);
+        let ext = Spanned::new(
+            2,
+            Expr::Member {
+                expr: Box::new(Spanned::new(1, Expr::Ident("pkg".to_string()), 4..7)),
+                field: "ExtField".to_string(),
+                optional: false,
+            },
+            4..16,
+        );
+
+        let result = expand_proto_has_ext(&mut ctx, 0..20, None, vec![msg, ext]);
+        match result {
+            MacroExpansion::Expanded(expr) => match &expr.node {
+                Expr::MemberTestOnly { expr, field } => {
+                    assert_eq!(field, "pkg.ExtField");
+                    assert!(matches!(&expr.node, Expr::Ident(name) if name == "msg"));
+                }
+                other => panic!("expected MemberTestOnly, got {:?}", other),
+            },
+            MacroExpansion::Error(e) => panic!("unexpected error: {}", e),
+        }
+    }
+
+    #[test]
+    fn test_proto_ext_error_non_qualified() {
+        let mut id = 10i64;
+        let mut next_id = || -> i64 { id += 1; id };
+        let mut ctx = MacroContext::new(&mut next_id, None);
+
+        let msg = Spanned::new(1, Expr::Ident("msg".to_string()), 0..3);
+        let bad_arg = Spanned::new(2, Expr::Int(42), 4..6);
+
+        let result = expand_proto_get_ext(&mut ctx, 0..10, None, vec![msg.clone(), bad_arg.clone()]);
+        assert!(matches!(result, MacroExpansion::Error(_)));
+
+        let result = expand_proto_has_ext(&mut ctx, 0..10, None, vec![msg, bad_arg]);
+        assert!(matches!(result, MacroExpansion::Error(_)));
     }
 }
