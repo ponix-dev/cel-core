@@ -32,7 +32,8 @@ fn is_zero_value(value: &Value) -> bool {
         Value::Map(m) => m.is_empty(),
         Value::Message(msg) => {
             // A proto message is zero-value if no fields are explicitly set
-            msg.is_default()
+            // If implementation doesn't know, treat as non-zero (conservative)
+            msg.is_default().unwrap_or(false)
         }
         _ => false,
     }

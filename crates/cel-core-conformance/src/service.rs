@@ -18,7 +18,7 @@ use cel_core_proto::gen::cel::expr::value::Kind as ProtoValueKind;
 use cel_core_proto::gen::cel::expr::{
     expr_value, ErrorSet, ExprValue, ListValue, MapValue, ParsedExpr, Value as ProtoValue,
 };
-use cel_core_proto::{cel_type_from_proto, from_parsed_expr, to_checked_expr, wkt, ProstMessage, ProstProtoRegistry};
+use cel_core_proto::{cel_type_from_proto, from_parsed_expr, maybe_unwrap_well_known, to_checked_expr, ProstMessage, ProstProtoRegistry};
 
 #[cfg(test)]
 use cel_core::CelType;
@@ -338,7 +338,7 @@ fn proto_value_to_value(proto: &ProtoValue, registry: &ProstProtoRegistry) -> Re
                 .map_err(|e| format!("failed to decode message: {}", e))?;
 
             // Convert to CEL Value using well-known type unwrapping
-            Ok(wkt::maybe_unwrap_well_known(message))
+            Ok(maybe_unwrap_well_known(message))
         }
         None => Err("missing value kind".to_string()),
     }

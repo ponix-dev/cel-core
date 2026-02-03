@@ -29,6 +29,16 @@ pub struct StructFieldValue {
 ///
 /// This trait provides type information needed during type checking,
 /// without requiring the ability to construct or manipulate proto messages.
+///
+/// # Object Safety
+///
+/// This trait is object-safe and can be used with `dyn ProtoTypeResolver`.
+///
+/// # Downcasting
+///
+/// The `as_any()` method enables downcasting to concrete types. Note that
+/// downcasting only works with the exact concrete type - wrapped or newtype
+/// implementations will not match.
 pub trait ProtoTypeResolver: fmt::Debug + Send + Sync {
     /// Get the CEL type of a message field.
     fn get_field_type(&self, message: &str, field: &str) -> Option<CelType>;
@@ -54,6 +64,10 @@ pub trait ProtoTypeResolver: fmt::Debug + Send + Sync {
 ///
 /// This trait extends `ProtoTypeResolver` with the ability to construct messages,
 /// access fields at runtime, and work with extensions. It is used by the evaluator.
+///
+/// # Object Safety
+///
+/// This trait is object-safe and can be used with `dyn ProtoRegistry`.
 pub trait ProtoRegistry: ProtoTypeResolver {
     /// Construct a protobuf message from evaluated field values.
     ///

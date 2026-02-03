@@ -77,11 +77,11 @@ impl MessageValue for ProstMessage {
         Box::new(self.clone())
     }
 
-    fn is_default(&self) -> bool {
-        self.message
+    fn is_default(&self) -> Option<bool> {
+        Some(self.message
             .descriptor()
             .fields()
-            .all(|field_desc| !self.message.has_field(&field_desc))
+            .all(|field_desc| !self.message.has_field(&field_desc)))
     }
 }
 

@@ -163,8 +163,8 @@ impl Abbreviations {
 
 use crate::ast::Ast;
 use crate::checker::{
-    check, check_with_abbreviations, check_with_descriptor_pool,
-    check_with_descriptor_pool_and_abbreviations, CheckError, CheckResult, STANDARD_LIBRARY,
+    check, check_with_abbreviations, check_with_type_resolver,
+    check_with_type_resolver_and_abbreviations, CheckError, CheckResult, STANDARD_LIBRARY,
 };
 use crate::eval::{Function, FunctionRegistry, Overload, Program, ProtoRegistry};
 use crate::ext;
@@ -491,7 +491,7 @@ impl Env {
         let has_abbreviations = !self.abbreviations.is_empty();
 
         match (has_proto_registry, has_abbreviations) {
-            (true, true) => check_with_descriptor_pool_and_abbreviations(
+            (true, true) => check_with_type_resolver_and_abbreviations(
                 expr,
                 &self.variables,
                 &self.functions,
@@ -499,7 +499,7 @@ impl Env {
                 self.proto_registry.as_ref().unwrap().as_ref(),
                 self.abbreviations.as_map(),
             ),
-            (true, false) => check_with_descriptor_pool(
+            (true, false) => check_with_type_resolver(
                 expr,
                 &self.variables,
                 &self.functions,

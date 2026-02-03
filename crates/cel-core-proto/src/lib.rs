@@ -67,11 +67,12 @@ mod operators;
 pub mod registry;
 mod source_info;
 mod type_conversion;
-pub mod wkt;
+pub(crate) mod wkt;
 mod eval_proto;
 
 pub use message::ProstMessage;
 pub use registry::ProstProtoRegistry;
+pub use wkt::maybe_unwrap_well_known;
 
 pub use converter::AstConverter;
 pub use error::ConversionError;
