@@ -163,10 +163,10 @@ impl Abbreviations {
 
 use crate::ast::Ast;
 use crate::checker::{
-    check, check_with_abbreviations, check_with_type_registry,
-    check_with_type_registry_and_abbreviations, CheckError, CheckResult, STANDARD_LIBRARY,
+    check, check_with_abbreviations, check_with_descriptor_pool,
+    check_with_descriptor_pool_and_abbreviations, CheckError, CheckResult, STANDARD_LIBRARY,
 };
-use crate::eval::{Function, FunctionRegistry, Overload, Program, TypeRegistry};
+use crate::eval::{Function, FunctionRegistry, Overload, Program, ProtoRegistry};
 use crate::ext;
 use crate::parser::{self, ParseError, ParseResult};
 use crate::types::{CelType, FunctionDecl, SpannedExpr};
@@ -242,7 +242,7 @@ pub struct Env {
     /// Container namespace for qualified name resolution.
     container: String,
     /// Type registry for resolving protobuf types.
-    type_registry: Option<Arc<dyn TypeRegistry>>,
+    proto_registry: Option<Arc<dyn ProtoRegistry>>,
     /// Abbreviations for qualified name shortcuts.
     abbreviations: Abbreviations,
     /// Whether to use strong enum typing (default: true).
@@ -260,7 +260,7 @@ impl Env {
             variables: HashMap::new(),
             functions: HashMap::new(),
             container: String::new(),
-            type_registry: None,
+            proto_registry: None,
             abbreviations: Abbreviations::new(),
             strong_enums: true,
         }
@@ -357,19 +357,19 @@ impl Env {
         &self.container
     }
 
-    /// Set the type registry (builder pattern).
+    /// Set the proto registry (builder pattern).
     ///
-    /// The type registry is used for resolving protobuf types during type checking
-    /// and evaluation. Pass an `Arc<dyn TypeRegistry>` implementation such as
-    /// `ProstTypeRegistry` from `cel-core-proto`.
-    pub fn with_type_registry(mut self, registry: Arc<dyn TypeRegistry>) -> Self {
-        self.type_registry = Some(registry);
+    /// The proto registry is used for resolving protobuf types during type checking
+    /// and evaluation. Pass an `Arc<dyn ProtoRegistry>` implementation such as
+    /// `ProstProtoRegistry` from `cel-core-proto`.
+    pub fn with_proto_registry(mut self, registry: Arc<dyn ProtoRegistry>) -> Self {
+        self.proto_registry = Some(registry);
         self
     }
 
-    /// Get the type registry.
-    pub fn type_registry(&self) -> Option<&dyn TypeRegistry> {
-        self.type_registry.as_ref().map(|r| r.as_ref())
+    /// Get the proto registry.
+    pub fn proto_registry(&self) -> Option<&dyn ProtoRegistry> {
+        self.proto_registry.as_ref().map(|r| r.as_ref())
     }
 
     /// Set abbreviations for qualified name resolution (builder pattern).
@@ -487,24 +487,24 @@ impl Env {
     /// This delegates to the checker with the environment's variables,
     /// functions, container, and abbreviations.
     pub fn check(&self, expr: &SpannedExpr) -> CheckResult {
-        let has_type_registry = self.type_registry.is_some();
+        let has_proto_registry = self.proto_registry.is_some();
         let has_abbreviations = !self.abbreviations.is_empty();
 
-        match (has_type_registry, has_abbreviations) {
-            (true, true) => check_with_type_registry_and_abbreviations(
+        match (has_proto_registry, has_abbreviations) {
+            (true, true) => check_with_descriptor_pool_and_abbreviations(
                 expr,
                 &self.variables,
                 &self.functions,
                 &self.container,
-                self.type_registry.as_ref().unwrap().as_ref(),
+                self.proto_registry.as_ref().unwrap().as_ref(),
                 self.abbreviations.as_map(),
             ),
-            (true, false) => check_with_type_registry(
+            (true, false) => check_with_descriptor_pool(
                 expr,
                 &self.variables,
                 &self.functions,
                 &self.container,
-                self.type_registry.as_ref().unwrap().as_ref(),
+                self.proto_registry.as_ref().unwrap().as_ref(),
             ),
             (false, true) => check_with_abbreviations(
                 expr,
@@ -604,20 +604,20 @@ impl Env {
     /// ```
     pub fn program(&self, ast: &Ast) -> Result<Program, CompileError> {
         let registry = self.build_function_registry();
-        let has_type_registry = self.type_registry.is_some();
+        let has_proto_registry = self.proto_registry.is_some();
         let has_abbreviations = !self.abbreviations.is_empty();
 
-        let mut program = match (has_type_registry, has_abbreviations) {
-            (true, true) => Program::with_type_registry_and_abbreviations(
+        let mut program = match (has_proto_registry, has_abbreviations) {
+            (true, true) => Program::with_proto_registry_and_abbreviations(
                 Arc::new(ast.clone()),
                 Arc::new(registry),
-                Arc::clone(self.type_registry.as_ref().unwrap()),
+                Arc::clone(self.proto_registry.as_ref().unwrap()),
                 self.abbreviations.as_map().clone(),
             ),
-            (true, false) => Program::with_type_registry(
+            (true, false) => Program::with_proto_registry(
                 Arc::new(ast.clone()),
                 Arc::new(registry),
-                Arc::clone(self.type_registry.as_ref().unwrap()),
+                Arc::clone(self.proto_registry.as_ref().unwrap()),
             ),
             (false, true) => Program::with_abbreviations(
                 Arc::new(ast.clone()),

@@ -6,10 +6,10 @@ use std::sync::Arc;
 
 use cel_core::eval::{Duration, MapActivation, Timestamp, Value};
 use cel_core::{Abbreviations, CelType, Env};
-use cel_core_proto::ProstTypeRegistry;
+use cel_core_proto::ProstProtoRegistry;
 
 fn main() {
-    let registry = ProstTypeRegistry::new();
+    let registry = ProstProtoRegistry::new();
 
     // Container for our domain, abbreviations for well-known types
     let abbrevs = Abbreviations::from_qualified_names(&[
@@ -19,7 +19,7 @@ fn main() {
     .unwrap();
 
     let env = Env::with_standard_library()
-        .with_type_registry(Arc::new(registry))
+        .with_proto_registry(Arc::new(registry))
         .with_container("myapp.models")
         .with_abbreviations(abbrevs)
         .with_variable("request_time", CelType::Timestamp)

@@ -71,7 +71,7 @@ pub mod wkt;
 mod eval_proto;
 
 pub use message::ProstMessage;
-pub use registry::ProstTypeRegistry;
+pub use registry::ProstProtoRegistry;
 
 pub use converter::AstConverter;
 pub use error::ConversionError;

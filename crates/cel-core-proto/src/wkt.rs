@@ -12,7 +12,7 @@ use cel_core::eval::time;
 use cel_core::eval::{Duration, EvalError, MapKey, Timestamp, Value, ValueMap};
 
 use crate::message::ProstMessage;
-use crate::registry::ProstTypeRegistry;
+use crate::registry::ProstProtoRegistry;
 
 // ==================== Well-Known Type Unwrapping ====================
 
@@ -288,7 +288,7 @@ fn unwrap_google_list_value(message: &DynamicMessage) -> Value {
 /// Convert a CEL value to a `google.protobuf.Value` message.
 pub fn cel_value_to_google_value(
     value: &Value,
-    registry: &ProstTypeRegistry,
+    registry: &ProstProtoRegistry,
 ) -> Result<DynamicMessage, Value> {
     let value_desc = registry
         .get_message("google.protobuf.Value")
@@ -410,7 +410,7 @@ pub fn cel_value_to_google_value(
 /// Convert a CEL map (string-keyed) to a `google.protobuf.Struct` message.
 pub fn cel_map_to_struct(
     map: &ValueMap,
-    registry: &ProstTypeRegistry,
+    registry: &ProstProtoRegistry,
 ) -> Result<DynamicMessage, Value> {
     let struct_desc = registry
         .get_message("google.protobuf.Struct")
@@ -445,7 +445,7 @@ pub fn cel_map_to_struct(
 /// Convert a CEL list to a `google.protobuf.ListValue` message.
 pub fn cel_list_to_list_value(
     list: &[Value],
-    registry: &ProstTypeRegistry,
+    registry: &ProstProtoRegistry,
 ) -> Result<DynamicMessage, Value> {
     let list_desc = registry
         .get_message("google.protobuf.ListValue")
@@ -499,7 +499,7 @@ pub fn pack_message_into_any(
 /// then pack into Any.
 pub fn wrap_value_for_any(
     value: &Value,
-    registry: &ProstTypeRegistry,
+    registry: &ProstProtoRegistry,
 ) -> Result<DynamicMessage, Value> {
     let any_desc = registry
         .get_message("google.protobuf.Any")

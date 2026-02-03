@@ -6,14 +6,14 @@ use std::sync::Arc;
 
 use cel_core::eval::MapActivation;
 use cel_core::Env;
-use cel_core_proto::ProstTypeRegistry;
+use cel_core_proto::ProstProtoRegistry;
 
 fn main() {
-    let registry = ProstTypeRegistry::new();
+    let registry = ProstProtoRegistry::new();
 
     // With container "google.protobuf", we can use short type names
     let env = Env::with_standard_library()
-        .with_type_registry(Arc::new(registry))
+        .with_proto_registry(Arc::new(registry))
         .with_container("google.protobuf");
 
     // Construct a Timestamp using short name (instead of google.protobuf.Timestamp)

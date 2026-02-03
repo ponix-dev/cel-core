@@ -107,11 +107,10 @@ This file does too much. It's the Env builder, the compile orchestrator, the pro
 - `abbreviations.rs` - `Abbreviations` and `AbbrevError` (already a distinct concept)
 
 ### 5b. `types/` is overloaded
-The `types` module contains four distinct concerns:
+The `types` module contains three distinct concerns:
 1. The type system (`CelType`, `CelValue`)
 2. The AST (`Expr`, `SpannedExpr`, operators)
 3. Declarations (`FunctionDecl`, `OverloadDecl`, `VariableDecl`)
-4. Proto type registry (`ProtoTypeRegistry`)
 
 In most Rust projects, the AST would be its own module (e.g., `ast/` at the crate root) rather than nested under `types/`. The declarations are also conceptually separate from the type system. This matters because `types/` is the foundation everything depends on - keeping it focused reduces the blast radius of changes.
 
@@ -189,7 +188,7 @@ The four-crate structure is appropriate:
 - `cel-core-lsp` - binary, depends on both
 - `cel-core-conformance` - test harness
 
-**One consideration:** `cel-core` has a hard dependency on `prost-reflect` (via `ProtoTypeRegistry` in `types/proto.rs`). If you wanted `cel-core` to be usable without protobuf support, `ProtoTypeRegistry` should be behind a feature flag. The `prost-reflect` dependency pulls in significant compile-time cost.
+**Note:** `cel-core` no longer has a dependency on `prost-reflect`. Proto support is provided via trait abstractions (`ProtoTypeResolver`, `ProtoRegistry`, `MessageValue`) defined in `cel-core::eval`, with the prost-backed implementation (`ProstProtoRegistry`, `ProstMessage`) living in `cel-core-proto`. This keeps the core crate lightweight and allows alternative proto implementations.
 
 ---
 
@@ -200,7 +199,7 @@ The four-crate structure is appropriate:
 3. **Replace `check()` function explosion** with a config/builder pattern
 4. **Split `env.rs`** into smaller focused modules
 5. **Move AST to its own top-level module** rather than nesting under `types/`
-6. **Consider feature-gating `prost-reflect`** dependency
+6. ~~**Consider feature-gating `prost-reflect`** dependency~~ *(DONE - decoupled via traits)*
 7. **Box the `Comprehension` payload** to reduce `Expr` enum size
 8. **Use `Arc<str>` in AST string positions** instead of `String`
 9. **Make `TYPE_VAR_COUNTER` owned by `Checker`** instead of global

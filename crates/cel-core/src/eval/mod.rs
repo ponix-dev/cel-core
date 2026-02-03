@@ -38,7 +38,7 @@ mod operators;
 mod program;
 mod resolve;
 pub mod time;
-pub mod type_registry;
+pub mod proto_registry;
 mod value;
 
 pub use activation::{
@@ -49,5 +49,5 @@ pub use evaluator::Evaluator;
 pub use functions::{Function, FunctionImpl, FunctionRegistry, Overload};
 pub use message::MessageValue;
 pub use program::Program;
-pub use type_registry::{StructFieldValue, TypeRegistry};
+pub use proto_registry::{ProtoTypeResolver, ProtoRegistry, StructFieldValue};
 pub use value::{Duration, EnumValue, MapKey, OptionalValue, Timestamp, TypeValue, Value, ValueError, ValueMap};

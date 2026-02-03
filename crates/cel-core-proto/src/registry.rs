@@ -1,6 +1,6 @@
 //! Prost-based implementation of the proto type registry.
 //!
-//! `ProstTypeRegistry` wraps a `prost_reflect::DescriptorPool` to provide
+//! `ProstProtoRegistry` wraps a `prost_reflect::DescriptorPool` to provide
 //! field type lookup, enum value resolution, and well-known type mapping.
 
 use prost_reflect::prost::Message;
@@ -8,6 +8,7 @@ use prost_reflect::{
     DescriptorPool, EnumDescriptor, ExtensionDescriptor, FieldDescriptor, Kind, MessageDescriptor,
 };
 
+use cel_core::eval::proto_registry::ProtoTypeResolver as ProtoTypeResolverTrait;
 use cel_core::types::proto::{proto_message_to_cel_type, ResolvedProtoType};
 use cel_core::types::CelType;
 
@@ -19,11 +20,11 @@ use cel_core::types::CelType;
 /// - Nested type resolution
 /// - Well-known type mapping
 #[derive(Debug, Clone)]
-pub struct ProstTypeRegistry {
+pub struct ProstProtoRegistry {
     pool: DescriptorPool,
 }
 
-impl ProstTypeRegistry {
+impl ProstProtoRegistry {
     /// Create a new proto type registry with well-known types pre-loaded.
     pub fn new() -> Self {
         // Start with the global pool which includes well-known types
@@ -61,27 +62,86 @@ impl ProstTypeRegistry {
         self.pool.get_enum_by_name(name)
     }
 
-    /// Get the CEL type of a field in a message.
-    pub fn get_field_type(&self, message_name: &str, field_name: &str) -> Option<CelType> {
+    /// Get an extension descriptor by fully qualified name.
+    pub fn get_extension_by_name(&self, name: &str) -> Option<ExtensionDescriptor> {
+        self.pool.get_extension_by_name(name)
+    }
+
+    /// Get the underlying descriptor pool.
+    pub fn pool(&self) -> &DescriptorPool {
+        &self.pool
+    }
+
+    /// Convert a field descriptor to a CEL type.
+    pub(crate) fn field_to_cel_type(&self, field: &FieldDescriptor) -> CelType {
+        let base_type = self.kind_to_cel_type(field.kind());
+
+        if field.is_list() {
+            CelType::list(base_type)
+        } else if field.is_map() {
+            // For map fields, get the key and value types
+            if let Kind::Message(map_entry) = field.kind() {
+                let key_field = map_entry.get_field_by_name("key");
+                let value_field = map_entry.get_field_by_name("value");
+
+                let key_type = key_field
+                    .map(|f| self.kind_to_cel_type(f.kind()))
+                    .unwrap_or(CelType::Dyn);
+                let value_type = value_field
+                    .map(|f| self.kind_to_cel_type(f.kind()))
+                    .unwrap_or(CelType::Dyn);
+
+                CelType::map(key_type, value_type)
+            } else {
+                CelType::map(CelType::Dyn, CelType::Dyn)
+            }
+        } else {
+            base_type
+        }
+    }
+
+    /// Convert a proto Kind to a CEL type.
+    pub(crate) fn kind_to_cel_type(&self, kind: Kind) -> CelType {
+        match kind {
+            Kind::Bool => CelType::Bool,
+            Kind::Int32
+            | Kind::Sint32
+            | Kind::Sfixed32
+            | Kind::Int64
+            | Kind::Sint64
+            | Kind::Sfixed64 => CelType::Int,
+            Kind::Uint32 | Kind::Fixed32 | Kind::Uint64 | Kind::Fixed64 => CelType::UInt,
+            Kind::Float | Kind::Double => CelType::Double,
+            Kind::String => CelType::String,
+            Kind::Bytes => CelType::Bytes,
+            Kind::Message(msg) => proto_message_to_cel_type(msg.full_name()),
+            Kind::Enum(_) => CelType::Int, // Enum values are ints in CEL type system
+        }
+    }
+}
+
+impl Default for ProstProtoRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ==================== ProtoTypeResolver trait implementation ====================
+
+impl ProtoTypeResolverTrait for ProstProtoRegistry {
+    fn get_field_type(&self, message_name: &str, field_name: &str) -> Option<CelType> {
         let message = self.get_message(message_name)?;
         let field = message.get_field_by_name(field_name)?;
         Some(self.field_to_cel_type(&field))
     }
 
-    /// Get an enum value by enum name and value name.
-    pub fn get_enum_value(&self, enum_name: &str, value_name: &str) -> Option<i32> {
+    fn get_enum_value(&self, enum_name: &str, value_name: &str) -> Option<i32> {
         let enum_desc = self.get_enum(enum_name)?;
         let value = enum_desc.get_value_by_name(value_name)?;
         Some(value.number())
     }
 
-    /// Resolve a qualified name (e.g., `TestAllTypes.NestedEnum.BAR`).
-    ///
-    /// This handles:
-    /// - Message types
-    /// - Enum types
-    /// - Enum values (e.g., `GlobalEnum.GAZ` -> enum value)
-    pub fn resolve_qualified(&self, parts: &[&str], container: &str) -> Option<ResolvedProtoType> {
+    fn resolve_qualified(&self, parts: &[&str], container: &str) -> Option<ResolvedProtoType> {
         if parts.is_empty() {
             return None;
         }
@@ -144,7 +204,7 @@ impl ProstTypeRegistry {
             enum_candidates.push(enum_parts.join("."));
 
             for enum_name in &enum_candidates {
-                if let Some(value) = self.get_enum_value(enum_name, value_name) {
+                if let Some(value) = ProtoTypeResolverTrait::get_enum_value(self, enum_name, value_name) {
                     return Some(ResolvedProtoType::EnumValue {
                         enum_name: enum_name.clone(),
                         value,
@@ -156,10 +216,7 @@ impl ProstTypeRegistry {
         None
     }
 
-    /// Resolve a message name to its fully qualified form.
-    ///
-    /// Tries the name as-is first, then with container prefix.
-    pub fn resolve_message_name(&self, name: &str, container: &str) -> Option<String> {
+    fn resolve_message_name(&self, name: &str, container: &str) -> Option<String> {
         // Try with container prefix first
         if !container.is_empty() {
             let qualified = format!("{}.{}", container, name);
@@ -186,66 +243,7 @@ impl ProstTypeRegistry {
         None
     }
 
-    /// Convert a field descriptor to a CEL type.
-    fn field_to_cel_type(&self, field: &FieldDescriptor) -> CelType {
-        let base_type = self.kind_to_cel_type(field.kind());
-
-        if field.is_list() {
-            CelType::list(base_type)
-        } else if field.is_map() {
-            // For map fields, get the key and value types
-            if let Kind::Message(map_entry) = field.kind() {
-                let key_field = map_entry.get_field_by_name("key");
-                let value_field = map_entry.get_field_by_name("value");
-
-                let key_type = key_field
-                    .map(|f| self.kind_to_cel_type(f.kind()))
-                    .unwrap_or(CelType::Dyn);
-                let value_type = value_field
-                    .map(|f| self.kind_to_cel_type(f.kind()))
-                    .unwrap_or(CelType::Dyn);
-
-                CelType::map(key_type, value_type)
-            } else {
-                CelType::map(CelType::Dyn, CelType::Dyn)
-            }
-        } else {
-            base_type
-        }
-    }
-
-    /// Convert a proto Kind to a CEL type.
-    fn kind_to_cel_type(&self, kind: Kind) -> CelType {
-        match kind {
-            Kind::Bool => CelType::Bool,
-            Kind::Int32
-            | Kind::Sint32
-            | Kind::Sfixed32
-            | Kind::Int64
-            | Kind::Sint64
-            | Kind::Sfixed64 => CelType::Int,
-            Kind::Uint32 | Kind::Fixed32 | Kind::Uint64 | Kind::Fixed64 => CelType::UInt,
-            Kind::Float | Kind::Double => CelType::Double,
-            Kind::String => CelType::String,
-            Kind::Bytes => CelType::Bytes,
-            Kind::Message(msg) => proto_message_to_cel_type(msg.full_name()),
-            Kind::Enum(_) => CelType::Int, // Enum values are ints in CEL type system
-        }
-    }
-
-    /// Get an extension descriptor by fully qualified name.
-    pub fn get_extension_by_name(&self, name: &str) -> Option<ExtensionDescriptor> {
-        self.pool.get_extension_by_name(name)
-    }
-
-    /// Get the underlying descriptor pool.
-    pub fn pool(&self) -> &DescriptorPool {
-        &self.pool
-    }
-}
-
-impl Default for ProstTypeRegistry {
-    fn default() -> Self {
-        Self::new()
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }

@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use super::type_registry::TypeRegistry;
+use super::proto_registry::ProtoRegistry;
 use super::{Activation, EmptyActivation, Evaluator, FunctionRegistry, Value};
 use crate::Ast;
 
@@ -19,7 +19,7 @@ use crate::Ast;
 pub struct Program {
     ast: Arc<Ast>,
     functions: Arc<FunctionRegistry>,
-    type_registry: Option<Arc<dyn TypeRegistry>>,
+    proto_registry: Option<Arc<dyn ProtoRegistry>>,
     abbreviations: Option<Arc<HashMap<String, String>>>,
     strong_enums: bool,
 }
@@ -30,22 +30,22 @@ impl Program {
         Self {
             ast,
             functions,
-            type_registry: None,
+            proto_registry: None,
             abbreviations: None,
             strong_enums: true,
         }
     }
 
     /// Create a new program with a type registry.
-    pub fn with_type_registry(
+    pub fn with_proto_registry(
         ast: Arc<Ast>,
         functions: Arc<FunctionRegistry>,
-        type_registry: Arc<dyn TypeRegistry>,
+        proto_registry: Arc<dyn ProtoRegistry>,
     ) -> Self {
         Self {
             ast,
             functions,
-            type_registry: Some(type_registry),
+            proto_registry: Some(proto_registry),
             abbreviations: None,
             strong_enums: true,
         }
@@ -60,23 +60,23 @@ impl Program {
         Self {
             ast,
             functions,
-            type_registry: None,
+            proto_registry: None,
             abbreviations: Some(Arc::new(abbreviations)),
             strong_enums: true,
         }
     }
 
     /// Create a new program with a type registry and abbreviations.
-    pub fn with_type_registry_and_abbreviations(
+    pub fn with_proto_registry_and_abbreviations(
         ast: Arc<Ast>,
         functions: Arc<FunctionRegistry>,
-        type_registry: Arc<dyn TypeRegistry>,
+        proto_registry: Arc<dyn ProtoRegistry>,
         abbreviations: HashMap<String, String>,
     ) -> Self {
         Self {
             ast,
             functions,
-            type_registry: Some(type_registry),
+            proto_registry: Some(proto_registry),
             abbreviations: Some(Arc::new(abbreviations)),
             strong_enums: true,
         }
@@ -122,8 +122,8 @@ impl Program {
         }
 
         // Pass type registry
-        if let Some(ref type_registry) = self.type_registry {
-            evaluator = evaluator.with_type_registry(type_registry.as_ref());
+        if let Some(ref proto_registry) = self.proto_registry {
+            evaluator = evaluator.with_proto_registry(proto_registry.as_ref());
         }
 
         // Set container for type resolution

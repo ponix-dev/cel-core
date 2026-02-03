@@ -18,7 +18,7 @@ use cel_core_proto::gen::cel::expr::value::Kind as ProtoValueKind;
 use cel_core_proto::gen::cel::expr::{
     expr_value, ErrorSet, ExprValue, ListValue, MapValue, ParsedExpr, Value as ProtoValue,
 };
-use cel_core_proto::{cel_type_from_proto, from_parsed_expr, to_checked_expr, wkt, ProstMessage, ProstTypeRegistry};
+use cel_core_proto::{cel_type_from_proto, from_parsed_expr, to_checked_expr, wkt, ProstMessage, ProstProtoRegistry};
 
 #[cfg(test)]
 use cel_core::CelType;
@@ -49,7 +49,7 @@ impl CelConformanceService {
     /// When false, enum values are returned as plain integers (legacy behavior).
     pub fn with_strong_enums(strong: bool) -> Self {
         // Create proto type registry with conformance test proto descriptors
-        let mut registry = ProstTypeRegistry::new();
+        let mut registry = ProstProtoRegistry::new();
 
         // Add conformance test proto descriptors
         // Order matters: dependencies must be added before dependents
@@ -72,7 +72,7 @@ impl CelConformanceService {
         let registry = Arc::new(registry);
         let mut env = Env::with_standard_library()
             .with_all_extensions()
-            .with_type_registry(registry as Arc<dyn cel_core::eval::TypeRegistry>);
+            .with_proto_registry(registry as Arc<dyn cel_core::eval::ProtoRegistry>);
         if !strong {
             env = env.with_legacy_enums();
         }
@@ -183,21 +183,21 @@ impl ConformanceService for CelConformanceService {
         };
 
         // Get proto registry for value conversion
-        let type_registry = match self.env.type_registry() {
+        let proto_registry = match self.env.proto_registry() {
             Some(registry) => registry,
             None => {
                 return EvalResponse {
                     result: None,
-                    issues: vec![Issue::error("type registry not available")],
+                    issues: vec![Issue::error("proto registry not available")],
                 };
             }
         };
-        let proto_types = match type_registry.as_any().downcast_ref::<ProstTypeRegistry>() {
+        let proto_types = match proto_registry.as_any().downcast_ref::<ProstProtoRegistry>() {
             Some(r) => r,
             None => {
                 return EvalResponse {
                     result: None,
-                    issues: vec![Issue::error("type registry is not ProstTypeRegistry")],
+                    issues: vec![Issue::error("proto registry is not ProstProtoRegistry")],
                 };
             }
         };
@@ -275,7 +275,7 @@ fn convert_function_decl(proto: &FunctionTypeDecl) -> cel_core::types::FunctionD
 /// Convert bindings to a MapActivation.
 fn bindings_to_activation(
     bindings: &[Binding],
-    registry: &ProstTypeRegistry,
+    registry: &ProstProtoRegistry,
 ) -> Result<MapActivation, String> {
     let mut activation = MapActivation::new();
     for binding in bindings {
@@ -286,7 +286,7 @@ fn bindings_to_activation(
 }
 
 /// Convert a proto Value to a cel_core::eval::Value.
-fn proto_value_to_value(proto: &ProtoValue, registry: &ProstTypeRegistry) -> Result<Value, String> {
+fn proto_value_to_value(proto: &ProtoValue, registry: &ProstProtoRegistry) -> Result<Value, String> {
     match &proto.kind {
         Some(ProtoValueKind::NullValue(_)) => Ok(Value::Null),
         Some(ProtoValueKind::BoolValue(b)) => Ok(Value::Bool(*b)),

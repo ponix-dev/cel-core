@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use crate::types::{BinaryOp, Expr, FunctionDecl, ListElement, MapEntry, SpannedExpr, StructField, UnaryOp, VariableDecl};
 use crate::types::{CelType, CelValue};
-use crate::eval::type_registry::TypeRegistry;
+use crate::eval::proto_registry::ProtoTypeResolver;
 use crate::types::ResolvedProtoType;
 use super::errors::CheckError;
 use super::overload::{finalize_type, resolve_overload, substitute_type};
@@ -101,7 +101,7 @@ pub struct Checker<'a> {
     /// Type parameter substitutions.
     substitutions: HashMap<Arc<str>, CelType>,
     /// Type registry for resolving protobuf types.
-    type_registry: Option<&'a dyn TypeRegistry>,
+    descriptor_pool: Option<&'a dyn ProtoTypeResolver>,
     /// Abbreviations for qualified name shortcuts.
     abbreviations: Option<&'a HashMap<String, String>>,
 }
@@ -133,14 +133,14 @@ impl<'a> Checker<'a> {
             reference_map: HashMap::new(),
             errors: Vec::new(),
             substitutions: HashMap::new(),
-            type_registry: None,
+            descriptor_pool: None,
             abbreviations: None,
         }
     }
 
     /// Set the type registry for resolving protobuf types.
-    pub fn with_type_registry(mut self, registry: &'a dyn TypeRegistry) -> Self {
-        self.type_registry = Some(registry);
+    pub fn with_descriptor_pool(mut self, registry: &'a dyn ProtoTypeResolver) -> Self {
+        self.descriptor_pool = Some(registry);
         self
     }
 
@@ -465,7 +465,7 @@ impl<'a> Checker<'a> {
         let result = match &inner_type {
             CelType::Message(name) => {
                 // Try to get field type from proto registry
-                if let Some(registry) = self.type_registry {
+                if let Some(registry) = self.descriptor_pool {
                     if let Some(field_type) = registry.get_field_type(name, field) {
                         return self.wrap_optional_if_needed(field_type, optional, was_optional);
                     }
@@ -512,7 +512,7 @@ impl<'a> Checker<'a> {
 
     /// Try to resolve a qualified name as a proto type.
     fn resolve_proto_qualified(&mut self, qualified_name: &str, expr: &SpannedExpr) -> Option<CelType> {
-        let registry = self.type_registry?;
+        let registry = self.descriptor_pool?;
 
         // Try to expand abbreviations first
         let expanded_name = self.expand_abbreviation(qualified_name);
@@ -545,7 +545,7 @@ impl<'a> Checker<'a> {
     /// Handles patterns like `TestAllTypes.NestedEnum(1)` and `GlobalEnum("BAZ")`.
     /// Enum constructors accept either an int or a string argument.
     fn try_enum_constructor(&mut self, name: &str, args: &[SpannedExpr], expr: &SpannedExpr) -> Option<CelType> {
-        let registry = self.type_registry?;
+        let registry = self.descriptor_pool?;
 
         // Try to expand abbreviations
         let expanded_name = self.expand_abbreviation(name);
@@ -816,7 +816,7 @@ impl<'a> Checker<'a> {
             let name_to_resolve = expanded_name.as_ref().unwrap_or(name);
 
             // Try to resolve to fully qualified name using proto registry
-            let fq_name = if let Some(registry) = self.type_registry {
+            let fq_name = if let Some(registry) = self.descriptor_pool {
                 registry.resolve_message_name(name_to_resolve, self.container)
                     .unwrap_or_else(|| name_to_resolve.clone())
             } else {
@@ -988,15 +988,15 @@ pub fn check(
 ///
 /// This is like `check`, but also takes a type registry for resolving
 /// protobuf types during type checking.
-pub fn check_with_type_registry(
+pub fn check_with_descriptor_pool(
     expr: &SpannedExpr,
     variables: &HashMap<String, CelType>,
     functions: &HashMap<String, FunctionDecl>,
     container: &str,
-    type_registry: &dyn TypeRegistry,
+    descriptor_pool: &dyn ProtoTypeResolver,
 ) -> CheckResult {
     let checker = Checker::new(variables, functions, container)
-        .with_type_registry(type_registry);
+        .with_descriptor_pool(descriptor_pool);
     checker.check(expr)
 }
 
@@ -1018,16 +1018,16 @@ pub fn check_with_abbreviations(
 /// Check an expression with a type registry and abbreviations.
 ///
 /// This is the most complete variant, supporting both a type registry and abbreviations.
-pub fn check_with_type_registry_and_abbreviations(
+pub fn check_with_descriptor_pool_and_abbreviations(
     expr: &SpannedExpr,
     variables: &HashMap<String, CelType>,
     functions: &HashMap<String, FunctionDecl>,
     container: &str,
-    type_registry: &dyn TypeRegistry,
+    descriptor_pool: &dyn ProtoTypeResolver,
     abbreviations: &HashMap<String, String>,
 ) -> CheckResult {
     let checker = Checker::new(variables, functions, container)
-        .with_type_registry(type_registry)
+        .with_descriptor_pool(descriptor_pool)
         .with_abbreviations(abbreviations);
     checker.check(expr)
 }

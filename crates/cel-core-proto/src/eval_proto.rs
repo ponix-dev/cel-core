@@ -1,4 +1,4 @@
-//! TypeRegistry implementation for ProstTypeRegistry.
+//! ProtoRegistry implementation for ProstProtoRegistry.
 //!
 //! Provides proto message construction, field access, and type resolution
 //! using prost-reflect as the backing protobuf runtime.
@@ -12,37 +12,16 @@ use prost_reflect::{
 };
 
 use cel_core::eval::message::MessageValue;
-use cel_core::eval::type_registry::{StructFieldValue, TypeRegistry};
+use cel_core::eval::proto_registry::{ProtoRegistry, StructFieldValue};
 use cel_core::eval::{EvalError, EvalErrorKind, EnumValue, MapKey, OptionalValue, Value, ValueMap};
-use cel_core::types::{CelType, ResolvedProtoType};
 
 use crate::message::ProstMessage;
-use crate::registry::ProstTypeRegistry;
+use crate::registry::ProstProtoRegistry;
 use crate::wkt;
 
-// ==================== TypeRegistry implementation for ProstTypeRegistry ====================
+// ==================== ProtoRegistry implementation for ProstProtoRegistry ====================
 
-impl TypeRegistry for ProstTypeRegistry {
-    // ==================== Checker Methods ====================
-
-    fn get_field_type(&self, message: &str, field: &str) -> Option<CelType> {
-        ProstTypeRegistry::get_field_type(self, message, field)
-    }
-
-    fn get_enum_value(&self, enum_name: &str, value_name: &str) -> Option<i32> {
-        ProstTypeRegistry::get_enum_value(self, enum_name, value_name)
-    }
-
-    fn resolve_qualified(&self, parts: &[&str], container: &str) -> Option<ResolvedProtoType> {
-        ProstTypeRegistry::resolve_qualified(self, parts, container)
-    }
-
-    fn resolve_message_name(&self, name: &str, container: &str) -> Option<String> {
-        ProstTypeRegistry::resolve_message_name(self, name, container)
-    }
-
-    // ==================== Evaluator Methods ====================
-
+impl ProtoRegistry for ProstProtoRegistry {
     fn construct_message(
         &self,
         type_name: &str,
@@ -249,10 +228,6 @@ impl TypeRegistry for ProstTypeRegistry {
         })
     }
 
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-
     fn has_extension(&self, msg: &dyn MessageValue, ext_name: &str) -> Option<bool> {
         let proto = msg.as_any().downcast_ref::<ProstMessage>()?;
         let ext = self.get_extension_by_name(ext_name)?;
@@ -264,9 +239,9 @@ impl TypeRegistry for ProstTypeRegistry {
     }
 }
 
-// ==================== Proto helper methods on ProstTypeRegistry ====================
+// ==================== Proto helper methods on ProstProtoRegistry ====================
 
-impl ProstTypeRegistry {
+impl ProstProtoRegistry {
     /// Convert a prost_reflect Value to a CEL Value.
     pub fn proto_reflect_to_value(
         &self,

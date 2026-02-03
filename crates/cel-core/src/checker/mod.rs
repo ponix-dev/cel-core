@@ -14,8 +14,8 @@ mod scope;
 mod standard_library;
 
 pub use checker::{
-    check, check_with_abbreviations, check_with_type_registry,
-    check_with_type_registry_and_abbreviations, CheckResult, Checker, ReferenceInfo,
+    check, check_with_abbreviations, check_with_descriptor_pool,
+    check_with_descriptor_pool_and_abbreviations, CheckResult, Checker, ReferenceInfo,
 };
 pub use errors::{CheckError, CheckErrorKind};
 pub use standard_library::STANDARD_LIBRARY;

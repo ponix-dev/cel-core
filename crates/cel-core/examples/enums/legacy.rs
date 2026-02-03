@@ -6,18 +6,18 @@ use std::sync::Arc;
 
 use cel_core::eval::MapActivation;
 use cel_core::Env;
-use cel_core_proto::ProstTypeRegistry;
+use cel_core_proto::ProstProtoRegistry;
 
 fn main() {
     // Build a proto registry with the conformance test descriptors (which contain enums)
-    let mut registry = ProstTypeRegistry::new();
+    let mut registry = ProstProtoRegistry::new();
     registry
         .add_file_descriptor_set(cel_core_proto::gen::cel::expr::conformance::proto3::FILE_DESCRIPTOR_SET)
         .expect("Failed to add proto3 descriptors");
 
     // Legacy mode: enums behave as plain integers
     let env = Env::with_standard_library()
-        .with_type_registry(Arc::new(registry))
+        .with_proto_registry(Arc::new(registry))
         .with_container("cel.expr.conformance.proto3")
         .with_legacy_enums();
 

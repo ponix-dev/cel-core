@@ -1,8 +1,11 @@
-//! Trait abstraction for protobuf type registries.
+//! Trait abstractions for protobuf type registries.
 //!
-//! `TypeRegistry` defines the interface for resolving protobuf types,
-//! constructing messages, and accessing message fields, decoupling
-//! cel-core from any specific protobuf implementation.
+//! This module defines two focused traits for working with protobuf types:
+//!
+//! - `ProtoTypeResolver`: Provides type lookup capabilities used by the checker
+//! - `ProtoRegistry`: Extends ProtoTypeResolver with runtime operations for the evaluator
+//!
+//! These traits decouple cel-core from any specific protobuf implementation.
 
 use std::any::Any;
 use std::fmt;
@@ -22,13 +25,11 @@ pub struct StructFieldValue {
     pub optional: bool,
 }
 
-/// A trait representing a protobuf type registry.
+/// Trait for protobuf descriptor pool access (checker operations).
 ///
-/// This abstraction allows cel-core's checker and evaluator to work with
-/// proto types without depending on a specific protobuf library.
-pub trait TypeRegistry: fmt::Debug + Send + Sync {
-    // ==================== Checker Methods ====================
-
+/// This trait provides type information needed during type checking,
+/// without requiring the ability to construct or manipulate proto messages.
+pub trait ProtoTypeResolver: fmt::Debug + Send + Sync {
     /// Get the CEL type of a message field.
     fn get_field_type(&self, message: &str, field: &str) -> Option<CelType>;
 
@@ -45,8 +46,15 @@ pub trait TypeRegistry: fmt::Debug + Send + Sync {
     /// Returns the fully qualified message name if found.
     fn resolve_message_name(&self, name: &str, container: &str) -> Option<String>;
 
-    // ==================== Evaluator Methods ====================
+    /// Downcast to a concrete type via `Any`.
+    fn as_any(&self) -> &dyn Any;
+}
 
+/// Trait for protobuf runtime operations (evaluator operations).
+///
+/// This trait extends `ProtoTypeResolver` with the ability to construct messages,
+/// access fields at runtime, and work with extensions. It is used by the evaluator.
+pub trait ProtoRegistry: ProtoTypeResolver {
     /// Construct a protobuf message from evaluated field values.
     ///
     /// Returns the constructed message as a Value (may be unwrapped to a
@@ -87,7 +95,4 @@ pub trait TypeRegistry: fmt::Debug + Send + Sync {
     ///
     /// Returns `None` if the extension is not applicable to this message type.
     fn has_extension(&self, msg: &dyn MessageValue, ext_name: &str) -> Option<bool>;
-
-    /// Downcast to a concrete type via `Any`.
-    fn as_any(&self) -> &dyn Any;
 }

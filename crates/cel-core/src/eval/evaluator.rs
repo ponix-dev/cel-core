@@ -17,7 +17,7 @@ use super::{
     Activation, EvalError, FunctionRegistry, HierarchicalActivation, MapKey,
     OptionalValue, Value, ValueMap,
 };
-use super::type_registry::TypeRegistry;
+use super::proto_registry::ProtoRegistry;
 use crate::checker::ReferenceInfo;
 use crate::types::{Expr, SpannedExpr};
 
@@ -35,7 +35,7 @@ pub struct Evaluator<'a> {
     /// Reference map from type checking (for qualified name resolution).
     pub(super) reference_map: Option<&'a HashMap<i64, ReferenceInfo>>,
     /// Type registry for message construction and field access.
-    pub(super) type_registry: Option<&'a dyn TypeRegistry>,
+    pub(super) proto_registry: Option<&'a dyn ProtoRegistry>,
     /// Container namespace for type resolution (C++ namespace rules).
     pub(super) container: String,
     /// Abbreviations for qualified name shortcuts.
@@ -57,7 +57,7 @@ impl<'a> Evaluator<'a> {
             root_activation: activation,
             functions,
             reference_map: None,
-            type_registry: None,
+            proto_registry: None,
             container: String::new(),
             abbreviations: None,
             strong_enums: true,
@@ -72,8 +72,8 @@ impl<'a> Evaluator<'a> {
     }
 
     /// Set the type registry for message construction and field access (builder pattern).
-    pub fn with_type_registry(mut self, registry: &'a dyn TypeRegistry) -> Self {
-        self.type_registry = Some(registry);
+    pub fn with_proto_registry(mut self, registry: &'a dyn ProtoRegistry) -> Self {
+        self.proto_registry = Some(registry);
         self
     }
 
@@ -137,8 +137,8 @@ impl<'a> Evaluator<'a> {
         if let Some(ref_map) = self.reference_map {
             eval = eval.with_reference_map(ref_map);
         }
-        if let Some(type_registry) = self.type_registry {
-            eval = eval.with_type_registry(type_registry);
+        if let Some(proto_registry) = self.proto_registry {
+            eval = eval.with_proto_registry(proto_registry);
         }
         if !self.container.is_empty() {
             eval = eval.with_container(&self.container);
@@ -499,7 +499,7 @@ impl<'a> Evaluator<'a> {
                 }
             }
             Value::Message(msg) => {
-                if let Some(registry) = self.type_registry {
+                if let Some(registry) = self.proto_registry {
                     registry.message_field_access(msg.as_ref(), field, optional, self.strong_enums)
                 } else if optional {
                     Value::optional_none()
@@ -853,7 +853,7 @@ impl<'a> Evaluator<'a> {
             }
             Value::String(s) => {
                 // String → Enum: look up value by name in type registry
-                if let Some(registry) = self.type_registry {
+                if let Some(registry) = self.proto_registry {
                     if let Some(value) = registry.get_enum_value(enum_type_name, s) {
                         self.enum_or_int(enum_type_name, value)
                     } else {
@@ -1028,7 +1028,7 @@ impl<'a> Evaluator<'a> {
                 Value::Bool(map.contains_key(&key))
             }
             Value::Message(msg) => {
-                if let Some(registry) = self.type_registry {
+                if let Some(registry) = self.proto_registry {
                     registry.message_has_field(msg.as_ref(), field)
                 } else {
                     Value::Bool(false)
@@ -1041,7 +1041,7 @@ impl<'a> Evaluator<'a> {
                         Value::Bool(map.contains_key(&key))
                     }
                     Value::Message(msg) => {
-                        if let Some(registry) = self.type_registry {
+                        if let Some(registry) = self.proto_registry {
                             registry.message_has_field(msg.as_ref(), field)
                         } else {
                             Value::Bool(false)
@@ -1064,7 +1064,7 @@ impl<'a> Evaluator<'a> {
         type_name: &SpannedExpr,
         fields: &[crate::types::StructField],
     ) -> Value {
-        use super::type_registry::StructFieldValue;
+        use super::proto_registry::StructFieldValue;
 
         // Get the fully qualified type name
         let extracted_name = self.get_type_name_from_expr(type_name);
@@ -1079,7 +1079,7 @@ impl<'a> Evaluator<'a> {
         };
 
         // Get the type registry
-        let registry = match self.type_registry {
+        let registry = match self.proto_registry {
             Some(r) => r,
             None => {
                 return Value::error(EvalError::internal(format!(
