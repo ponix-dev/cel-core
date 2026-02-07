@@ -241,6 +241,13 @@ fn protovalidate_this_nested_field_access() {
     expected.assert_eq(&actual);
 }
 
+#[test]
+fn protovalidate_has_undefined_field() {
+    let actual = check_protovalidate_message("User", "has(this.nonexistent)");
+    let expected = expect![[r#"5:21-5:42 error [undefined-field]: undefined field 'nonexistent' on type 'test.User'"#]];
+    expected.assert_eq(&actual);
+}
+
 // ---------------------------------------------------------------------------
 // Tests — protovalidate field-level CEL expressions
 // ---------------------------------------------------------------------------

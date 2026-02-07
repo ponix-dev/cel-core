@@ -154,9 +154,14 @@ static EXPRESSION_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
 /// Extract all CEL regions from a proto file.
 pub fn extract_cel_regions(source: &str) -> Vec<ExtractedRegion> {
     let mut regions = Vec::new();
+    let comment_ranges = find_comment_ranges(source);
 
     for (pattern, context_type) in PROTOVALIDATE_PATTERNS.iter() {
         for mat in pattern.find_iter(source) {
+            // Skip matches that fall within a comment
+            if is_in_comment(mat.start(), &comment_ranges) {
+                continue;
+            }
             // Find the closing brace for this option block
             if let Some(block_end) = find_matching_brace(source, mat.end() - 1) {
                 let block = &source[mat.end()..block_end];
@@ -249,6 +254,79 @@ fn extract_message_context(source: &str, position: usize) -> Option<String> {
 
     // Return the last (innermost) message
     messages.pop().map(|(_, name)| name)
+}
+
+/// Find byte ranges of all comments in a proto source file.
+///
+/// Handles both `//` line comments and `/* */` block comments,
+/// while ignoring comment-like sequences inside string literals.
+fn find_comment_ranges(source: &str) -> Vec<std::ops::Range<usize>> {
+    let bytes = source.as_bytes();
+    let mut ranges = Vec::new();
+    let mut pos = 0;
+    let mut in_string = false;
+    let mut escape_next = false;
+
+    while pos < bytes.len() {
+        let c = bytes[pos];
+
+        if escape_next {
+            escape_next = false;
+            pos += 1;
+            continue;
+        }
+
+        if in_string {
+            if c == b'\\' {
+                escape_next = true;
+            } else if c == b'"' {
+                in_string = false;
+            }
+            pos += 1;
+            continue;
+        }
+
+        if c == b'"' {
+            in_string = true;
+            pos += 1;
+            continue;
+        }
+
+        if c == b'/' && pos + 1 < bytes.len() {
+            if bytes[pos + 1] == b'/' {
+                // Line comment: extends to end of line
+                let start = pos;
+                pos += 2;
+                while pos < bytes.len() && bytes[pos] != b'\n' {
+                    pos += 1;
+                }
+                ranges.push(start..pos);
+                continue;
+            } else if bytes[pos + 1] == b'*' {
+                // Block comment: extends to closing */
+                let start = pos;
+                pos += 2;
+                while pos + 1 < bytes.len() {
+                    if bytes[pos] == b'*' && bytes[pos + 1] == b'/' {
+                        pos += 2;
+                        break;
+                    }
+                    pos += 1;
+                }
+                ranges.push(start..pos);
+                continue;
+            }
+        }
+
+        pos += 1;
+    }
+
+    ranges
+}
+
+/// Check whether a byte offset falls within any comment range.
+fn is_in_comment(offset: usize, comment_ranges: &[std::ops::Range<usize>]) -> bool {
+    comment_ranges.iter().any(|range| range.contains(&offset))
 }
 
 /// Find the position of the matching closing brace.
@@ -544,5 +622,63 @@ message User {
     fn context_this_type_for_predefined() {
         let context = ProtovalidateContext::Predefined;
         assert_eq!(context.this_type(), CelType::Dyn);
+    }
+
+    #[test]
+    fn skips_line_commented_annotation() {
+        let proto = r#"
+message User {
+    // string email = 1 [(buf.validate.field).cel = {
+    //     expression: "this.isEmail()"
+    // }];
+}
+"#;
+        let regions = extract_cel_regions(proto);
+        assert!(regions.is_empty());
+    }
+
+    #[test]
+    fn skips_block_commented_annotation() {
+        let proto = r#"
+message User {
+    /* string email = 1 [(buf.validate.field).cel = {
+        expression: "this.isEmail()"
+    }]; */
+}
+"#;
+        let regions = extract_cel_regions(proto);
+        assert!(regions.is_empty());
+    }
+
+    #[test]
+    fn extracts_uncommented_but_skips_commented() {
+        let proto = r#"
+message User {
+    string email = 1 [(buf.validate.field).cel = {
+        expression: "this.isEmail()"
+    }];
+    // string name = 2 [(buf.validate.field).cel = {
+    //     expression: "size(this) > 0"
+    // }];
+}
+"#;
+        let regions = extract_cel_regions(proto);
+        assert_eq!(regions.len(), 1);
+        assert_eq!(regions[0].source, "this.isEmail()");
+    }
+
+    #[test]
+    fn comment_like_content_in_strings_not_treated_as_comment() {
+        // A string containing "//" should not confuse the comment parser
+        let proto = r#"
+message Test {
+    string val = 1 [(buf.validate.field).cel = {
+        expression: "this.contains(\"//\")"
+    }];
+}
+"#;
+        let regions = extract_cel_regions(proto);
+        assert_eq!(regions.len(), 1);
+        assert_eq!(regions[0].source, r#"this.contains("//")"#);
     }
 }
