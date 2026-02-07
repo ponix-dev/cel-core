@@ -12,15 +12,13 @@ use prost_reflect::DynamicMessage;
 use crate::{
     Binding, CheckResponse, ConformanceService, EvalResponse, FunctionTypeDecl, Issue, ParseResponse, TypeDecl,
 };
-use cel_core::eval::wkt;
 use cel_core::eval::{MapActivation, MapKey, Value, ValueMap};
-use cel_core::types::ProtoTypeRegistry;
 use cel_core::Env;
 use cel_core_proto::gen::cel::expr::value::Kind as ProtoValueKind;
 use cel_core_proto::gen::cel::expr::{
     expr_value, ErrorSet, ExprValue, ListValue, MapValue, ParsedExpr, Value as ProtoValue,
 };
-use cel_core_proto::{cel_type_from_proto, from_parsed_expr, to_checked_expr};
+use cel_core_proto::{cel_type_from_proto, from_parsed_expr, maybe_unwrap_well_known, to_checked_expr, ProstMessage, ProstProtoRegistry};
 
 #[cfg(test)]
 use cel_core::CelType;
@@ -51,7 +49,7 @@ impl CelConformanceService {
     /// When false, enum values are returned as plain integers (legacy behavior).
     pub fn with_strong_enums(strong: bool) -> Self {
         // Create proto type registry with conformance test proto descriptors
-        let mut registry = ProtoTypeRegistry::new();
+        let mut registry = ProstProtoRegistry::new();
 
         // Add conformance test proto descriptors
         // Order matters: dependencies must be added before dependents
@@ -71,9 +69,10 @@ impl CelConformanceService {
             .add_file_descriptor_set(cel_core_proto::gen::cel::expr::conformance::test::FILE_DESCRIPTOR_SET)
             .expect("Failed to add cel.expr.conformance.test descriptors");
 
+        let registry = Arc::new(registry);
         let mut env = Env::with_standard_library()
             .with_all_extensions()
-            .with_proto_types(registry);
+            .with_proto_registry(registry as Arc<dyn cel_core::eval::ProtoRegistry>);
         if !strong {
             env = env.with_legacy_enums();
         }
@@ -184,12 +183,21 @@ impl ConformanceService for CelConformanceService {
         };
 
         // Get proto registry for value conversion
-        let proto_types = match self.env.proto_types() {
+        let proto_registry = match self.env.proto_registry() {
             Some(registry) => registry,
             None => {
                 return EvalResponse {
                     result: None,
-                    issues: vec![Issue::error("proto type registry not available")],
+                    issues: vec![Issue::error("proto registry not available")],
+                };
+            }
+        };
+        let proto_types = match proto_registry.as_any().downcast_ref::<ProstProtoRegistry>() {
+            Some(r) => r,
+            None => {
+                return EvalResponse {
+                    result: None,
+                    issues: vec![Issue::error("proto registry is not ProstProtoRegistry")],
                 };
             }
         };
@@ -267,7 +275,7 @@ fn convert_function_decl(proto: &FunctionTypeDecl) -> cel_core::types::FunctionD
 /// Convert bindings to a MapActivation.
 fn bindings_to_activation(
     bindings: &[Binding],
-    registry: &ProtoTypeRegistry,
+    registry: &ProstProtoRegistry,
 ) -> Result<MapActivation, String> {
     let mut activation = MapActivation::new();
     for binding in bindings {
@@ -278,7 +286,7 @@ fn bindings_to_activation(
 }
 
 /// Convert a proto Value to a cel_core::eval::Value.
-fn proto_value_to_value(proto: &ProtoValue, registry: &ProtoTypeRegistry) -> Result<Value, String> {
+fn proto_value_to_value(proto: &ProtoValue, registry: &ProstProtoRegistry) -> Result<Value, String> {
     match &proto.kind {
         Some(ProtoValueKind::NullValue(_)) => Ok(Value::Null),
         Some(ProtoValueKind::BoolValue(b)) => Ok(Value::Bool(*b)),
@@ -330,7 +338,7 @@ fn proto_value_to_value(proto: &ProtoValue, registry: &ProtoTypeRegistry) -> Res
                 .map_err(|e| format!("failed to decode message: {}", e))?;
 
             // Convert to CEL Value using well-known type unwrapping
-            Ok(wkt::maybe_unwrap_well_known(message))
+            Ok(maybe_unwrap_well_known(message))
         }
         None => Err("missing value kind".to_string()),
     }
@@ -413,7 +421,9 @@ fn value_to_proto_value(value: &Value) -> ProtoValue {
                 return value_to_proto_value(v);
             }
         },
-        Value::Proto(proto) => {
+        Value::Message(msg_val) => {
+            let proto = msg_val.as_any().downcast_ref::<ProstMessage>()
+                .expect("Message must be ProstMessage");
             // If the proto message IS an Any, preserve its inner type_url and value
             if proto.type_name() == "google.protobuf.Any" {
                 let msg = proto.message();

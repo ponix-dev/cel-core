@@ -8,13 +8,16 @@ use std::sync::Arc;
 use prost::Message;
 use prost_reflect::{DynamicMessage, MessageDescriptor, ReflectMessage};
 
-use super::{time, Duration, EvalError, MapKey, ProtoValue, Timestamp, Value, ValueMap};
-use crate::types::ProtoTypeRegistry;
+use cel_core::eval::time;
+use cel_core::eval::{Duration, EvalError, MapKey, Timestamp, Value, ValueMap};
+
+use crate::message::ProstMessage;
+use crate::registry::ProstProtoRegistry;
 
 // ==================== Well-Known Type Unwrapping ====================
 
 /// Check if a message is a well-known type and unwrap it to a native CEL value.
-/// Non-WKT messages are returned as `Value::Proto`.
+/// Non-WKT messages are returned as `Value::Message`.
 pub fn maybe_unwrap_well_known(message: DynamicMessage) -> Value {
     let descriptor = message.descriptor();
     let type_name = descriptor.full_name();
@@ -56,7 +59,7 @@ pub fn maybe_unwrap_well_known(message: DynamicMessage) -> Value {
         "google.protobuf.Value" => unwrap_google_value(&message),
         "google.protobuf.Struct" => unwrap_google_struct(&message),
         "google.protobuf.ListValue" => unwrap_google_list_value(&message),
-        _ => Value::Proto(ProtoValue::new(message)),
+        _ => Value::Message(Box::new(ProstMessage::new(message))),
     }
 }
 
@@ -187,8 +190,6 @@ pub fn get_field_bytes(message: &DynamicMessage, field_name: &str) -> Option<Vec
 /// Unwrap a `google.protobuf.Value` message to a native CEL value.
 fn unwrap_google_value(message: &DynamicMessage) -> Value {
     let descriptor = message.descriptor();
-    // The Value message has a `kind` oneof with fields:
-    // null_value, number_value, string_value, bool_value, struct_value, list_value
     if let Some(field) = descriptor.get_field_by_name("null_value") {
         if message.has_field(&field) {
             return Value::Null;
@@ -234,7 +235,6 @@ fn unwrap_google_value(message: &DynamicMessage) -> Value {
             }
         }
     }
-    // No oneof field set - treat as null (default for Value)
     Value::Null
 }
 
@@ -258,7 +258,6 @@ fn unwrap_google_struct(message: &DynamicMessage) -> Value {
             return Value::Map(Arc::new(value_map));
         }
     }
-    // Empty struct
     Value::Map(Arc::new(ValueMap::new()))
 }
 
@@ -281,16 +280,15 @@ fn unwrap_google_list_value(message: &DynamicMessage) -> Value {
             return Value::List(Arc::from(values));
         }
     }
-    // Empty list
     Value::List(Arc::from(Vec::<Value>::new()))
 }
 
-// ==================== WKT Coercion (CEL value → google.protobuf.*) ====================
+// ==================== WKT Coercion (CEL value -> google.protobuf.*) ====================
 
 /// Convert a CEL value to a `google.protobuf.Value` message.
 pub fn cel_value_to_google_value(
     value: &Value,
-    registry: &ProtoTypeRegistry,
+    registry: &ProstProtoRegistry,
 ) -> Result<DynamicMessage, Value> {
     let value_desc = registry
         .get_message("google.protobuf.Value")
@@ -310,7 +308,6 @@ pub fn cel_value_to_google_value(
             }
         }
         Value::Int(i) => {
-            // Large integers that can't be represented exactly as f64 → string_value
             if *i > (1i64 << 53) || *i < -(1i64 << 53) {
                 if let Some(field) = value_desc.get_field_by_name("string_value") {
                     msg.set_field(&field, prost_reflect::Value::String(i.to_string()));
@@ -320,7 +317,6 @@ pub fn cel_value_to_google_value(
             }
         }
         Value::UInt(u) => {
-            // Large integers that can't be represented exactly as f64 → string_value
             if *u > (1u64 << 53) {
                 if let Some(field) = value_desc.get_field_by_name("string_value") {
                     msg.set_field(&field, prost_reflect::Value::String(u.to_string()));
@@ -352,31 +348,28 @@ pub fn cel_value_to_google_value(
             }
         }
         Value::Bytes(b) => {
-            // Bytes → base64-encoded string in google.protobuf.Value (JSON mapping)
             let encoded = base64_encode(b);
             if let Some(field) = value_desc.get_field_by_name("string_value") {
                 msg.set_field(&field, prost_reflect::Value::String(encoded));
             }
         }
         Value::Duration(d) => {
-            // Duration → "Xs" string format (protobuf JSON mapping)
             let formatted = time::format_duration(d);
             if let Some(field) = value_desc.get_field_by_name("string_value") {
                 msg.set_field(&field, prost_reflect::Value::String(formatted));
             }
         }
         Value::Timestamp(ts) => {
-            // Timestamp → RFC 3339 format (protobuf JSON mapping)
             let formatted = time::format_timestamp(ts);
             if let Some(field) = value_desc.get_field_by_name("string_value") {
                 msg.set_field(&field, prost_reflect::Value::String(formatted));
             }
         }
-        Value::Proto(proto) => {
-            // Handle WKT proto messages that can be represented in google.protobuf.Value
+        Value::Message(msg_val) => {
+            let proto = msg_val.as_any().downcast_ref::<ProstMessage>()
+                .expect("Message must be ProstMessage for WKT conversion");
             match proto.message().descriptor().full_name() {
                 "google.protobuf.Empty" => {
-                    // Empty → empty struct_value
                     let struct_desc = registry
                         .get_message("google.protobuf.Struct")
                         .ok_or_else(|| {
@@ -390,7 +383,6 @@ pub fn cel_value_to_google_value(
                     }
                 }
                 "google.protobuf.FieldMask" => {
-                    // FieldMask → comma-separated paths string
                     let paths = get_field_mask_paths(proto.message());
                     if let Some(field) = value_desc.get_field_by_name("string_value") {
                         msg.set_field(&field, prost_reflect::Value::String(paths));
@@ -418,7 +410,7 @@ pub fn cel_value_to_google_value(
 /// Convert a CEL map (string-keyed) to a `google.protobuf.Struct` message.
 pub fn cel_map_to_struct(
     map: &ValueMap,
-    registry: &ProtoTypeRegistry,
+    registry: &ProstProtoRegistry,
 ) -> Result<DynamicMessage, Value> {
     let struct_desc = registry
         .get_message("google.protobuf.Struct")
@@ -453,7 +445,7 @@ pub fn cel_map_to_struct(
 /// Convert a CEL list to a `google.protobuf.ListValue` message.
 pub fn cel_list_to_list_value(
     list: &[Value],
-    registry: &ProtoTypeRegistry,
+    registry: &ProstProtoRegistry,
 ) -> Result<DynamicMessage, Value> {
     let list_desc = registry
         .get_message("google.protobuf.ListValue")
@@ -507,13 +499,12 @@ pub fn pack_message_into_any(
 /// then pack into Any.
 pub fn wrap_value_for_any(
     value: &Value,
-    registry: &ProtoTypeRegistry,
+    registry: &ProstProtoRegistry,
 ) -> Result<DynamicMessage, Value> {
     let any_desc = registry
         .get_message("google.protobuf.Any")
         .ok_or_else(|| Value::error(EvalError::internal("google.protobuf.Any not in registry")))?;
 
-    // Determine which wrapper type to use and create the wrapper message
     let wrapper_msg = match value {
         Value::Bool(b) => {
             let desc = registry.get_message("google.protobuf.BoolValue").ok_or_else(|| {
@@ -607,7 +598,6 @@ pub fn wrap_value_for_any(
         Value::Map(map) => cel_map_to_struct(map, registry)?,
         Value::List(list) => cel_list_to_list_value(list, registry)?,
         Value::Null => {
-            // Null wraps as google.protobuf.Value with null_value
             cel_value_to_google_value(value, registry)?
         }
         _ => {
@@ -618,7 +608,6 @@ pub fn wrap_value_for_any(
         }
     };
 
-    // Pack the wrapper message into Any
     let mut any_msg = DynamicMessage::new(any_desc.clone());
     let type_url = format!(
         "type.googleapis.com/{}",

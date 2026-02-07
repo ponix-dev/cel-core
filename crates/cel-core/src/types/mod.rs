@@ -26,7 +26,7 @@ pub use decls::{FunctionDecl, OverloadDecl, VariableDecl};
 
 // Proto types module
 pub mod proto;
-pub use proto::{proto_message_to_cel_type, ProtoTypeRegistry, ResolvedProtoType};
+pub use proto::{proto_message_to_cel_type, ResolvedProtoType};
 
 // ==================== CelValue ====================
 

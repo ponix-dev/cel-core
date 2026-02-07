@@ -13,15 +13,13 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use prost_reflect::Kind;
-
 use super::{
-    wkt,
     Activation, EvalError, FunctionRegistry, HierarchicalActivation, MapKey,
     OptionalValue, Value, ValueMap,
 };
+use super::proto_registry::ProtoRegistry;
 use crate::checker::ReferenceInfo;
-use crate::types::{Expr, ProtoTypeRegistry, SpannedExpr};
+use crate::types::{Expr, SpannedExpr};
 
 /// The CEL expression evaluator.
 ///
@@ -36,8 +34,8 @@ pub struct Evaluator<'a> {
     pub(super) functions: &'a FunctionRegistry,
     /// Reference map from type checking (for qualified name resolution).
     pub(super) reference_map: Option<&'a HashMap<i64, ReferenceInfo>>,
-    /// Proto type registry for message construction.
-    pub(super) proto_types: Option<&'a ProtoTypeRegistry>,
+    /// Type registry for message construction and field access.
+    pub(super) proto_registry: Option<&'a dyn ProtoRegistry>,
     /// Container namespace for type resolution (C++ namespace rules).
     pub(super) container: String,
     /// Abbreviations for qualified name shortcuts.
@@ -59,7 +57,7 @@ impl<'a> Evaluator<'a> {
             root_activation: activation,
             functions,
             reference_map: None,
-            proto_types: None,
+            proto_registry: None,
             container: String::new(),
             abbreviations: None,
             strong_enums: true,
@@ -73,9 +71,9 @@ impl<'a> Evaluator<'a> {
         self
     }
 
-    /// Set the proto type registry for message construction (builder pattern).
-    pub fn with_proto_types(mut self, registry: &'a ProtoTypeRegistry) -> Self {
-        self.proto_types = Some(registry);
+    /// Set the type registry for message construction and field access (builder pattern).
+    pub fn with_proto_registry(mut self, registry: &'a dyn ProtoRegistry) -> Self {
+        self.proto_registry = Some(registry);
         self
     }
 
@@ -139,8 +137,8 @@ impl<'a> Evaluator<'a> {
         if let Some(ref_map) = self.reference_map {
             eval = eval.with_reference_map(ref_map);
         }
-        if let Some(proto_types) = self.proto_types {
-            eval = eval.with_proto_types(proto_types);
+        if let Some(proto_registry) = self.proto_registry {
+            eval = eval.with_proto_registry(proto_registry);
         }
         if !self.container.is_empty() {
             eval = eval.with_container(&self.container);
@@ -500,84 +498,13 @@ impl<'a> Evaluator<'a> {
                     }
                 }
             }
-            Value::Proto(proto) => {
-                let descriptor = proto.descriptor();
-                match descriptor.get_field_by_name(field) {
-                    Some(field_desc) => {
-                        // For wrapper/well-known message fields that support presence,
-                        // return null if the field is not set.
-                        // This applies to wrapper types (e.g., Int64Value, StringValue)
-                        // and other WKT message fields (Any, Value, etc.)
-                        if field_desc.supports_presence()
-                            && !proto.message().has_field(&field_desc)
-                        {
-                            if let Kind::Message(msg_desc) = field_desc.kind() {
-                                let msg_name = msg_desc.full_name();
-                                // Unset ListValue → empty list, unset Struct → empty map
-                                if msg_name == "google.protobuf.ListValue" {
-                                    let result = Value::List(Arc::from(Vec::<Value>::new()));
-                                    return if optional {
-                                        Value::optional_some(result)
-                                    } else {
-                                        result
-                                    };
-                                }
-                                if msg_name == "google.protobuf.Struct" {
-                                    let result = Value::Map(Arc::new(ValueMap::new()));
-                                    return if optional {
-                                        Value::optional_some(result)
-                                    } else {
-                                        result
-                                    };
-                                }
-                                if wkt::is_wrapper_type(&msg_desc)
-                                    || msg_name == "google.protobuf.Any"
-                                {
-                                    if optional {
-                                        return Value::optional_some(Value::Null);
-                                    } else {
-                                        return Value::Null;
-                                    }
-                                }
-                            }
-                        }
-                        // For optional access, unset repeated/map fields return none
-                        if optional
-                            && (field_desc.is_list() || field_desc.is_map())
-                            && !proto.message().has_field(&field_desc)
-                        {
-                            return Value::optional_none();
-                        }
-                        let proto_value = proto.message().get_field(&field_desc);
-                        let cel_value = self.proto_reflect_to_value(proto_value, &field_desc);
-                        if optional {
-                            Value::optional_some(cel_value)
-                        } else {
-                            cel_value
-                        }
-                    }
-                    None => {
-                        // Try extension field lookup
-                        if let Some(registry) = self.proto_types {
-                            if let Some(ext) = registry.get_extension_by_name(field) {
-                                if ext.containing_message() == descriptor {
-                                    let proto_value = proto.message().get_extension(&ext);
-                                    let cel_value =
-                                        self.extension_value_to_cel(proto_value, &ext);
-                                    return if optional {
-                                        Value::optional_some(cel_value)
-                                    } else {
-                                        cel_value
-                                    };
-                                }
-                            }
-                        }
-                        if optional {
-                            Value::optional_none()
-                        } else {
-                            Value::error(EvalError::field_not_found(field))
-                        }
-                    }
+            Value::Message(msg) => {
+                if let Some(registry) = self.proto_registry {
+                    registry.message_field_access(msg.as_ref(), field, optional, self.strong_enums)
+                } else if optional {
+                    Value::optional_none()
+                } else {
+                    Value::error(EvalError::field_not_found(field))
                 }
             }
             Value::Optional(opt) => match opt {
@@ -586,7 +513,7 @@ impl<'a> Evaluator<'a> {
                     // For those types, missing fields become Optional(None).
                     // For other types (null, int, etc.), propagate the error.
                     match inner.as_ref() {
-                        Value::Map(_) | Value::Proto(_) => {
+                        Value::Map(_) | Value::Message(_) => {
                             let result = self.access_field(inner, field, false);
                             if result.is_error() {
                                 Value::optional_none()
@@ -925,8 +852,8 @@ impl<'a> Evaluator<'a> {
                 }
             }
             Value::String(s) => {
-                // String → Enum: look up value by name in proto registry
-                if let Some(registry) = self.proto_types {
+                // String → Enum: look up value by name in type registry
+                if let Some(registry) = self.proto_registry {
                     if let Some(value) = registry.get_enum_value(enum_type_name, s) {
                         self.enum_or_int(enum_type_name, value)
                     } else {
@@ -936,7 +863,7 @@ impl<'a> Evaluator<'a> {
                         )))
                     }
                 } else {
-                    Value::error(EvalError::internal("no proto types available for enum lookup"))
+                    Value::error(EvalError::internal("no type registry available for enum lookup"))
                 }
             }
             _ => Value::error(EvalError::no_matching_overload("enum constructor")),
@@ -1100,32 +1027,11 @@ impl<'a> Evaluator<'a> {
                 let key = MapKey::String(Arc::from(field));
                 Value::Bool(map.contains_key(&key))
             }
-            Value::Proto(proto) => {
-                // Check if the proto message has the field set
-                let descriptor = proto.descriptor();
-                match descriptor.get_field_by_name(field) {
-                    Some(field_desc) => {
-                        if field_desc.supports_presence() {
-                            // Proto2 fields, oneof fields, and message fields track presence
-                            Value::Bool(proto.message().has_field(&field_desc))
-                        } else {
-                            // Proto3 scalar: has() = value differs from default
-                            let current = proto.message().get_field(&field_desc);
-                            let default = field_desc.default_value();
-                            Value::Bool(current.as_ref() != &default)
-                        }
-                    }
-                    None => {
-                        // Try extension field lookup
-                        if let Some(registry) = self.proto_types {
-                            if let Some(ext) = registry.get_extension_by_name(field) {
-                                if ext.containing_message() == descriptor {
-                                    return Value::Bool(proto.message().has_extension(&ext));
-                                }
-                            }
-                        }
-                        Value::error(EvalError::field_not_found(field))
-                    }
+            Value::Message(msg) => {
+                if let Some(registry) = self.proto_registry {
+                    registry.message_has_field(msg.as_ref(), field)
+                } else {
+                    Value::Bool(false)
                 }
             }
             Value::Optional(opt) => match opt {
@@ -1134,19 +1040,11 @@ impl<'a> Evaluator<'a> {
                         let key = MapKey::String(Arc::from(field));
                         Value::Bool(map.contains_key(&key))
                     }
-                    Value::Proto(proto) => {
-                        let descriptor = proto.descriptor();
-                        match descriptor.get_field_by_name(field) {
-                            Some(field_desc) => {
-                                if field_desc.supports_presence() {
-                                    Value::Bool(proto.message().has_field(&field_desc))
-                                } else {
-                                    let current = proto.message().get_field(&field_desc);
-                                    let default = field_desc.default_value();
-                                    Value::Bool(current.as_ref() != &default)
-                                }
-                            }
-                            None => Value::error(EvalError::field_not_found(field)),
+                    Value::Message(msg) => {
+                        if let Some(registry) = self.proto_registry {
+                            registry.message_has_field(msg.as_ref(), field)
+                        } else {
+                            Value::Bool(false)
                         }
                     }
                     _ => Value::Bool(false),
@@ -1155,6 +1053,58 @@ impl<'a> Evaluator<'a> {
             },
             _ => Value::Bool(false),
         }
+    }
+
+    /// Evaluate a struct construction expression.
+    ///
+    /// Resolves the type name, evaluates all field expressions, then delegates
+    /// to the type registry for actual message construction.
+    pub(super) fn eval_struct(
+        &self,
+        type_name: &SpannedExpr,
+        fields: &[crate::types::StructField],
+    ) -> Value {
+        use super::proto_registry::StructFieldValue;
+
+        // Get the fully qualified type name
+        let extracted_name = self.get_type_name_from_expr(type_name);
+        let fq_name = match self.resolve_type_name(type_name) {
+            Some(name) => name,
+            None => {
+                return Value::error(EvalError::internal(format!(
+                    "could not resolve type name for struct (extracted: {:?})",
+                    extracted_name
+                )))
+            }
+        };
+
+        // Get the type registry
+        let registry = match self.proto_registry {
+            Some(r) => r,
+            None => {
+                return Value::error(EvalError::internal(format!(
+                    "type registry not available for struct construction (type: {})",
+                    fq_name
+                )))
+            }
+        };
+
+        // Evaluate all field expressions
+        let mut evaluated_fields = Vec::with_capacity(fields.len());
+        for field in fields {
+            let value = self.eval_expr(&field.value);
+            if value.is_error() {
+                return value;
+            }
+            evaluated_fields.push(StructFieldValue {
+                name: field.name.clone(),
+                value,
+                optional: field.optional,
+            });
+        }
+
+        // Delegate to the type registry for message construction
+        registry.construct_message(&fq_name, &evaluated_fields, self.strong_enums)
     }
 
     fn eval_bind(&self, var_name: &str, init: &SpannedExpr, body: &SpannedExpr) -> Value {

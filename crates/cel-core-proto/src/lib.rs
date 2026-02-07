@@ -62,9 +62,17 @@ mod converter;
 pub use checked_expr::{check_result_from_proto, to_checked_expr, to_checked_expr_from_ast};
 mod error;
 pub mod gen;
+pub mod message;
 mod operators;
+pub mod registry;
 mod source_info;
 mod type_conversion;
+pub(crate) mod wkt;
+mod eval_proto;
+
+pub use message::ProstMessage;
+pub use registry::ProstProtoRegistry;
+pub use wkt::maybe_unwrap_well_known;
 
 pub use converter::AstConverter;
 pub use error::ConversionError;
