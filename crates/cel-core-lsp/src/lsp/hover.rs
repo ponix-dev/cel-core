@@ -181,6 +181,7 @@ fn hover_for_node(
             Expr::Member { field, .. } => get_builtin(field).map(format_builtin_docs),
             _ => None,
         },
+        Expr::MemberTestOnly { .. } => get_builtin("has").map(format_builtin_docs),
         _ => None,
     }?;
 
@@ -249,6 +250,7 @@ pub fn hover_at_position_proto(state: &ProtoDocumentState, position: Position) -
             Expr::Member { field, .. } => get_function_docs(field),
             _ => None,
         },
+        Expr::MemberTestOnly { .. } => get_function_docs("has"),
         _ => None,
     }?;
 
@@ -311,6 +313,25 @@ mod tests {
             HoverContents::Markup(m) => {
                 assert!(m.value.contains("Undeclared reference"));
                 assert!(m.value.contains("`x`"));
+            }
+            _ => panic!("Expected markup content"),
+        }
+    }
+
+    #[test]
+    fn hover_for_has_macro() {
+        let source = "has(msg.field)";
+        let result = parse(source);
+        let ast = result.ast.unwrap();
+        let line_index = LineIndex::new(source.to_string());
+
+        // Hover on "has" (position 0) should return has() builtin docs
+        let hover = hover_at_position(&line_index, &ast, &[], Position::new(0, 0));
+        assert!(hover.is_some());
+        let hover = hover.unwrap();
+        match hover.contents {
+            HoverContents::Markup(m) => {
+                assert!(m.value.contains("has"));
             }
             _ => panic!("Expected markup content"),
         }

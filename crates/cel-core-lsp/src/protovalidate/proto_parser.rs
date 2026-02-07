@@ -62,7 +62,7 @@ impl ProtovalidateContext {
 }
 
 /// Convert a proto field type string to a CEL type.
-fn proto_field_type_to_cel(proto_type: &str) -> CelType {
+pub(crate) fn proto_field_type_to_cel(proto_type: &str) -> CelType {
     match proto_type {
         "bool" => CelType::Bool,
         "int32" | "int64" | "sint32" | "sint64" | "sfixed32" | "sfixed64" => CelType::Int,

@@ -5,8 +5,10 @@
 //! and host document coordinates.
 
 use std::ops::Range;
+use std::sync::Arc;
 
-use cel_core::{parse, CheckError, CheckResult, Env, ParseError, SpannedExpr};
+use cel_core::{parse, CelType, CheckError, CheckResult, Env, ParseError, SpannedExpr};
+use cel_core_proto::ProstProtoRegistry;
 
 use crate::protovalidate::ProtovalidateContext;
 use crate::settings::protovalidate_extension;
@@ -117,9 +119,14 @@ pub struct CelRegionState {
 
 impl CelRegionState {
     /// Create a new CEL region state with a specific protovalidate context.
-    pub fn with_context(region: CelRegion, mapper: OffsetMapper, context: ProtovalidateContext) -> Self {
+    pub fn with_context(
+        region: CelRegion,
+        mapper: OffsetMapper,
+        context: ProtovalidateContext,
+        proto_registry: Option<&Arc<ProstProtoRegistry>>,
+    ) -> Self {
         let result = parse(&region.source);
-        let env = build_protovalidate_env_typed(&context);
+        let env = build_protovalidate_env_typed(&context, proto_registry);
 
         // Run type checking if we have an AST
         let check_result = result.ast.as_ref().map(|ast| env.check(ast));
@@ -189,16 +196,72 @@ impl CelRegionState {
     }
 }
 
-/// Build a protovalidate environment with typed `this` based on context.
-fn build_protovalidate_env_typed(context: &ProtovalidateContext) -> Env {
+/// Resolve a short message name (e.g. "User") to its fully qualified name
+/// (e.g. "test.User") using the proto registry's descriptor pool.
+///
+/// Returns the name as-is if it already contains a dot (already qualified).
+/// Returns `None` if the name is ambiguous (multiple matches) or not found.
+fn resolve_short_message_name(short_name: &str, registry: &ProstProtoRegistry) -> Option<String> {
+    if short_name.contains('.') {
+        return Some(short_name.to_string());
+    }
+
+    let mut matches = registry
+        .pool()
+        .all_messages()
+        .filter(|msg| msg.name() == short_name);
+
+    let first = matches.next()?;
+    // Ambiguous if more than one match
+    if matches.next().is_some() {
+        return None;
+    }
+    Some(first.full_name().to_string())
+}
+
+/// Resolve `this` type, upgrading short message names to FQ names when a registry is available.
+fn resolve_this_type(
+    context: &ProtovalidateContext,
+    registry: Option<&Arc<ProstProtoRegistry>>,
+) -> CelType {
     let this_type = context.this_type();
 
-    Env::with_standard_library()
+    // If we have a registry, try to resolve short message names to FQ names
+    let Some(registry) = registry else {
+        return this_type;
+    };
+
+    match &this_type {
+        CelType::Message(name) => {
+            if let Some(fq_name) = resolve_short_message_name(name.as_ref(), registry) {
+                CelType::message(&fq_name)
+            } else {
+                this_type
+            }
+        }
+        _ => this_type,
+    }
+}
+
+/// Build a protovalidate environment with typed `this` based on context.
+fn build_protovalidate_env_typed(
+    context: &ProtovalidateContext,
+    proto_registry: Option<&Arc<ProstProtoRegistry>>,
+) -> Env {
+    let this_type = resolve_this_type(context, proto_registry);
+
+    let mut env = Env::with_standard_library()
         .with_all_extensions()
         .with_extension(protovalidate_extension())
         .with_variable("this", this_type)
-        .with_variable("rules", cel_core::CelType::Dyn)
-        .with_variable("now", cel_core::CelType::Timestamp)
+        .with_variable("rules", CelType::Dyn)
+        .with_variable("now", CelType::Timestamp);
+
+    if let Some(registry) = proto_registry {
+        env = env.with_proto_registry(Arc::clone(registry) as Arc<dyn cel_core::eval::ProtoRegistry>);
+    }
+
+    env
 }
 
 #[cfg(test)]

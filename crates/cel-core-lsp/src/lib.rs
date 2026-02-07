@@ -1,5 +1,9 @@
 //! CEL Language Server implementation.
 
+use std::path::PathBuf;
+use std::sync::{Arc, OnceLock};
+
+use cel_core_proto::ProstProtoRegistry;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService};
@@ -10,14 +14,16 @@ pub mod protovalidate;
 pub mod settings;
 pub mod types;
 
-pub use document::{DocumentState, LineIndex};
-pub use lsp::to_diagnostics;
+pub use document::{DocumentState, LineIndex, ProtoDocumentState};
+pub use lsp::{proto_to_diagnostics, to_diagnostics};
 
 use document::{DocumentKind, DocumentStore};
 
 pub struct Backend {
     client: Client,
     documents: DocumentStore,
+    workspace_root: OnceLock<PathBuf>,
+    proto_registry: OnceLock<Option<Arc<ProstProtoRegistry>>>,
 }
 
 impl Backend {
@@ -25,12 +31,15 @@ impl Backend {
         Self {
             client,
             documents: DocumentStore::new(),
+            workspace_root: OnceLock::new(),
+            proto_registry: OnceLock::new(),
         }
     }
 
     /// Parse document and publish diagnostics.
     async fn on_document_change(&self, uri: Url, text: String, version: i32) {
-        let state = self.documents.open(uri.clone(), text, version);
+        let registry = self.proto_registry.get().and_then(|r| r.clone());
+        let state = self.documents.open(uri.clone(), text, version, registry.as_ref());
         self.publish_diagnostics_for(&uri, &state).await;
     }
 
@@ -59,7 +68,29 @@ impl Backend {
 
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
-    async fn initialize(&self, _: InitializeParams) -> Result<InitializeResult> {
+    async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
+        // Extract workspace root from params
+        let workspace_root = params
+            .workspace_folders
+            .as_ref()
+            .and_then(|folders| folders.first())
+            .and_then(|f| f.uri.to_file_path().ok())
+            .or_else(|| {
+                #[allow(deprecated)]
+                params.root_uri.as_ref()?.to_file_path().ok()
+            });
+
+        if let Some(root) = workspace_root {
+            let _ = self.workspace_root.set(root.clone());
+
+            // Load settings and proto registry
+            let settings = settings::load_settings_from_workspace(&root);
+            let registry = settings::load_proto_registry(&settings, &root);
+            let _ = self.proto_registry.set(registry);
+        } else {
+            let _ = self.proto_registry.set(None);
+        }
+
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(

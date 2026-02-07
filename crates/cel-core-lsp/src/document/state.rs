@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use cel_core::{parse, CheckError, CheckResult, Env, ParseError, SpannedExpr};
+use cel_core_proto::ProstProtoRegistry;
 use dashmap::DashMap;
 use tower_lsp::lsp_types::Url;
 
@@ -79,7 +80,7 @@ pub struct ProtoDocumentState {
 
 impl ProtoDocumentState {
     /// Create a new proto document state by extracting and parsing CEL regions.
-    pub fn new(source: String, version: i32) -> Self {
+    pub fn new(source: String, version: i32, proto_registry: Option<&Arc<ProstProtoRegistry>>) -> Self {
         let line_index = LineIndex::new(source.clone());
 
         // Extract CEL regions from the proto file
@@ -91,7 +92,7 @@ impl ProtoDocumentState {
             .map(|ext| {
                 let context = ext.context.clone();
                 let (region, mapper) = ext.into_region_and_mapper();
-                CelRegionState::with_context(region, mapper, context)
+                CelRegionState::with_context(region, mapper, context, proto_registry)
             })
             .collect();
 
@@ -135,9 +136,9 @@ impl DocumentStore {
 
     /// Open or update a document with the given source text.
     /// Auto-detects document type based on file extension.
-    pub fn open(&self, uri: Url, source: String, version: i32) -> Arc<DocumentKind> {
+    pub fn open(&self, uri: Url, source: String, version: i32, proto_registry: Option<&Arc<ProstProtoRegistry>>) -> Arc<DocumentKind> {
         let kind = if is_proto_file(&uri) {
-            DocumentKind::Proto(ProtoDocumentState::new(source, version))
+            DocumentKind::Proto(ProtoDocumentState::new(source, version, proto_registry))
         } else {
             DocumentKind::Cel(DocumentState::new(source, version))
         };

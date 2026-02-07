@@ -1,8 +1,10 @@
 use std::path::PathBuf;
 
 use cel_core::Env;
-use cel_core_lsp::settings::{build_env_with_protos, load_settings};
-use cel_core_lsp::{to_diagnostics, DocumentState, LineIndex};
+use cel_core_lsp::settings::{build_env_with_protos, load_proto_registry, load_settings};
+use cel_core_lsp::{
+    proto_to_diagnostics, to_diagnostics, DocumentState, LineIndex, ProtoDocumentState,
+};
 use expect_test::expect;
 use tower_lsp::lsp_types::Diagnostic;
 
@@ -184,6 +186,107 @@ fn proto_undefined_field() {
 #[test]
 fn proto_nested_access() {
     let actual = check_cel("proto", "user.address.city");
+    let expected = expect![[r#"OK (no diagnostics)"#]];
+    expected.assert_eq(&actual);
+}
+
+// ---------------------------------------------------------------------------
+// Tests — protovalidate `this` type resolution
+// ---------------------------------------------------------------------------
+
+/// Build a proto source with a message-level protovalidate CEL expression,
+/// parse it as a ProtoDocumentState with the proto fixture registry,
+/// and return formatted diagnostics.
+fn check_protovalidate_message(message_name: &str, cel_expr: &str) -> String {
+    let fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/proto");
+    let settings = load_settings(&fixture_path.join("settings.toml"));
+    let registry = load_proto_registry(&settings, &fixture_path);
+
+    let proto_source = format!(
+        r#"syntax = "proto3";
+package test;
+
+message {} {{
+    option (buf.validate.message).cel = {{
+        expression: "{}"
+    }};
+}}"#,
+        message_name, cel_expr
+    );
+
+    let state = ProtoDocumentState::new(proto_source, 0, registry.as_ref());
+    let diagnostics = proto_to_diagnostics(&state);
+    format_diagnostics(&diagnostics)
+}
+
+#[test]
+fn protovalidate_this_field_access() {
+    let actual = check_protovalidate_message("User", "this.name");
+    let expected = expect![[r#"OK (no diagnostics)"#]];
+    expected.assert_eq(&actual);
+}
+
+#[test]
+fn protovalidate_this_undefined_field() {
+    let actual = check_protovalidate_message("User", "this.nonexistent");
+    let expected = expect![[r#"5:21-5:37 error [undefined-field]: undefined field 'nonexistent' on type 'test.User'"#]];
+    expected.assert_eq(&actual);
+}
+
+#[test]
+fn protovalidate_this_nested_field_access() {
+    let actual = check_protovalidate_message("User", "this.address.city");
+    let expected = expect![[r#"OK (no diagnostics)"#]];
+    expected.assert_eq(&actual);
+}
+
+// ---------------------------------------------------------------------------
+// Tests — protovalidate field-level CEL expressions
+// ---------------------------------------------------------------------------
+
+/// Build a proto source with a field-level protovalidate CEL expression,
+/// parse it as a ProtoDocumentState with the proto fixture registry,
+/// and return formatted diagnostics.
+fn check_protovalidate_field(field_type: &str, field_name: &str, cel_expr: &str) -> String {
+    let fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/proto");
+    let settings = load_settings(&fixture_path.join("settings.toml"));
+    let registry = load_proto_registry(&settings, &fixture_path);
+
+    let proto_source = format!(
+        r#"syntax = "proto3";
+package test;
+
+message TestMessage {{
+    {field_type} {field_name} = 1 [(buf.validate.field).cel = {{
+        expression: "{cel_expr}"
+    }}];
+}}"#
+    );
+
+    let state = ProtoDocumentState::new(proto_source, 0, registry.as_ref());
+    let diagnostics = proto_to_diagnostics(&state);
+    format_diagnostics(&diagnostics)
+}
+
+#[test]
+fn protovalidate_field_string_is_email() {
+    let actual = check_protovalidate_field("string", "email", "this.isEmail()");
+    let expected = expect![[r#"OK (no diagnostics)"#]];
+    expected.assert_eq(&actual);
+}
+
+#[test]
+fn protovalidate_field_int_comparison() {
+    let actual = check_protovalidate_field("int32", "age", "this > 0 && this < 150");
+    let expected = expect![[r#"OK (no diagnostics)"#]];
+    expected.assert_eq(&actual);
+}
+
+#[test]
+fn protovalidate_field_string_size() {
+    let actual = check_protovalidate_field("string", "name", "this.size() > 0");
     let expected = expect![[r#"OK (no diagnostics)"#]];
     expected.assert_eq(&actual);
 }
