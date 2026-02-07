@@ -1,10 +1,9 @@
-//! Diagnostics conversion from parser and validation errors to LSP diagnostics.
+//! Diagnostics conversion from parser and check errors to LSP diagnostics.
 
-use cel_core::ParseError;
+use cel_core::{CheckError, CheckErrorKind, ParseError};
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString};
 
 use crate::document::{LineIndex, ProtoDocumentState};
-use crate::types::{ValidationError, ValidationErrorKind};
 
 /// Convert parser errors to LSP diagnostics.
 fn parse_errors_to_diagnostics(errors: &[ParseError], line_index: &LineIndex) -> Vec<Diagnostic> {
@@ -27,22 +26,23 @@ fn parse_errors_to_diagnostics(errors: &[ParseError], line_index: &LineIndex) ->
         .collect()
 }
 
-/// Convert validation errors to LSP diagnostics.
-fn validation_errors_to_diagnostics(
-    errors: &[ValidationError],
+/// Convert check errors to LSP diagnostics.
+fn check_errors_to_diagnostics(
+    errors: &[CheckError],
     line_index: &LineIndex,
 ) -> Vec<Diagnostic> {
     errors
         .iter()
         .map(|error| {
-            let code = match error.kind {
-                ValidationErrorKind::UndefinedVariable => "undefined-variable",
-                ValidationErrorKind::UndefinedMethod => "undefined-method",
-                ValidationErrorKind::StandaloneCalledAsMethod => "standalone-as-method",
-                ValidationErrorKind::MethodCalledAsStandalone => "method-as-standalone",
-                ValidationErrorKind::TooFewArguments => "too-few-arguments",
-                ValidationErrorKind::TooManyArguments => "too-many-arguments",
-                ValidationErrorKind::InvalidArgumentType => "invalid-argument-type",
+            let code = match &error.kind {
+                CheckErrorKind::UndeclaredReference { .. } => "undeclared-reference",
+                CheckErrorKind::NoMatchingOverload { .. } => "no-matching-overload",
+                CheckErrorKind::TypeMismatch { .. } => "type-mismatch",
+                CheckErrorKind::UndefinedField { .. } => "undefined-field",
+                CheckErrorKind::NotAssignable { .. } => "type-mismatch",
+                CheckErrorKind::HeterogeneousAggregate { .. } => "heterogeneous-aggregate",
+                CheckErrorKind::NotAType { .. } => "not-a-type",
+                CheckErrorKind::Other(_) => "check-error",
             };
 
             Diagnostic {
@@ -51,7 +51,7 @@ fn validation_errors_to_diagnostics(
                 code: Some(NumberOrString::String(code.to_string())),
                 code_description: None,
                 source: Some("cel".to_string()),
-                message: error.message.clone(),
+                message: error.message(),
                 related_information: None,
                 tags: None,
                 data: None,
@@ -60,21 +60,21 @@ fn validation_errors_to_diagnostics(
         .collect()
 }
 
-/// Convert all errors (parse + validation) to LSP diagnostics.
+/// Convert all errors (parse + check) to LSP diagnostics.
 pub fn to_diagnostics(
     parse_errors: &[ParseError],
-    validation_errors: &[ValidationError],
+    check_errors: &[CheckError],
     line_index: &LineIndex,
 ) -> Vec<Diagnostic> {
     let mut diagnostics = parse_errors_to_diagnostics(parse_errors, line_index);
-    diagnostics.extend(validation_errors_to_diagnostics(validation_errors, line_index));
+    diagnostics.extend(check_errors_to_diagnostics(check_errors, line_index));
     diagnostics
 }
 
 /// Convert all errors from a proto document to LSP diagnostics.
 ///
 /// This processes all CEL regions in the proto document, converting their
-/// parse and validation errors with proper offset mapping to host coordinates.
+/// parse and check errors with proper offset mapping to host coordinates.
 pub fn proto_to_diagnostics(state: &ProtoDocumentState) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
 
@@ -98,18 +98,19 @@ pub fn proto_to_diagnostics(state: &ProtoDocumentState) -> Vec<Diagnostic> {
             });
         }
 
-        // Convert validation errors
-        for error in &region_state.validation_errors {
+        // Convert check errors
+        for error in region_state.check_errors() {
             let host_span = mapper.span_to_host(&error.span);
             let range = state.line_index.span_to_range(&host_span);
-            let code = match error.kind {
-                ValidationErrorKind::UndefinedVariable => "undefined-variable",
-                ValidationErrorKind::UndefinedMethod => "undefined-method",
-                ValidationErrorKind::StandaloneCalledAsMethod => "standalone-as-method",
-                ValidationErrorKind::MethodCalledAsStandalone => "method-as-standalone",
-                ValidationErrorKind::TooFewArguments => "too-few-arguments",
-                ValidationErrorKind::TooManyArguments => "too-many-arguments",
-                ValidationErrorKind::InvalidArgumentType => "invalid-argument-type",
+            let code = match &error.kind {
+                CheckErrorKind::UndeclaredReference { .. } => "undeclared-reference",
+                CheckErrorKind::NoMatchingOverload { .. } => "no-matching-overload",
+                CheckErrorKind::TypeMismatch { .. } => "type-mismatch",
+                CheckErrorKind::UndefinedField { .. } => "undefined-field",
+                CheckErrorKind::NotAssignable { .. } => "type-mismatch",
+                CheckErrorKind::HeterogeneousAggregate { .. } => "heterogeneous-aggregate",
+                CheckErrorKind::NotAType { .. } => "not-a-type",
+                CheckErrorKind::Other(_) => "check-error",
             };
 
             diagnostics.push(Diagnostic {
@@ -118,7 +119,7 @@ pub fn proto_to_diagnostics(state: &ProtoDocumentState) -> Vec<Diagnostic> {
                 code: Some(NumberOrString::String(code.to_string())),
                 code_description: None,
                 source: Some("cel".to_string()),
-                message: error.message.clone(),
+                message: error.message(),
                 related_information: None,
                 tags: None,
                 data: None,
@@ -149,13 +150,8 @@ mod tests {
     }
 
     #[test]
-    fn creates_diagnostic_from_validation_error() {
-        let error = ValidationError {
-            kind: ValidationErrorKind::UndefinedVariable,
-            message: "undefined variable 'x'".to_string(),
-            span: 0..1,
-            name: "x".to_string(),
-        };
+    fn creates_diagnostic_from_check_error() {
+        let error = CheckError::undeclared_reference("x", 0..1, 1);
         let line_index = LineIndex::new("x".to_string());
 
         let diagnostics = to_diagnostics(&[], &[error], &line_index);
@@ -164,7 +160,7 @@ mod tests {
         assert_eq!(diagnostics[0].severity, Some(DiagnosticSeverity::ERROR));
         assert_eq!(
             diagnostics[0].code,
-            Some(NumberOrString::String("undefined-variable".to_string()))
+            Some(NumberOrString::String("undeclared-reference".to_string()))
         );
     }
 }

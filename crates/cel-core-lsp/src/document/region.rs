@@ -6,9 +6,10 @@
 
 use std::ops::Range;
 
-use cel_core::{parse, ParseError, SpannedExpr};
+use cel_core::{parse, CheckError, CheckResult, Env, ParseError, SpannedExpr};
 
-use crate::types::ValidationError;
+use crate::protovalidate::ProtovalidateContext;
+use crate::settings::protovalidate_extension;
 
 /// Represents a single CEL expression region within a host document.
 #[derive(Debug, Clone)]
@@ -110,33 +111,43 @@ pub struct CelRegionState {
     /// Parse errors for this region (spans are relative to region).
     pub parse_errors: Vec<ParseError>,
 
-    /// Validation errors for this region (spans are relative to region).
-    pub validation_errors: Vec<ValidationError>,
+    /// Check result from type checking (spans are relative to region).
+    pub check_result: Option<CheckResult>,
+
+    /// Protovalidate context for this region.
+    pub context: ProtovalidateContext,
 }
 
 impl CelRegionState {
-    /// Create a new CEL region state by parsing and validating the source.
+    /// Create a new CEL region state by parsing and type-checking the source.
     pub fn new(region: CelRegion, mapper: OffsetMapper) -> Self {
-        let result = parse(&region.source);
+        Self::with_context(region, mapper, ProtovalidateContext::Predefined)
+    }
 
-        // Run validation if we have an AST
-        let validation_errors = result
-            .ast
-            .as_ref()
-            .map(|ast| {
-                use crate::protovalidate::ProtovalidateResolver;
-                use crate::types::validate;
-                validate(ast, &ProtovalidateResolver)
-            })
-            .unwrap_or_default();
+    /// Create a new CEL region state with a specific protovalidate context.
+    pub fn with_context(region: CelRegion, mapper: OffsetMapper, context: ProtovalidateContext) -> Self {
+        let result = parse(&region.source);
+        let env = build_protovalidate_env_typed(&context);
+
+        // Run type checking if we have an AST
+        let check_result = result.ast.as_ref().map(|ast| env.check(ast));
 
         Self {
             region,
             mapper,
             ast: result.ast,
             parse_errors: result.errors,
-            validation_errors,
+            check_result,
+            context,
         }
+    }
+
+    /// Get the check errors if any.
+    pub fn check_errors(&self) -> &[CheckError] {
+        self.check_result
+            .as_ref()
+            .map(|r| r.errors.as_slice())
+            .unwrap_or(&[])
     }
 
     /// Check if this region contains the given host document offset.
@@ -185,6 +196,18 @@ impl CelRegionState {
 
         Some(cel_offset)
     }
+}
+
+/// Build a protovalidate environment with typed `this` based on context.
+fn build_protovalidate_env_typed(context: &ProtovalidateContext) -> Env {
+    let this_type = context.this_type();
+
+    Env::with_standard_library()
+        .with_all_extensions()
+        .with_extension(protovalidate_extension())
+        .with_variable("this", this_type)
+        .with_variable("rules", cel_core::CelType::Dyn)
+        .with_variable("now", cel_core::CelType::Timestamp)
 }
 
 #[cfg(test)]
@@ -238,7 +261,8 @@ mod tests {
             mapper,
             ast: None,
             parse_errors: vec![],
-            validation_errors: vec![],
+            check_result: None,
+            context: ProtovalidateContext::Predefined,
         };
 
         assert!(state.contains_host_offset(100));

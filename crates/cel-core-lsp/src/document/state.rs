@@ -2,12 +2,11 @@
 
 use std::sync::Arc;
 
-use cel_core::{parse, ParseError, SpannedExpr};
+use cel_core::{parse, CheckError, CheckResult, Env, ParseError, SpannedExpr};
 use dashmap::DashMap;
 use tower_lsp::lsp_types::Url;
 
 use crate::protovalidate::extract_cel_regions;
-use crate::types::{validate, EmptyResolver, ValidationError};
 
 use super::region::CelRegionState;
 use super::text::LineIndex;
@@ -21,30 +20,31 @@ pub struct DocumentState {
     pub ast: Option<SpannedExpr>,
     /// Any parse errors encountered.
     pub errors: Vec<ParseError>,
-    /// Any validation errors (undefined variables, methods, etc.).
-    pub validation_errors: Vec<ValidationError>,
+    /// Check result from type checking (contains errors and type info).
+    pub check_result: Option<CheckResult>,
     /// Document version from the client.
     pub version: i32,
 }
 
 impl DocumentState {
-    /// Create a new document state by parsing and validating the source.
+    /// Create a new document state by parsing and type-checking the source.
     pub fn new(source: String, version: i32) -> Self {
+        Self::with_env(source, version, &Env::with_standard_library().with_all_extensions())
+    }
+
+    /// Create a new document state with a custom Env.
+    pub fn with_env(source: String, version: i32, env: &Env) -> Self {
         let result = parse(&source);
         let line_index = LineIndex::new(source);
 
-        // Run validation if we have an AST
-        let validation_errors = result
-            .ast
-            .as_ref()
-            .map(|ast| validate(ast, &EmptyResolver))
-            .unwrap_or_default();
+        // Run type checking if we have an AST
+        let check_result = result.ast.as_ref().map(|ast| env.check(ast));
 
         Self {
             line_index,
             ast: result.ast,
             errors: result.errors,
-            validation_errors,
+            check_result,
             version,
         }
     }
@@ -53,6 +53,14 @@ impl DocumentState {
     /// Note: The AST may contain Expr::Error nodes if there were parse errors.
     pub fn ast(&self) -> Option<&SpannedExpr> {
         self.ast.as_ref()
+    }
+
+    /// Get the check errors if any.
+    pub fn check_errors(&self) -> &[CheckError] {
+        self.check_result
+            .as_ref()
+            .map(|r| r.errors.as_slice())
+            .unwrap_or(&[])
     }
 }
 
@@ -77,12 +85,13 @@ impl ProtoDocumentState {
         // Extract CEL regions from the proto file
         let extracted = extract_cel_regions(&source);
 
-        // Parse and validate each region
+        // Parse and validate each region with its context
         let regions = extracted
             .into_iter()
             .map(|ext| {
+                let context = ext.context.clone();
                 let (region, mapper) = ext.into_region_and_mapper();
-                CelRegionState::new(region, mapper)
+                CelRegionState::with_context(region, mapper, context)
             })
             .collect();
 

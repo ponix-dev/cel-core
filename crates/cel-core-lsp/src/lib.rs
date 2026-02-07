@@ -7,6 +7,7 @@ use tower_lsp::{Client, LanguageServer, LspService};
 mod document;
 mod lsp;
 pub mod protovalidate;
+pub mod settings;
 pub mod types;
 
 use document::{DocumentKind, DocumentStore};
@@ -36,7 +37,7 @@ impl Backend {
             DocumentKind::Cel(cel_state) => {
                 let diags = lsp::to_diagnostics(
                     &cel_state.errors,
-                    &cel_state.validation_errors,
+                    cel_state.check_errors(),
                     &cel_state.line_index,
                 );
                 (diags, cel_state.version)
@@ -133,7 +134,7 @@ impl LanguageServer for Backend {
                 Ok(lsp::hover_at_position(
                     &state.line_index,
                     ast,
-                    &state.validation_errors,
+                    state.check_errors(),
                     position,
                 ))
             }

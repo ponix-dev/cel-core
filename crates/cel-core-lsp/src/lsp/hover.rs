@@ -1,11 +1,11 @@
 //! Hover information for CEL expressions.
 
-use cel_core::{types::Expr, SpannedExpr};
+use cel_core::{types::Expr, CheckError, CheckErrorKind, SpannedExpr};
 use tower_lsp::lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position};
 
 use crate::document::{LineIndex, ProtoDocumentState};
 use crate::protovalidate::get_protovalidate_builtin;
-use crate::types::{get_builtin, FunctionDef, ValidationError, ValidationErrorKind};
+use crate::types::{get_builtin, FunctionDef};
 
 /// Format builtin function documentation as markdown.
 fn format_builtin_docs(builtin: &FunctionDef) -> String {
@@ -80,66 +80,74 @@ fn find_node_containing_offset<'a>(ast: &'a SpannedExpr, offset: usize) -> Optio
     child.or(Some(ast))
 }
 
-/// Format a validation error for hover display.
-fn format_validation_error(error: &ValidationError) -> String {
-    match error.kind {
-        ValidationErrorKind::UndefinedVariable => {
+/// Format a check error for hover display.
+fn format_check_error(error: &CheckError) -> String {
+    match &error.kind {
+        CheckErrorKind::UndeclaredReference { name, .. } => {
             format!(
-                "**Error:** Undefined variable `{}`\n\n\
-                 This variable is not defined in the current context.",
-                error.name
+                "**Error:** Undeclared reference `{}`\n\n\
+                 This variable or function is not defined in the current context.",
+                name
             )
         }
-        ValidationErrorKind::UndefinedMethod => {
+        CheckErrorKind::NoMatchingOverload { function, arg_types } => {
+            let types: Vec<_> = arg_types.iter().map(|t| t.display_name()).collect();
             format!(
-                "**Error:** Undefined method `{}`\n\n\
-                 This method is not a CEL builtin.",
-                error.name
+                "**Error:** No matching overload for `{}`\n\n\
+                 No overload found with argument types ({}).",
+                function,
+                types.join(", ")
             )
         }
-        ValidationErrorKind::StandaloneCalledAsMethod => {
+        CheckErrorKind::TypeMismatch { expected, actual } => {
             format!(
-                "**Error:** `{}` is a standalone function\n\n\
-                 Use `{}(...)` instead of calling it as a method.",
-                error.name, error.name
+                "**Error:** Type mismatch\n\n\
+                 Expected `{}` but found `{}`.",
+                expected.display_name(),
+                actual.display_name()
             )
         }
-        ValidationErrorKind::MethodCalledAsStandalone => {
+        CheckErrorKind::UndefinedField { type_name, field } => {
             format!(
-                "**Error:** `{}` must be called as a method\n\n\
-                 Use `receiver.{}(...)` instead of calling it standalone.",
-                error.name, error.name
+                "**Error:** Undefined field `{}`\n\n\
+                 The type `{}` has no field named `{}`.",
+                field, type_name, field
             )
         }
-        ValidationErrorKind::TooFewArguments => {
+        CheckErrorKind::NotAssignable { from, to } => {
             format!(
-                "**Error:** Too few arguments for `{}`\n\n\
-                 {}",
-                error.name, error.message
+                "**Error:** Type not assignable\n\n\
+                 Type `{}` is not assignable to `{}`.",
+                from.display_name(),
+                to.display_name()
             )
         }
-        ValidationErrorKind::TooManyArguments => {
+        CheckErrorKind::HeterogeneousAggregate { types } => {
+            let type_names: Vec<_> = types.iter().map(|t| t.display_name()).collect();
             format!(
-                "**Error:** Too many arguments for `{}`\n\n\
-                 {}",
-                error.name, error.message
+                "**Error:** Heterogeneous aggregate\n\n\
+                 Aggregate literal contains mixed types: {}.",
+                type_names.join(", ")
             )
         }
-        ValidationErrorKind::InvalidArgumentType => {
+        CheckErrorKind::NotAType { expr } => {
             format!(
-                "**Error:** Invalid argument type for `{}`\n\n\
-                 {}",
-                error.name, error.message
+                "**Error:** Not a type\n\n\
+                 `{}` cannot be used as a type.",
+                expr
             )
+        }
+        CheckErrorKind::Other(msg) => {
+            format!("**Error:** {}", msg)
         }
     }
 }
 
-/// Find a validation error that overlaps with the given node.
-fn find_validation_error_at<'a>(
+/// Find a check error that overlaps with the given node.
+fn find_check_error_at<'a>(
     node: &SpannedExpr,
-    errors: &'a [ValidationError],
-) -> Option<&'a ValidationError> {
+    errors: &'a [CheckError],
+) -> Option<&'a CheckError> {
     errors.iter().find(|e| {
         // Check if error span overlaps with node span
         e.span.start < node.span.end && e.span.end > node.span.start
@@ -147,18 +155,18 @@ fn find_validation_error_at<'a>(
 }
 
 /// Generate hover information for a node.
-/// Checks validation errors first, then falls back to builtin docs.
+/// Checks check errors first, then falls back to builtin docs.
 fn hover_for_node(
     line_index: &LineIndex,
     node: &SpannedExpr,
-    validation_errors: &[ValidationError],
+    check_errors: &[CheckError],
 ) -> Option<Hover> {
-    // Check if this node has a validation error
-    if let Some(error) = find_validation_error_at(node, validation_errors) {
+    // Check if this node has a check error
+    if let Some(error) = find_check_error_at(node, check_errors) {
         return Some(Hover {
             contents: HoverContents::Markup(MarkupContent {
                 kind: MarkupKind::Markdown,
-                value: format_validation_error(error),
+                value: format_check_error(error),
             }),
             range: Some(line_index.span_to_range(&error.span)),
         });
@@ -189,11 +197,11 @@ fn hover_for_node(
 pub fn hover_at_position(
     line_index: &LineIndex,
     ast: &SpannedExpr,
-    validation_errors: &[ValidationError],
+    check_errors: &[CheckError],
     position: Position,
 ) -> Option<Hover> {
     let node = find_node_at_position(line_index, ast, position)?;
-    hover_for_node(line_index, node, validation_errors)
+    hover_for_node(line_index, node, check_errors)
 }
 
 /// Get hover information for a position in a proto document.
@@ -214,13 +222,13 @@ pub fn hover_at_position_proto(state: &ProtoDocumentState, position: Position) -
     let ast = region_state.ast.as_ref()?;
     let node = find_node_containing_offset(ast, cel_offset)?;
 
-    // Check if this node has a validation error
-    if let Some(error) = find_validation_error_at(node, &region_state.validation_errors) {
+    // Check if this node has a check error
+    if let Some(error) = find_check_error_at(node, region_state.check_errors()) {
         let host_span = region_state.mapper.span_to_host(&error.span);
         return Some(Hover {
             contents: HoverContents::Markup(MarkupContent {
                 kind: MarkupKind::Markdown,
-                value: format_validation_error(error),
+                value: format_check_error(error),
             }),
             range: Some(state.line_index.span_to_range(&host_span)),
         });
@@ -289,24 +297,19 @@ mod tests {
     }
 
     #[test]
-    fn hover_for_undefined_variable() {
+    fn hover_for_undeclared_reference() {
         let source = "x";
         let result = parse(source);
         let ast = result.ast.unwrap();
         let line_index = LineIndex::new(source.to_string());
-        let validation_errors = vec![ValidationError {
-            kind: ValidationErrorKind::UndefinedVariable,
-            message: "undefined variable 'x'".to_string(),
-            span: 0..1,
-            name: "x".to_string(),
-        }];
+        let check_errors = vec![CheckError::undeclared_reference("x", 0..1, 1)];
 
-        let hover = hover_at_position(&line_index, &ast, &validation_errors, Position::new(0, 0));
+        let hover = hover_at_position(&line_index, &ast, &check_errors, Position::new(0, 0));
         assert!(hover.is_some());
         let hover = hover.unwrap();
         match hover.contents {
             HoverContents::Markup(m) => {
-                assert!(m.value.contains("Undefined variable"));
+                assert!(m.value.contains("Undeclared reference"));
                 assert!(m.value.contains("`x`"));
             }
             _ => panic!("Expected markup content"),
