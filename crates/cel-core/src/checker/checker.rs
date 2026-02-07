@@ -469,8 +469,19 @@ impl<'a> Checker<'a> {
                     if let Some(field_type) = registry.get_field_type(name, field) {
                         return self.wrap_optional_if_needed(field_type, optional, was_optional);
                     }
+                    // If the message is known but the field doesn't exist, report an error.
+                    // Skip extension fields — those are valid but not in the field list.
+                    if registry.has_message(name) && !registry.is_extension(name, field) {
+                        self.report_error(CheckError::undefined_field(
+                            name,
+                            field,
+                            expr.span.clone(),
+                            expr.id,
+                        ));
+                        return CelType::Error;
+                    }
                 }
-                // Fall back to Dyn if no registry or field not found
+                // Fall back to Dyn if no registry available
                 CelType::Dyn
             }
             CelType::Dyn | CelType::TypeVar(_) => {

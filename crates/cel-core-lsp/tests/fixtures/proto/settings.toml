@@ -1,0 +1,6 @@
+[env]
+container = "test"
+variables = { user = "test.User" }
+
+[env.proto]
+descriptors = ["test.binpb"]

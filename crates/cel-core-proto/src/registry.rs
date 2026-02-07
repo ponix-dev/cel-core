@@ -135,6 +135,20 @@ impl ProtoTypeResolverTrait for ProstProtoRegistry {
         Some(self.field_to_cel_type(&field))
     }
 
+    fn has_message(&self, message_name: &str) -> bool {
+        self.get_message(message_name).is_some()
+    }
+
+    fn is_extension(&self, message_name: &str, ext_name: &str) -> bool {
+        let Some(msg) = self.get_message(message_name) else {
+            return false;
+        };
+        let Some(ext) = self.get_extension_by_name(ext_name) else {
+            return false;
+        };
+        ext.containing_message() == msg
+    }
+
     fn get_enum_value(&self, enum_name: &str, value_name: &str) -> Option<i32> {
         let enum_desc = self.get_enum(enum_name)?;
         let value = enum_desc.get_value_by_name(value_name)?;

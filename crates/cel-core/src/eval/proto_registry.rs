@@ -43,6 +43,12 @@ pub trait ProtoTypeResolver: fmt::Debug + Send + Sync {
     /// Get the CEL type of a message field.
     fn get_field_type(&self, message: &str, field: &str) -> Option<CelType>;
 
+    /// Check whether a message type is known to this registry.
+    fn has_message(&self, message: &str) -> bool;
+
+    /// Check whether `ext_name` is a known extension field on `message`.
+    fn is_extension(&self, message: &str, ext_name: &str) -> bool;
+
     /// Get the numeric value of an enum constant by name.
     fn get_enum_value(&self, enum_name: &str, value_name: &str) -> Option<i32>;
 

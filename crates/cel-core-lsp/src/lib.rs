@@ -10,6 +10,9 @@ pub mod protovalidate;
 pub mod settings;
 pub mod types;
 
+pub use document::{DocumentState, LineIndex};
+pub use lsp::to_diagnostics;
+
 use document::{DocumentKind, DocumentStore};
 
 pub struct Backend {

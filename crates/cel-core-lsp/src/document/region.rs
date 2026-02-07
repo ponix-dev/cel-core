@@ -113,17 +113,9 @@ pub struct CelRegionState {
 
     /// Check result from type checking (spans are relative to region).
     pub check_result: Option<CheckResult>,
-
-    /// Protovalidate context for this region.
-    pub context: ProtovalidateContext,
 }
 
 impl CelRegionState {
-    /// Create a new CEL region state by parsing and type-checking the source.
-    pub fn new(region: CelRegion, mapper: OffsetMapper) -> Self {
-        Self::with_context(region, mapper, ProtovalidateContext::Predefined)
-    }
-
     /// Create a new CEL region state with a specific protovalidate context.
     pub fn with_context(region: CelRegion, mapper: OffsetMapper, context: ProtovalidateContext) -> Self {
         let result = parse(&region.source);
@@ -138,7 +130,6 @@ impl CelRegionState {
             ast: result.ast,
             parse_errors: result.errors,
             check_result,
-            context,
         }
     }
 
@@ -262,7 +253,6 @@ mod tests {
             ast: None,
             parse_errors: vec![],
             check_result: None,
-            context: ProtovalidateContext::Predefined,
         };
 
         assert!(state.contains_host_offset(100));

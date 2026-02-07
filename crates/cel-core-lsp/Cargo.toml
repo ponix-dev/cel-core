@@ -18,3 +18,6 @@ tokio = { version = "1", features = ["full"] }
 regex = "1.10"
 toml = "0.8"
 serde = { version = "1.0", features = ["derive"] }
+
+[dev-dependencies]
+expect-test = "1.5"

@@ -10,5 +10,5 @@ mod state;
 mod text;
 
 pub use region::{CelRegion, OffsetMapper};
-pub use state::{DocumentKind, DocumentStore, ProtoDocumentState};
+pub use state::{DocumentKind, DocumentState, DocumentStore, ProtoDocumentState};
 pub use text::LineIndex;
