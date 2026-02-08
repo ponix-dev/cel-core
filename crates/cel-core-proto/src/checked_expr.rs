@@ -9,7 +9,9 @@ use cel_core::{CelType, CheckResult, ReferenceInfo, SpannedExpr};
 
 use crate::error::ConversionError;
 use crate::gen::cel::expr::{CheckedExpr, ParsedExpr, Reference};
-use crate::type_conversion::{cel_type_from_proto, cel_type_to_proto, cel_value_from_proto, cel_value_to_proto};
+use crate::type_conversion::{
+    cel_type_from_proto, cel_type_to_proto, cel_value_from_proto, cel_value_to_proto,
+};
 
 /// Convert a check result and parsed expression to a proto CheckedExpr.
 ///
@@ -169,8 +171,8 @@ fn reference_info_from_proto(r: &Reference) -> ReferenceInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cel_core::Env;
     use crate::AstToProto;
+    use cel_core::Env;
 
     #[test]
     fn test_to_checked_expr_simple() {
@@ -193,8 +195,7 @@ mod tests {
 
     #[test]
     fn test_to_checked_expr_with_variable() {
-        let env = Env::with_standard_library()
-            .with_variable("x", CelType::Int);
+        let env = Env::with_standard_library().with_variable("x", CelType::Int);
         let ast = env.compile("x + 1").unwrap();
         let parsed = ast.to_parsed_expr();
         let check_result = ast.type_info().unwrap();

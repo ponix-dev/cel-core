@@ -8,23 +8,25 @@
 //! - Eval tests: Verify evaluation produces expected results
 
 use cel_core_conformance::{
-    build_descriptor_pool, load_test_file, Binding, CelConformanceService, ConformanceService, FunctionTypeDecl, SimpleTest, TypeDecl,
+    build_descriptor_pool, load_test_file, Binding, CelConformanceService, ConformanceService,
+    FunctionTypeDecl, SimpleTest, TypeDecl,
 };
+use cel_core_proto::cel_type_from_proto;
 use cel_core_proto::gen::cel::expr::conformance::test::simple_test::ResultMatcher;
 use cel_core_proto::gen::cel::expr::conformance::test::{ErrorSetMatcher, UnknownSetMatcher};
 use cel_core_proto::gen::cel::expr::decl::DeclKind;
 use cel_core_proto::gen::cel::expr::r#type::TypeKind;
 use cel_core_proto::gen::cel::expr::value::Kind as ValueKind;
 use cel_core_proto::gen::cel::expr::Type as ProtoType;
-use cel_core_proto::gen::cel::expr::{expr_value, ErrorSet, ExprValue, UnknownSet, Value as ProtoValue};
-use cel_core_proto::cel_type_from_proto;
+use cel_core_proto::gen::cel::expr::{
+    expr_value, ErrorSet, ExprValue, UnknownSet, Value as ProtoValue,
+};
 use prost_reflect::{DescriptorPool, DynamicMessage};
 use std::path::Path;
 use std::sync::LazyLock;
 
-static POOL: LazyLock<DescriptorPool> = LazyLock::new(|| {
-    build_descriptor_pool().expect("failed to build descriptor pool")
-});
+static POOL: LazyLock<DescriptorPool> =
+    LazyLock::new(|| build_descriptor_pool().expect("failed to build descriptor pool"));
 
 const TESTDATA_PATH: &str = "cel-spec/tests/simple/testdata";
 
@@ -226,7 +228,10 @@ fn values_equivalent(actual: &ProtoValue, expected: &ProtoValue) -> bool {
             if a.type_url != e.type_url {
                 return false;
             }
-            let type_name = a.type_url.strip_prefix("type.googleapis.com/").unwrap_or(&a.type_url);
+            let type_name = a
+                .type_url
+                .strip_prefix("type.googleapis.com/")
+                .unwrap_or(&a.type_url);
             if let Some(desc) = POOL.get_message_by_name(type_name) {
                 if let (Ok(a_msg), Ok(e_msg)) = (
                     DynamicMessage::decode(desc.clone(), a.value.as_ref()),
@@ -391,7 +396,13 @@ fn run_eval_conformance_file_with_service(
             let func_decls = build_function_decls(test);
 
             // Evaluate - always get a result to compare
-            let eval_result = service.eval(&parsed_expr, &bindings, &type_decls, &func_decls, &test.container);
+            let eval_result = service.eval(
+                &parsed_expr,
+                &bindings,
+                &type_decls,
+                &func_decls,
+                &test.container,
+            );
             let actual_result = match &eval_result.result {
                 Some(r) => r,
                 None => {
@@ -414,19 +425,13 @@ fn run_eval_conformance_file_with_service(
 
             // Compare results based on expected type
             let matches = match &expected_result {
-                ExpectedResult::Value(expected) => {
-                    match &actual_result.kind {
-                        Some(expr_value::Kind::Value(actual)) => {
-                            values_equivalent(actual, expected)
-                        }
-                        Some(expr_value::Kind::Error(_)) => false,
-                        Some(expr_value::Kind::Unknown(_)) => false,
-                        None => false,
-                    }
-                }
-                ExpectedResult::Error(expected) => {
-                    matches_eval_error(actual_result, expected)
-                }
+                ExpectedResult::Value(expected) => match &actual_result.kind {
+                    Some(expr_value::Kind::Value(actual)) => values_equivalent(actual, expected),
+                    Some(expr_value::Kind::Error(_)) => false,
+                    Some(expr_value::Kind::Unknown(_)) => false,
+                    None => false,
+                },
+                ExpectedResult::Error(expected) => matches_eval_error(actual_result, expected),
                 ExpectedResult::AnyErrors(expected) => {
                     matches_any_eval_errors(actual_result, expected)
                 }
@@ -559,10 +564,19 @@ fn run_check_conformance_file(filename: &str) -> (usize, Vec<String>) {
             let func_decls = build_function_decls(test);
 
             // Run the type checker with container from test
-            let check_result = service.check(&parsed_expr, &type_decls, &func_decls, &test.container);
+            let check_result =
+                service.check(&parsed_expr, &type_decls, &func_decls, &test.container);
             if !check_result.is_ok() {
-                let errors: Vec<_> = check_result.issues.iter().map(|i| i.message.clone()).collect();
-                failures.push(format!("{}: check failed: {}", test_name, errors.join("; ")));
+                let errors: Vec<_> = check_result
+                    .issues
+                    .iter()
+                    .map(|i| i.message.clone())
+                    .collect();
+                failures.push(format!(
+                    "{}: check failed: {}",
+                    test_name,
+                    errors.join("; ")
+                ));
                 continue;
             }
 
@@ -650,7 +664,8 @@ fn run_conformance_file(filename: &str) -> (usize, Vec<String>) {
 
             // Run type checker with container from test
             let parsed_expr = parse_result.parsed_expr.unwrap();
-            let check_result = service.check(&parsed_expr, &type_decls, &func_decls, &test.container);
+            let check_result =
+                service.check(&parsed_expr, &type_decls, &func_decls, &test.container);
             if !check_result.is_ok() {
                 let error_msg = check_result
                     .issues
@@ -673,7 +688,10 @@ macro_rules! conformance_test {
             let (total, failures) = run_conformance_file($file);
             let passed = total - failures.len();
 
-            println!("CONFORMANCE_RESULT parse_check {} {}/{}", $file, passed, total);
+            println!(
+                "CONFORMANCE_RESULT parse_check {} {}/{}",
+                $file, passed, total
+            );
 
             if !failures.is_empty() {
                 panic!(
@@ -725,7 +743,10 @@ macro_rules! check_conformance_test {
             let (total, failures) = run_check_conformance_file($file);
             let passed = total - failures.len();
 
-            println!("CONFORMANCE_RESULT type_check {} {}/{}", $file, passed, total);
+            println!(
+                "CONFORMANCE_RESULT type_check {} {}/{}",
+                $file, passed, total
+            );
 
             if !failures.is_empty() {
                 panic!(
@@ -815,11 +836,8 @@ conformance_test!(test_enums, "enums.textproto");
 fn test_enums_legacy_eval() {
     let service = CelConformanceService::with_strong_enums(false);
     let sections = &["legacy_proto2", "legacy_proto3"];
-    let (total, failures) = run_eval_conformance_file_with_service(
-        "enums.textproto",
-        &service,
-        Some(sections),
-    );
+    let (total, failures) =
+        run_eval_conformance_file_with_service("enums.textproto", &service, Some(sections));
     let passed = total - failures.len();
 
     println!(
@@ -846,11 +864,8 @@ fn test_enums_legacy_eval() {
 fn test_enums_strong_eval() {
     let service = CelConformanceService::new();
     let sections = &["strong_proto2", "strong_proto3"];
-    let (total, failures) = run_eval_conformance_file_with_service(
-        "enums.textproto",
-        &service,
-        Some(sections),
-    );
+    let (total, failures) =
+        run_eval_conformance_file_with_service("enums.textproto", &service, Some(sections));
     let passed = total - failures.len();
 
     println!(

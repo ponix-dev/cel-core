@@ -88,7 +88,9 @@ impl<'a> MacroContext<'a> {
     /// Create a new macro context.
     pub fn new(
         next_id_fn: &'a mut dyn FnMut() -> i64,
-        store_macro_call_fn: Option<&'a mut dyn FnMut(i64, &Span, &SpannedExpr, &str, &[SpannedExpr])>,
+        store_macro_call_fn: Option<
+            &'a mut dyn FnMut(i64, &Span, &SpannedExpr, &str, &[SpannedExpr]),
+        >,
     ) -> Self {
         Self {
             next_id_fn,
@@ -196,7 +198,11 @@ impl Macro {
 
     /// Generate the lookup key for this macro.
     pub fn key(&self) -> String {
-        make_key(self.name, self.arg_count.count(), self.style == MacroStyle::Receiver)
+        make_key(
+            self.name,
+            self.arg_count.count(),
+            self.style == MacroStyle::Receiver,
+        )
     }
 }
 
@@ -258,8 +264,13 @@ impl MacroRegistry {
 
         // Track vararg macros for fallback lookup
         if macro_def.arg_count.is_vararg() {
-            let vararg_key = format!("{}:{}", macro_def.name, macro_def.style == MacroStyle::Receiver);
-            self.vararg_keys.insert(vararg_key, macro_def.arg_count.count());
+            let vararg_key = format!(
+                "{}:{}",
+                macro_def.name,
+                macro_def.style == MacroStyle::Receiver
+            );
+            self.vararg_keys
+                .insert(vararg_key, macro_def.arg_count.count());
         }
 
         self.macros.insert(key, macro_def);
@@ -325,7 +336,6 @@ pub static STANDARD_MACROS: &[Macro] = &[
         expand_has,
         "Tests whether a field is set on a message",
     ),
-
     // all - receiver, 2 or 3 args
     Macro::with_description(
         "all",
@@ -341,7 +351,6 @@ pub static STANDARD_MACROS: &[Macro] = &[
         expand_all_3arg,
         "Tests whether all elements satisfy a condition (two-variable form)",
     ),
-
     // exists - receiver, 2 or 3 args
     Macro::with_description(
         "exists",
@@ -357,7 +366,6 @@ pub static STANDARD_MACROS: &[Macro] = &[
         expand_exists_3arg,
         "Tests whether any element satisfies a condition (two-variable form)",
     ),
-
     // exists_one - receiver, 2 or 3 args
     Macro::with_description(
         "exists_one",
@@ -373,7 +381,6 @@ pub static STANDARD_MACROS: &[Macro] = &[
         expand_exists_one_3arg,
         "Tests whether exactly one element satisfies a condition (two-variable form)",
     ),
-
     // existsOne - camelCase alias (cel-go compatibility)
     Macro::with_description(
         "existsOne",
@@ -389,7 +396,6 @@ pub static STANDARD_MACROS: &[Macro] = &[
         expand_exists_one_3arg,
         "Tests whether exactly one element satisfies a condition (two-variable form)",
     ),
-
     // map - receiver, 2 or 3 args
     Macro::with_description(
         "map",
@@ -405,7 +411,6 @@ pub static STANDARD_MACROS: &[Macro] = &[
         expand_map_3arg,
         "Transforms elements of a list with filtering",
     ),
-
     // filter - receiver, 2 args
     Macro::with_description(
         "filter",
@@ -414,7 +419,6 @@ pub static STANDARD_MACROS: &[Macro] = &[
         expand_filter,
         "Filters elements of a list by a condition",
     ),
-
     // transformList - receiver, 3 or 4 args
     Macro::with_description(
         "transformList",
@@ -430,7 +434,6 @@ pub static STANDARD_MACROS: &[Macro] = &[
         expand_transform_list_4arg,
         "Transforms list elements with index, value, and filter",
     ),
-
     // transformMap - receiver, 3 or 4 args
     Macro::with_description(
         "transformMap",
@@ -559,11 +562,7 @@ fn expand_has(
 
     match arg.node {
         Expr::Member { expr, field, .. } => {
-            let result = Spanned::new(
-                ctx.next_id(),
-                Expr::MemberTestOnly { expr, field },
-                span,
-            );
+            let result = Spanned::new(ctx.next_id(), Expr::MemberTestOnly { expr, field }, span);
             MacroExpansion::Expanded(result)
         }
         _ => MacroExpansion::Error(
@@ -916,7 +915,15 @@ fn expand_map_3arg(
     let filter = args[1].clone();
     let transform = args[2].clone();
 
-    expand_map_impl(ctx, span, receiver, iter_var, Some(filter), transform, &args)
+    expand_map_impl(
+        ctx,
+        span,
+        receiver,
+        iter_var,
+        Some(filter),
+        transform,
+        &args,
+    )
 }
 
 fn expand_map_impl(
@@ -935,7 +942,14 @@ fn expand_map_impl(
     let accu_init = synthetic(ctx, Expr::List(vec![]), span.clone());
     let loop_condition = synthetic(ctx, Expr::Bool(true), span.clone());
 
-    let transformed_list = synthetic(ctx, Expr::List(vec![ListElement { expr: transform, optional: false }]), span.clone());
+    let transformed_list = synthetic(
+        ctx,
+        Expr::List(vec![ListElement {
+            expr: transform,
+            optional: false,
+        }]),
+        span.clone(),
+    );
     let accu_ref_step = synthetic(ctx, Expr::Ident(accu_var.clone()), span.clone());
     let append_step = synthetic(
         ctx,
@@ -1007,7 +1021,14 @@ fn expand_filter(
     let loop_condition = synthetic(ctx, Expr::Bool(true), span.clone());
 
     let iter_ref = synthetic(ctx, Expr::Ident(iter_var.clone()), span.clone());
-    let element_list = synthetic(ctx, Expr::List(vec![ListElement { expr: iter_ref, optional: false }]), span.clone());
+    let element_list = synthetic(
+        ctx,
+        Expr::List(vec![ListElement {
+            expr: iter_ref,
+            optional: false,
+        }]),
+        span.clone(),
+    );
 
     let accu_ref_then = synthetic(ctx, Expr::Ident(accu_var.clone()), span.clone());
     let append_step = synthetic(
@@ -1072,7 +1093,9 @@ fn expand_transform_list_3arg(
     };
     let transform = args[2].clone();
 
-    expand_transform_list_impl(ctx, span, receiver, iter_var, iter_var2, None, transform, &args)
+    expand_transform_list_impl(
+        ctx, span, receiver, iter_var, iter_var2, None, transform, &args,
+    )
 }
 
 fn expand_transform_list_4arg(
@@ -1097,7 +1120,16 @@ fn expand_transform_list_4arg(
     let filter = args[2].clone();
     let transform = args[3].clone();
 
-    expand_transform_list_impl(ctx, span, receiver, iter_var, iter_var2, Some(filter), transform, &args)
+    expand_transform_list_impl(
+        ctx,
+        span,
+        receiver,
+        iter_var,
+        iter_var2,
+        Some(filter),
+        transform,
+        &args,
+    )
 }
 
 fn expand_transform_list_impl(
@@ -1117,7 +1149,14 @@ fn expand_transform_list_impl(
     let accu_init = synthetic(ctx, Expr::List(vec![]), span.clone());
     let loop_condition = synthetic(ctx, Expr::Bool(true), span.clone());
 
-    let transformed_list = synthetic(ctx, Expr::List(vec![ListElement { expr: transform, optional: false }]), span.clone());
+    let transformed_list = synthetic(
+        ctx,
+        Expr::List(vec![ListElement {
+            expr: transform,
+            optional: false,
+        }]),
+        span.clone(),
+    );
     let accu_ref_step = synthetic(ctx, Expr::Ident(accu_var.clone()), span.clone());
     let append_step = synthetic(
         ctx,
@@ -1185,7 +1224,9 @@ fn expand_transform_map_3arg(
     };
     let transform = args[2].clone();
 
-    expand_transform_map_impl(ctx, span, receiver, iter_var, iter_var2, None, transform, &args)
+    expand_transform_map_impl(
+        ctx, span, receiver, iter_var, iter_var2, None, transform, &args,
+    )
 }
 
 fn expand_transform_map_4arg(
@@ -1210,7 +1251,16 @@ fn expand_transform_map_4arg(
     let filter = args[2].clone();
     let transform = args[3].clone();
 
-    expand_transform_map_impl(ctx, span, receiver, iter_var, iter_var2, Some(filter), transform, &args)
+    expand_transform_map_impl(
+        ctx,
+        span,
+        receiver,
+        iter_var,
+        iter_var2,
+        Some(filter),
+        transform,
+        &args,
+    )
 }
 
 fn expand_transform_map_impl(
@@ -1231,7 +1281,15 @@ fn expand_transform_map_impl(
     let loop_condition = synthetic(ctx, Expr::Bool(true), span.clone());
 
     let key_ref = synthetic(ctx, Expr::Ident(iter_var.clone()), span.clone());
-    let transformed_map = synthetic(ctx, Expr::Map(vec![MapEntry { key: key_ref, value: transform, optional: false }]), span.clone());
+    let transformed_map = synthetic(
+        ctx,
+        Expr::Map(vec![MapEntry {
+            key: key_ref,
+            value: transform,
+            optional: false,
+        }]),
+        span.clone(),
+    );
     let accu_ref_step = synthetic(ctx, Expr::Ident(accu_var.clone()), span.clone());
     let append_step = synthetic(
         ctx,
@@ -1567,12 +1625,10 @@ fn expand_proto_get_ext(
 
     let ext_name = match validate_qualified_identifier(&args[1]) {
         Some(name) => name,
-        None => {
-            return MacroExpansion::Error(
-                "proto.getExt() second argument must be a qualified identifier (e.g., pkg.ExtField)"
-                    .to_string(),
-            )
-        }
+        None => return MacroExpansion::Error(
+            "proto.getExt() second argument must be a qualified identifier (e.g., pkg.ExtField)"
+                .to_string(),
+        ),
     };
 
     let msg = args[0].clone();
@@ -1606,12 +1662,10 @@ fn expand_proto_has_ext(
 
     let ext_name = match validate_qualified_identifier(&args[1]) {
         Some(name) => name,
-        None => {
-            return MacroExpansion::Error(
-                "proto.hasExt() second argument must be a qualified identifier (e.g., pkg.ExtField)"
-                    .to_string(),
-            )
-        }
+        None => return MacroExpansion::Error(
+            "proto.hasExt() second argument must be a qualified identifier (e.g., pkg.ExtField)"
+                .to_string(),
+        ),
     };
 
     let msg = args[0].clone();
@@ -1858,18 +1912,38 @@ mod tests {
 
     #[test]
     fn test_macro_key() {
-        let m = Macro::new("all", MacroStyle::Receiver, ArgCount::Exact(2), dummy_expander);
+        let m = Macro::new(
+            "all",
+            MacroStyle::Receiver,
+            ArgCount::Exact(2),
+            dummy_expander,
+        );
         assert_eq!(m.key(), "all:2:true");
 
-        let m2 = Macro::new("has", MacroStyle::Global, ArgCount::Exact(1), dummy_expander);
+        let m2 = Macro::new(
+            "has",
+            MacroStyle::Global,
+            ArgCount::Exact(1),
+            dummy_expander,
+        );
         assert_eq!(m2.key(), "has:1:false");
     }
 
     #[test]
     fn test_registry_lookup_exact() {
         let mut registry = MacroRegistry::new();
-        registry.register(Macro::new("all", MacroStyle::Receiver, ArgCount::Exact(2), dummy_expander));
-        registry.register(Macro::new("all", MacroStyle::Receiver, ArgCount::Exact(3), dummy_expander));
+        registry.register(Macro::new(
+            "all",
+            MacroStyle::Receiver,
+            ArgCount::Exact(2),
+            dummy_expander,
+        ));
+        registry.register(Macro::new(
+            "all",
+            MacroStyle::Receiver,
+            ArgCount::Exact(3),
+            dummy_expander,
+        ));
 
         assert!(registry.lookup("all", 2, true).is_some());
         assert!(registry.lookup("all", 3, true).is_some());
@@ -1880,7 +1954,12 @@ mod tests {
     #[test]
     fn test_registry_lookup_vararg() {
         let mut registry = MacroRegistry::new();
-        registry.register(Macro::new("custom", MacroStyle::Receiver, ArgCount::VarArg(2), dummy_expander));
+        registry.register(Macro::new(
+            "custom",
+            MacroStyle::Receiver,
+            ArgCount::VarArg(2),
+            dummy_expander,
+        ));
 
         assert!(registry.lookup("custom", 2, true).is_some());
         assert!(registry.lookup("custom", 3, true).is_some());
@@ -1984,7 +2063,10 @@ mod tests {
             },
             0..3,
         );
-        assert_eq!(validate_qualified_identifier(&dotted), Some("a.b".to_string()));
+        assert_eq!(
+            validate_qualified_identifier(&dotted),
+            Some("a.b".to_string())
+        );
 
         // Deeply nested: a.b.c.d
         let deep = Spanned::new(
@@ -2012,7 +2094,10 @@ mod tests {
             },
             0..7,
         );
-        assert_eq!(validate_qualified_identifier(&deep), Some("a.b.c.d".to_string()));
+        assert_eq!(
+            validate_qualified_identifier(&deep),
+            Some("a.b.c.d".to_string())
+        );
 
         // Non-identifier returns None
         let non_ident = Spanned::new(1, Expr::Int(42), 0..2);
@@ -2022,7 +2107,10 @@ mod tests {
     #[test]
     fn test_proto_get_ext_expansion() {
         let mut id = 10i64;
-        let mut next_id = || -> i64 { id += 1; id };
+        let mut next_id = || -> i64 {
+            id += 1;
+            id
+        };
         let mut ctx = MacroContext::new(&mut next_id, None);
 
         let msg = Spanned::new(1, Expr::Ident("msg".to_string()), 0..3);
@@ -2039,7 +2127,11 @@ mod tests {
         let result = expand_proto_get_ext(&mut ctx, 0..20, None, vec![msg, ext]);
         match result {
             MacroExpansion::Expanded(expr) => match &expr.node {
-                Expr::Member { expr, field, optional } => {
+                Expr::Member {
+                    expr,
+                    field,
+                    optional,
+                } => {
                     assert_eq!(field, "pkg.ExtField");
                     assert!(!optional);
                     assert!(matches!(&expr.node, Expr::Ident(name) if name == "msg"));
@@ -2053,7 +2145,10 @@ mod tests {
     #[test]
     fn test_proto_has_ext_expansion() {
         let mut id = 10i64;
-        let mut next_id = || -> i64 { id += 1; id };
+        let mut next_id = || -> i64 {
+            id += 1;
+            id
+        };
         let mut ctx = MacroContext::new(&mut next_id, None);
 
         let msg = Spanned::new(1, Expr::Ident("msg".to_string()), 0..3);
@@ -2083,13 +2178,17 @@ mod tests {
     #[test]
     fn test_proto_ext_error_non_qualified() {
         let mut id = 10i64;
-        let mut next_id = || -> i64 { id += 1; id };
+        let mut next_id = || -> i64 {
+            id += 1;
+            id
+        };
         let mut ctx = MacroContext::new(&mut next_id, None);
 
         let msg = Spanned::new(1, Expr::Ident("msg".to_string()), 0..3);
         let bad_arg = Spanned::new(2, Expr::Int(42), 4..6);
 
-        let result = expand_proto_get_ext(&mut ctx, 0..10, None, vec![msg.clone(), bad_arg.clone()]);
+        let result =
+            expand_proto_get_ext(&mut ctx, 0..10, None, vec![msg.clone(), bad_arg.clone()]);
         assert!(matches!(result, MacroExpansion::Error(_)));
 
         let result = expand_proto_has_ext(&mut ctx, 0..10, None, vec![msg, bad_arg]);

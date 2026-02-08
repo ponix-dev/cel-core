@@ -29,7 +29,9 @@ fn main() {
     println!("Abbreviations: Timestamp, Duration\n");
 
     // Construct proto message with abbreviated type name
-    let ast = env.compile("Timestamp{seconds: 1704067200, nanos: 0}").unwrap();
+    let ast = env
+        .compile("Timestamp{seconds: 1704067200, nanos: 0}")
+        .unwrap();
     let program = env.program(&ast).unwrap();
     let result = program.eval(&MapActivation::new());
 
@@ -42,7 +44,10 @@ fn main() {
     let program = env.program(&ast).unwrap();
 
     let mut activation = MapActivation::new();
-    activation.insert("request_time", Value::Timestamp(Timestamp::from_seconds(1704110400)));
+    activation.insert(
+        "request_time",
+        Value::Timestamp(Timestamp::from_seconds(1704110400)),
+    );
     activation.insert("max_age", Value::Duration(Duration::from_seconds(3600)));
     activation.insert("now", Value::Timestamp(Timestamp::from_seconds(1704112200)));
 

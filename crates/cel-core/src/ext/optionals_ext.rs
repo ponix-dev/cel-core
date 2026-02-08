@@ -55,12 +55,8 @@ pub fn optionals_extension() -> Vec<FunctionDecl> {
         ),
         // optional.none() -> optional<dyn>
         FunctionDecl::new("optional.none").with_overload(
-            OverloadDecl::function(
-                "optional_none",
-                vec![],
-                CelType::optional(CelType::Dyn),
-            )
-            .with_impl(|_args| Value::optional_none()),
+            OverloadDecl::function("optional_none", vec![], CelType::optional(CelType::Dyn))
+                .with_impl(|_args| Value::optional_none()),
         ),
         // optional.ofNonZeroValue(T) -> optional<T>
         FunctionDecl::new("optional.ofNonZeroValue").with_overload(

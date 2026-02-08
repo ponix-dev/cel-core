@@ -40,7 +40,9 @@ impl Backend {
     /// Parse document and publish diagnostics.
     async fn on_document_change(&self, uri: Url, text: String, version: i32) {
         let registry = self.proto_registry.get().and_then(|r| r.clone());
-        let state = self.documents.open(uri.clone(), text, version, registry.as_ref());
+        let state = self
+            .documents
+            .open(uri.clone(), text, version, registry.as_ref());
         self.publish_diagnostics_for(&uri, &state).await;
     }
 
@@ -178,9 +180,7 @@ impl LanguageServer for Backend {
                     position,
                 ))
             }
-            DocumentKind::Proto(state) => {
-                Ok(lsp::hover_at_position_proto(state, position))
-            }
+            DocumentKind::Proto(state) => Ok(lsp::hover_at_position_proto(state, position)),
         }
     }
 
@@ -214,16 +214,25 @@ impl LanguageServer for Backend {
                         let end = start + r.mapper.host_length(r.region.source.len());
                         eprintln!(
                             "[completion]   region[{}]: host=[{}..{}] source={:?} contains={}",
-                            i, start, end, r.region.source,
+                            i,
+                            start,
+                            end,
+                            r.region.source,
                             r.contains_host_offset(offset)
                         );
                     }
                 }
                 let result = lsp::completion_at_position_proto(state, position);
-                eprintln!("[completion] result items={}", result.as_ref().map(|r| match r {
-                    CompletionResponse::Array(items) => items.len(),
-                    _ => 0,
-                }).unwrap_or(0));
+                eprintln!(
+                    "[completion] result items={}",
+                    result
+                        .as_ref()
+                        .map(|r| match r {
+                            CompletionResponse::Array(items) => items.len(),
+                            _ => 0,
+                        })
+                        .unwrap_or(0)
+                );
                 Ok(result)
             }
         }
@@ -246,9 +255,7 @@ impl LanguageServer for Backend {
                 };
                 lsp::tokens_for_ast(&state.line_index, ast)
             }
-            DocumentKind::Proto(state) => {
-                lsp::tokens_for_proto(state)
-            }
+            DocumentKind::Proto(state) => lsp::tokens_for_proto(state),
         };
 
         Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {

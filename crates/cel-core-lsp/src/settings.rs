@@ -71,7 +71,10 @@ pub fn parse_type_string(s: &str) -> Result<CelType, String> {
     // Handle parameterized types first
     if let Some(inner_start) = s.find('(') {
         if !s.ends_with(')') {
-            return Err(format!("malformed type string: missing closing paren in '{}'", s));
+            return Err(format!(
+                "malformed type string: missing closing paren in '{}'",
+                s
+            ));
         }
 
         let type_name = &s[..inner_start];
@@ -242,7 +245,10 @@ fn build_env_from_settings_impl(settings: &Settings, workspace_root: Option<&Pat
                         env.add_variable(name, cel_type);
                     }
                     Err(e) => {
-                        eprintln!("Warning: failed to parse type for variable '{}': {}", name, e);
+                        eprintln!(
+                            "Warning: failed to parse type for variable '{}': {}",
+                            name, e
+                        );
                     }
                 }
             }

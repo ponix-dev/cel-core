@@ -7,11 +7,13 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use prost_reflect::{
-    DynamicMessage, FieldDescriptor, Kind, MapKey as ProtoMapKey, MessageDescriptor,
-    ReflectMessage,
+    DynamicMessage, FieldDescriptor, Kind, MapKey as ProtoMapKey, MessageDescriptor, ReflectMessage,
 };
 
-use cel_core::{EnumValue, EvalError, EvalErrorKind, MapKey, MessageValue, OptionalValue, ProtoRegistry, StructFieldValue, Value, ValueMap};
+use cel_core::{
+    EnumValue, EvalError, EvalErrorKind, MapKey, MessageValue, OptionalValue, ProtoRegistry,
+    StructFieldValue, Value, ValueMap,
+};
 
 use crate::message::ProstMessage;
 use crate::registry::ProstProtoRegistry;
@@ -43,9 +45,7 @@ impl ProtoRegistry for ProstProtoRegistry {
         }
 
         // Shortcut for google.protobuf.Any
-        if descriptor.full_name() == "google.protobuf.Any"
-            || type_name == "google.protobuf.Any"
-        {
+        if descriptor.full_name() == "google.protobuf.Any" || type_name == "google.protobuf.Any" {
             return self.construct_any(&descriptor, fields);
         }
 
@@ -58,7 +58,12 @@ impl ProtoRegistry for ProstProtoRegistry {
             if field.optional {
                 match &field.value {
                     Value::Optional(OptionalValue::Some(v)) => {
-                        if let Err(e) = self.set_proto_field_or_null(&mut message, &field.name, (**v).clone(), strong_enums) {
+                        if let Err(e) = self.set_proto_field_or_null(
+                            &mut message,
+                            &field.name,
+                            (**v).clone(),
+                            strong_enums,
+                        ) {
                             return e;
                         }
                     }
@@ -66,13 +71,23 @@ impl ProtoRegistry for ProstProtoRegistry {
                         // Skip absent optionals
                     }
                     _ => {
-                        if let Err(e) = self.set_proto_field_or_null(&mut message, &field.name, field.value.clone(), strong_enums) {
+                        if let Err(e) = self.set_proto_field_or_null(
+                            &mut message,
+                            &field.name,
+                            field.value.clone(),
+                            strong_enums,
+                        ) {
                             return e;
                         }
                     }
                 }
             } else {
-                if let Err(e) = self.set_proto_field_or_null(&mut message, &field.name, field.value.clone(), strong_enums) {
+                if let Err(e) = self.set_proto_field_or_null(
+                    &mut message,
+                    &field.name,
+                    field.value.clone(),
+                    strong_enums,
+                ) {
                     return e;
                 }
             }
@@ -104,9 +119,7 @@ impl ProtoRegistry for ProstProtoRegistry {
             Some(field_desc) => {
                 // For wrapper/well-known message fields that support presence,
                 // return null if the field is not set.
-                if field_desc.supports_presence()
-                    && !proto.message().has_field(&field_desc)
-                {
+                if field_desc.supports_presence() && !proto.message().has_field(&field_desc) {
                     if let Kind::Message(msg_desc) = field_desc.kind() {
                         let msg_name = msg_desc.full_name();
                         // Unset ListValue -> empty list, unset Struct -> empty map
@@ -126,9 +139,7 @@ impl ProtoRegistry for ProstProtoRegistry {
                                 result
                             };
                         }
-                        if wkt::is_wrapper_type(&msg_desc)
-                            || msg_name == "google.protobuf.Any"
-                        {
+                        if wkt::is_wrapper_type(&msg_desc) || msg_name == "google.protobuf.Any" {
                             if optional {
                                 return Value::optional_some(Value::Null);
                             } else {
@@ -264,9 +275,7 @@ impl ProstProtoRegistry {
                     Value::Int(*n as i64)
                 }
             }
-            prost_reflect::Value::Message(msg) => {
-                self.maybe_unwrap_well_known(msg.clone())
-            }
+            prost_reflect::Value::Message(msg) => self.maybe_unwrap_well_known(msg.clone()),
             prost_reflect::Value::List(list) => {
                 let elem_kind = field.kind();
                 let values: Vec<Value> = list
@@ -297,7 +306,12 @@ impl ProstProtoRegistry {
     }
 
     /// Convert a scalar prost_reflect Value to a CEL Value.
-    pub fn proto_scalar_to_value(&self, value: &prost_reflect::Value, kind: &Kind, strong_enums: bool) -> Value {
+    pub fn proto_scalar_to_value(
+        &self,
+        value: &prost_reflect::Value,
+        kind: &Kind,
+        strong_enums: bool,
+    ) -> Value {
         match value {
             prost_reflect::Value::Bool(b) => Value::Bool(*b),
             prost_reflect::Value::I32(i) => Value::Int(*i as i64),
@@ -376,7 +390,9 @@ impl ProstProtoRegistry {
                 "google.protobuf.UInt32Value" | "google.protobuf.UInt64Value" => Value::UInt(0),
                 "google.protobuf.FloatValue" | "google.protobuf.DoubleValue" => Value::Double(0.0),
                 "google.protobuf.StringValue" => Value::String(Arc::from("")),
-                "google.protobuf.BytesValue" => Value::Bytes(Arc::from(Vec::<u8>::new().as_slice())),
+                "google.protobuf.BytesValue" => {
+                    Value::Bytes(Arc::from(Vec::<u8>::new().as_slice()))
+                }
                 _ => Value::error(EvalError::internal("unknown wrapper type")),
             };
         }
@@ -397,7 +413,10 @@ impl ProstProtoRegistry {
         match type_name {
             "google.protobuf.BoolValue" => match value {
                 Value::Bool(_) => value.clone(),
-                _ => Value::error(EvalError::type_mismatch("bool", &value.cel_type().display_name())),
+                _ => Value::error(EvalError::type_mismatch(
+                    "bool",
+                    &value.cel_type().display_name(),
+                )),
             },
             "google.protobuf.Int32Value" => match value {
                 Value::Int(i) => {
@@ -421,7 +440,10 @@ impl ProstProtoRegistry {
                         Value::Int(*d as i64)
                     }
                 }
-                _ => Value::error(EvalError::type_mismatch("int", &value.cel_type().display_name())),
+                _ => Value::error(EvalError::type_mismatch(
+                    "int",
+                    &value.cel_type().display_name(),
+                )),
             },
             "google.protobuf.Int64Value" => match value {
                 Value::Int(_) => value.clone(),
@@ -432,7 +454,10 @@ impl ProstProtoRegistry {
                         Value::Int(*u as i64)
                     }
                 }
-                _ => Value::error(EvalError::type_mismatch("int", &value.cel_type().display_name())),
+                _ => Value::error(EvalError::type_mismatch(
+                    "int",
+                    &value.cel_type().display_name(),
+                )),
             },
             "google.protobuf.UInt32Value" => match value {
                 Value::UInt(u) => {
@@ -449,7 +474,10 @@ impl ProstProtoRegistry {
                         Value::UInt(*i as u64)
                     }
                 }
-                _ => Value::error(EvalError::type_mismatch("uint", &value.cel_type().display_name())),
+                _ => Value::error(EvalError::type_mismatch(
+                    "uint",
+                    &value.cel_type().display_name(),
+                )),
             },
             "google.protobuf.UInt64Value" => match value {
                 Value::UInt(_) => value.clone(),
@@ -460,27 +488,42 @@ impl ProstProtoRegistry {
                         Value::UInt(*i as u64)
                     }
                 }
-                _ => Value::error(EvalError::type_mismatch("uint", &value.cel_type().display_name())),
+                _ => Value::error(EvalError::type_mismatch(
+                    "uint",
+                    &value.cel_type().display_name(),
+                )),
             },
             "google.protobuf.FloatValue" => match value {
                 Value::Double(d) => Value::Double((*d as f32) as f64),
                 Value::Int(i) => Value::Double((*i as f32) as f64),
                 Value::UInt(u) => Value::Double((*u as f32) as f64),
-                _ => Value::error(EvalError::type_mismatch("double", &value.cel_type().display_name())),
+                _ => Value::error(EvalError::type_mismatch(
+                    "double",
+                    &value.cel_type().display_name(),
+                )),
             },
             "google.protobuf.DoubleValue" => match value {
                 Value::Double(_) => value.clone(),
                 Value::Int(i) => Value::Double(*i as f64),
                 Value::UInt(u) => Value::Double(*u as f64),
-                _ => Value::error(EvalError::type_mismatch("double", &value.cel_type().display_name())),
+                _ => Value::error(EvalError::type_mismatch(
+                    "double",
+                    &value.cel_type().display_name(),
+                )),
             },
             "google.protobuf.StringValue" => match value {
                 Value::String(_) => value.clone(),
-                _ => Value::error(EvalError::type_mismatch("string", &value.cel_type().display_name())),
+                _ => Value::error(EvalError::type_mismatch(
+                    "string",
+                    &value.cel_type().display_name(),
+                )),
             },
             "google.protobuf.BytesValue" => match value {
                 Value::Bytes(_) => value.clone(),
-                _ => Value::error(EvalError::type_mismatch("bytes", &value.cel_type().display_name())),
+                _ => Value::error(EvalError::type_mismatch(
+                    "bytes",
+                    &value.cel_type().display_name(),
+                )),
             },
             _ => Value::error(EvalError::internal(format!(
                 "unknown wrapper type: {}",
@@ -490,11 +533,7 @@ impl ProstProtoRegistry {
     }
 
     /// Construct a google.protobuf.Any message directly.
-    fn construct_any(
-        &self,
-        descriptor: &MessageDescriptor,
-        fields: &[StructFieldValue],
-    ) -> Value {
+    fn construct_any(&self, descriptor: &MessageDescriptor, fields: &[StructFieldValue]) -> Value {
         let mut type_url = String::new();
         let mut value_bytes = Vec::new();
 
@@ -540,15 +579,10 @@ impl ProstProtoRegistry {
         } else {
             for field_desc in descriptor.fields() {
                 match field_desc.number() {
-                    1 => msg.set_field(
-                        &field_desc,
-                        prost_reflect::Value::String(type_url.clone()),
-                    ),
+                    1 => msg.set_field(&field_desc, prost_reflect::Value::String(type_url.clone())),
                     2 => msg.set_field(
                         &field_desc,
-                        prost_reflect::Value::Bytes(prost::bytes::Bytes::from(
-                            value_bytes.clone(),
-                        )),
+                        prost_reflect::Value::Bytes(prost::bytes::Bytes::from(value_bytes.clone())),
                     ),
                     _ => {}
                 }
@@ -600,8 +634,7 @@ impl ProstProtoRegistry {
                     }
                     // For google.protobuf.Value, null sets the null_value oneof
                     if msg_name == "google.protobuf.Value" {
-                        let val_msg =
-                            wkt::cel_value_to_google_value(&Value::Null, self)?;
+                        let val_msg = wkt::cel_value_to_google_value(&Value::Null, self)?;
                         message.set_field(&field, prost_reflect::Value::Message(val_msg));
                         return Ok(());
                     }
@@ -660,7 +693,11 @@ impl ProstProtoRegistry {
                 Value::List(list) => {
                     let mut values = Vec::with_capacity(list.len());
                     for item in list.iter() {
-                        values.push(self.scalar_value_to_proto(item, &field.kind(), strong_enums)?);
+                        values.push(self.scalar_value_to_proto(
+                            item,
+                            &field.kind(),
+                            strong_enums,
+                        )?);
                     }
                     return Ok(prost_reflect::Value::List(values));
                 }
@@ -684,7 +721,8 @@ impl ProstProtoRegistry {
                         if let (Some(kf), Some(vf)) = (key_field, value_field) {
                             for (k, v) in map.iter() {
                                 let proto_key = self.map_key_to_proto(k, &kf.kind())?;
-                                let proto_val = self.scalar_value_to_proto(v, &vf.kind(), strong_enums)?;
+                                let proto_val =
+                                    self.scalar_value_to_proto(v, &vf.kind(), strong_enums)?;
                                 proto_map.insert(proto_key, proto_val);
                             }
                         }
@@ -742,9 +780,9 @@ impl ProstProtoRegistry {
             (Value::Double(d), Kind::Double) => Ok(prost_reflect::Value::F64(*d)),
             (Value::Double(d), Kind::Float) => Ok(prost_reflect::Value::F32(*d as f32)),
             (Value::String(s), Kind::String) => Ok(prost_reflect::Value::String(s.to_string())),
-            (Value::Bytes(b), Kind::Bytes) => {
-                Ok(prost_reflect::Value::Bytes(prost::bytes::Bytes::copy_from_slice(b)))
-            }
+            (Value::Bytes(b), Kind::Bytes) => Ok(prost_reflect::Value::Bytes(
+                prost::bytes::Bytes::copy_from_slice(b),
+            )),
             // Cross-type numeric coercion: Int -> Uint
             (Value::Int(i), Kind::Uint32 | Kind::Fixed32) => {
                 if *i < 0 || *i > u32::MAX as i64 {
@@ -783,28 +821,36 @@ impl ProstProtoRegistry {
             // Cross-type numeric coercion: Double -> Int/UInt
             (Value::Double(d), Kind::Int32 | Kind::Sint32 | Kind::Sfixed32) => {
                 if d.fract() != 0.0 || *d < i32::MIN as f64 || *d > i32::MAX as f64 {
-                    Err(Value::error(EvalError::overflow("double to int32 overflow")))
+                    Err(Value::error(EvalError::overflow(
+                        "double to int32 overflow",
+                    )))
                 } else {
                     Ok(prost_reflect::Value::I32(*d as i32))
                 }
             }
             (Value::Double(d), Kind::Int64 | Kind::Sint64 | Kind::Sfixed64) => {
                 if d.fract() != 0.0 || *d < i64::MIN as f64 || *d > i64::MAX as f64 {
-                    Err(Value::error(EvalError::overflow("double to int64 overflow")))
+                    Err(Value::error(EvalError::overflow(
+                        "double to int64 overflow",
+                    )))
                 } else {
                     Ok(prost_reflect::Value::I64(*d as i64))
                 }
             }
             (Value::Double(d), Kind::Uint32 | Kind::Fixed32) => {
                 if d.fract() != 0.0 || *d < 0.0 || *d > u32::MAX as f64 {
-                    Err(Value::error(EvalError::overflow("double to uint32 overflow")))
+                    Err(Value::error(EvalError::overflow(
+                        "double to uint32 overflow",
+                    )))
                 } else {
                     Ok(prost_reflect::Value::U32(*d as u32))
                 }
             }
             (Value::Double(d), Kind::Uint64 | Kind::Fixed64) => {
                 if d.fract() != 0.0 || *d < 0.0 || *d > u64::MAX as f64 {
-                    Err(Value::error(EvalError::overflow("double to uint64 overflow")))
+                    Err(Value::error(EvalError::overflow(
+                        "double to uint64 overflow",
+                    )))
                 } else {
                     Ok(prost_reflect::Value::U64(*d as u64))
                 }
@@ -856,7 +902,9 @@ impl ProstProtoRegistry {
                 if let Some(value_field) = msg_desc.get_field_by_name("value") {
                     let proto_val = if msg_desc.full_name() == "google.protobuf.UInt32Value" {
                         if *u > u32::MAX as u64 {
-                            return Err(Value::error(EvalError::overflow("uint to uint32 overflow")));
+                            return Err(Value::error(EvalError::overflow(
+                                "uint to uint32 overflow",
+                            )));
                         }
                         prost_reflect::Value::U32(*u as u32)
                     } else {
@@ -911,13 +959,17 @@ impl ProstProtoRegistry {
             // Cross-type numeric coercion for wrapper types: Int -> UInt wrapper
             (Value::Int(i), Kind::Message(msg_desc)) if wkt::is_uint_wrapper(msg_desc) => {
                 if *i < 0 {
-                    return Err(Value::error(EvalError::overflow("negative int to uint wrapper")));
+                    return Err(Value::error(EvalError::overflow(
+                        "negative int to uint wrapper",
+                    )));
                 }
                 let mut msg = DynamicMessage::new(msg_desc.clone());
                 if let Some(value_field) = msg_desc.get_field_by_name("value") {
                     let proto_val = if msg_desc.full_name() == "google.protobuf.UInt32Value" {
                         if *i > u32::MAX as i64 {
-                            return Err(Value::error(EvalError::overflow("int to uint32 overflow")));
+                            return Err(Value::error(EvalError::overflow(
+                                "int to uint32 overflow",
+                            )));
                         }
                         prost_reflect::Value::U32(*i as u32)
                     } else {
@@ -933,12 +985,16 @@ impl ProstProtoRegistry {
                 if let Some(value_field) = msg_desc.get_field_by_name("value") {
                     let proto_val = if msg_desc.full_name() == "google.protobuf.Int32Value" {
                         if *u > i32::MAX as u64 {
-                            return Err(Value::error(EvalError::overflow("uint to int32 overflow")));
+                            return Err(Value::error(EvalError::overflow(
+                                "uint to int32 overflow",
+                            )));
                         }
                         prost_reflect::Value::I32(*u as i32)
                     } else {
                         if *u > i64::MAX as u64 {
-                            return Err(Value::error(EvalError::overflow("uint to int64 overflow")));
+                            return Err(Value::error(EvalError::overflow(
+                                "uint to int64 overflow",
+                            )));
                         }
                         prost_reflect::Value::I64(*u as i64)
                     };
@@ -972,9 +1028,7 @@ impl ProstProtoRegistry {
                 Ok(prost_reflect::Value::Message(msg))
             }
             // google.protobuf.Value coercion
-            (_, Kind::Message(msg_desc))
-                if msg_desc.full_name() == "google.protobuf.Value" =>
-            {
+            (_, Kind::Message(msg_desc)) if msg_desc.full_name() == "google.protobuf.Value" => {
                 let msg = wkt::cel_value_to_google_value(value, self)?;
                 Ok(prost_reflect::Value::Message(msg))
             }
@@ -996,22 +1050,24 @@ impl ProstProtoRegistry {
             (Value::Message(msg), Kind::Message(msg_desc))
                 if msg_desc.full_name() == "google.protobuf.Any" =>
             {
-                let proto = msg.as_any().downcast_ref::<ProstMessage>()
+                let proto = msg
+                    .as_any()
+                    .downcast_ref::<ProstMessage>()
                     .expect("Message must be ProstMessage");
                 wkt::pack_message_into_any(proto.message(), msg_desc)
             }
             // google.protobuf.Any wrapping for primitive values
-            (_, Kind::Message(msg_desc))
-                if msg_desc.full_name() == "google.protobuf.Any" =>
-            {
+            (_, Kind::Message(msg_desc)) if msg_desc.full_name() == "google.protobuf.Any" => {
                 let any_msg = wkt::wrap_value_for_any(value, self)?;
                 Ok(prost_reflect::Value::Message(any_msg))
             }
-            (Value::Null, Kind::Message(msg_desc)) => {
-                Ok(prost_reflect::Value::Message(DynamicMessage::new(msg_desc.clone())))
-            }
+            (Value::Null, Kind::Message(msg_desc)) => Ok(prost_reflect::Value::Message(
+                DynamicMessage::new(msg_desc.clone()),
+            )),
             (Value::Message(msg), Kind::Message(_)) => {
-                let proto = msg.as_any().downcast_ref::<ProstMessage>()
+                let proto = msg
+                    .as_any()
+                    .downcast_ref::<ProstMessage>()
                     .expect("Message must be ProstMessage");
                 Ok(prost_reflect::Value::Message((*proto.message()).clone()))
             }
@@ -1023,11 +1079,7 @@ impl ProstProtoRegistry {
     }
 
     /// Convert a CEL MapKey to a prost_reflect MapKey.
-    fn map_key_to_proto(
-        &self,
-        key: &MapKey,
-        kind: &Kind,
-    ) -> Result<ProtoMapKey, Value> {
+    fn map_key_to_proto(&self, key: &MapKey, kind: &Kind) -> Result<ProtoMapKey, Value> {
         match (key, kind) {
             (MapKey::Bool(b), Kind::Bool) => Ok(ProtoMapKey::Bool(*b)),
             (MapKey::Int(i), Kind::Int32 | Kind::Sint32 | Kind::Sfixed32) => {

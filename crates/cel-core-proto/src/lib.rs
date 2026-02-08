@@ -53,6 +53,7 @@ mod converter;
 
 pub use checked_expr::{check_result_from_proto, to_checked_expr, to_checked_expr_from_ast};
 mod error;
+mod eval_proto;
 pub mod gen;
 mod message;
 mod operators;
@@ -60,7 +61,6 @@ mod registry;
 mod source_info;
 mod type_conversion;
 pub(crate) mod wkt;
-mod eval_proto;
 
 pub use message::ProstMessage;
 pub use registry::ProstProtoRegistry;

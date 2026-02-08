@@ -82,7 +82,9 @@ pub fn cel_type_from_proto(proto: &ProtoType) -> CelType {
                 }
                 "google.protobuf.StringValue" => CelType::wrapper(CelType::String),
                 "google.protobuf.BytesValue" => CelType::wrapper(CelType::Bytes),
-                "google.protobuf.Any" | "google.protobuf.Struct" | "google.protobuf.Value"
+                "google.protobuf.Any"
+                | "google.protobuf.Struct"
+                | "google.protobuf.Value"
                 | "google.protobuf.ListValue" => CelType::Dyn,
                 _ => CelType::Message(Arc::from(name.as_str())),
             }
@@ -121,11 +123,17 @@ pub fn cel_type_from_proto(proto: &ProtoType) -> CelType {
         Some(ProtoTypeKind::Error(_)) => CelType::Error,
         Some(ProtoTypeKind::AbstractType(abs)) => {
             // Special case: "optional" abstract type maps to CelType::Optional
-            if (abs.name == "optional_type" || abs.name == "optional") && abs.parameter_types.len() == 1 {
+            if (abs.name == "optional_type" || abs.name == "optional")
+                && abs.parameter_types.len() == 1
+            {
                 let inner = cel_type_from_proto(&abs.parameter_types[0]);
                 return CelType::Optional(Arc::new(inner));
             }
-            let params: Vec<_> = abs.parameter_types.iter().map(cel_type_from_proto).collect();
+            let params: Vec<_> = abs
+                .parameter_types
+                .iter()
+                .map(cel_type_from_proto)
+                .collect();
             CelType::Abstract {
                 name: Arc::from(abs.name.as_str()),
                 params: Arc::from(params),
@@ -159,12 +167,10 @@ pub fn cel_type_to_proto(cel_type: &CelType) -> ProtoType {
         CelType::Message(name) => ProtoTypeKind::MessageType(name.to_string()),
         // Note: Enum loses its distinction when serialized - see module docs
         CelType::Enum(name) => ProtoTypeKind::MessageType(name.to_string()),
-        CelType::Abstract { name, params } => {
-            ProtoTypeKind::AbstractType(ProtoAbstractType {
-                name: name.to_string(),
-                parameter_types: params.iter().map(cel_type_to_proto).collect(),
-            })
-        }
+        CelType::Abstract { name, params } => ProtoTypeKind::AbstractType(ProtoAbstractType {
+            name: name.to_string(),
+            parameter_types: params.iter().map(cel_type_to_proto).collect(),
+        }),
         CelType::Function { params, result } => {
             ProtoTypeKind::Function(Box::new(ProtoFunctionType {
                 arg_types: params.iter().map(cel_type_to_proto).collect(),

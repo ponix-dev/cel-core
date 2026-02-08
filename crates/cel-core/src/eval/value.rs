@@ -63,7 +63,6 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
 
-
 use super::message::MessageValue;
 use super::EvalError;
 use crate::types::{CelType, CelValue};
@@ -1422,7 +1421,10 @@ mod tests {
         assert_eq!(Value::Int(1).compare(&Value::Int(1)), Some(Ordering::Equal));
 
         // Cross-numeric comparison
-        assert_eq!(Value::Int(-1).compare(&Value::UInt(1)), Some(Ordering::Less));
+        assert_eq!(
+            Value::Int(-1).compare(&Value::UInt(1)),
+            Some(Ordering::Less)
+        );
         assert_eq!(
             Value::Int(1).compare(&Value::Double(1.5)),
             Some(Ordering::Less)
@@ -1483,16 +1485,16 @@ mod tests {
         // Integer keys
         let map = Value::map([(1i64, "one"), (2i64, "two")]);
         if let Value::Map(m) = &map {
-            assert_eq!(m.get(&MapKey::Int(1)), Some(&Value::String(Arc::from("one"))));
+            assert_eq!(
+                m.get(&MapKey::Int(1)),
+                Some(&Value::String(Arc::from("one")))
+            );
         } else {
             panic!("expected map");
         }
 
         // Mixed value types with explicit Value::from
-        let map = Value::map([
-            ("name", Value::from("Alice")),
-            ("age", Value::from(30i64)),
-        ]);
+        let map = Value::map([("name", Value::from("Alice")), ("age", Value::from(30i64))]);
         if let Value::Map(m) = &map {
             assert_eq!(m.len(), 2);
         } else {
@@ -1841,7 +1843,10 @@ mod tests {
         assert_ne!(Value::Double(f64::NAN), enum_val);
 
         // List membership: Int in [Enum] uses PartialEq
-        let list = Value::List(Arc::from(vec![Value::Enum(EnumValue::new("test.MyEnum", 1))]));
+        let list = Value::List(Arc::from(vec![Value::Enum(EnumValue::new(
+            "test.MyEnum",
+            1,
+        ))]));
         if let Value::List(items) = &list {
             assert!(items.contains(&Value::Int(1)));
         }

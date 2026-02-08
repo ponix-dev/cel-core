@@ -87,7 +87,11 @@ pub struct ProtoDocumentState {
 
 impl ProtoDocumentState {
     /// Create a new proto document state by extracting and parsing CEL regions.
-    pub fn new(source: String, version: i32, proto_registry: Option<&Arc<ProstProtoRegistry>>) -> Self {
+    pub fn new(
+        source: String,
+        version: i32,
+        proto_registry: Option<&Arc<ProstProtoRegistry>>,
+    ) -> Self {
         let line_index = LineIndex::new(source.clone());
 
         // Extract CEL regions from the proto file
@@ -143,7 +147,13 @@ impl DocumentStore {
 
     /// Open or update a document with the given source text.
     /// Auto-detects document type based on file extension.
-    pub fn open(&self, uri: Url, source: String, version: i32, proto_registry: Option<&Arc<ProstProtoRegistry>>) -> Arc<DocumentKind> {
+    pub fn open(
+        &self,
+        uri: Url,
+        source: String,
+        version: i32,
+        proto_registry: Option<&Arc<ProstProtoRegistry>>,
+    ) -> Arc<DocumentKind> {
         let kind = if is_proto_file(&uri) {
             DocumentKind::Proto(ProtoDocumentState::new(source, version, proto_registry))
         } else {

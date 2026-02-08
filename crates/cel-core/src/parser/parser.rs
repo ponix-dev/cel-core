@@ -2,9 +2,9 @@
 
 use std::collections::HashMap;
 
-use crate::types::{Expr, ListElement, MapEntry, Span, Spanned, SpannedExpr, StructField};
 use super::lexer::{SpannedToken, Token};
 use super::macros::{MacroContext, MacroExpansion, MacroRegistry};
+use crate::types::{Expr, ListElement, MapEntry, Span, Spanned, SpannedExpr, StructField};
 
 /// Parse error with span information.
 #[derive(Debug, Clone, PartialEq)]
@@ -93,11 +93,7 @@ impl<'a> Parser<'a> {
 
     /// Get the span representing end-of-input.
     fn eof_span(&self) -> Span {
-        let end = self
-            .tokens
-            .last()
-            .map(|(_, s)| s.end)
-            .unwrap_or(0);
+        let end = self.tokens.last().map(|(_, s)| s.end).unwrap_or(0);
         end..end
     }
 
@@ -336,7 +332,11 @@ impl<'a> Parser<'a> {
                 if s == "9223372036854775808" {
                     let end = span.end;
                     self.advance();
-                    return Ok(Spanned::new(self.next_id(), Expr::Int(i64::MIN), start..end));
+                    return Ok(Spanned::new(
+                        self.next_id(),
+                        Expr::Int(i64::MIN),
+                        start..end,
+                    ));
                 }
             }
             let expr = self.parse_unary()?;
@@ -457,7 +457,11 @@ impl<'a> Parser<'a> {
 
         // Store macro call closure
         let macro_calls = &mut self.macro_calls;
-        let mut store_fn = |call_id: i64, span: &Span, receiver: &SpannedExpr, method_name: &str, args: &[SpannedExpr]| {
+        let mut store_fn = |call_id: i64,
+                            span: &Span,
+                            receiver: &SpannedExpr,
+                            method_name: &str,
+                            args: &[SpannedExpr]| {
             // Build the original call expression: receiver.method(args...)
             let method_expr = Spanned::new(
                 0, // ID doesn't matter for stored calls
@@ -502,14 +506,18 @@ impl<'a> Parser<'a> {
 
     /// Extract call information from a callee expression.
     /// Returns (name, receiver, is_receiver) or None if not a macro candidate.
-    fn extract_call_info(&self, callee: &SpannedExpr) -> Option<(String, Option<SpannedExpr>, bool)> {
+    fn extract_call_info(
+        &self,
+        callee: &SpannedExpr,
+    ) -> Option<(String, Option<SpannedExpr>, bool)> {
         match &callee.node {
             // Global function call: name(args)
             Expr::Ident(name) => {
                 // Check if this is a global macro
-                if self.macros.lookup(name, 0, false).is_some() ||
-                   self.macros.lookup(name, 1, false).is_some() ||
-                   self.macros.lookup(name, 2, false).is_some() {
+                if self.macros.lookup(name, 0, false).is_some()
+                    || self.macros.lookup(name, 1, false).is_some()
+                    || self.macros.lookup(name, 2, false).is_some()
+                {
                     Some((name.clone(), None, false))
                 } else {
                     None
@@ -529,11 +537,12 @@ impl<'a> Parser<'a> {
                     }
                 }
                 // Check if this is a receiver macro
-                if self.macros.lookup(field, 0, true).is_some() ||
-                   self.macros.lookup(field, 1, true).is_some() ||
-                   self.macros.lookup(field, 2, true).is_some() ||
-                   self.macros.lookup(field, 3, true).is_some() ||
-                   self.macros.lookup(field, 4, true).is_some() {
+                if self.macros.lookup(field, 0, true).is_some()
+                    || self.macros.lookup(field, 1, true).is_some()
+                    || self.macros.lookup(field, 2, true).is_some()
+                    || self.macros.lookup(field, 3, true).is_some()
+                    || self.macros.lookup(field, 4, true).is_some()
+                {
                     Some((field.clone(), Some((**expr).clone()), true))
                 } else {
                     None
@@ -573,7 +582,10 @@ impl<'a> Parser<'a> {
             Some((Token::Reserved(name), span)) => (name.clone(), span.end),
             other => {
                 return Err(ParseError {
-                    message: format!("expected identifier after '.', found {:?}", other.map(|(t, _)| t)),
+                    message: format!(
+                        "expected identifier after '.', found {:?}",
+                        other.map(|(t, _)| t)
+                    ),
                     span: self.peek_span(),
                 });
             }
@@ -636,7 +648,11 @@ impl<'a> Parser<'a> {
         self.expect(&Token::Colon)?;
         let value = self.parse_expr()?;
 
-        Ok(StructField { name, value, optional })
+        Ok(StructField {
+            name,
+            value,
+            optional,
+        })
     }
 
     /// Parse an atom: literal, identifier, parenthesized expression, list, or map.
@@ -688,20 +704,19 @@ impl<'a> Parser<'a> {
             }
 
             // Reserved word - error
-            Some(Token::Reserved(word)) => {
-                Err(ParseError {
-                    message: format!("'{}' is a reserved word and cannot be used as an identifier", word),
-                    span,
-                })
-            }
+            Some(Token::Reserved(word)) => Err(ParseError {
+                message: format!(
+                    "'{}' is a reserved word and cannot be used as an identifier",
+                    word
+                ),
+                span,
+            }),
 
             // Integer overflow - error (unless preceded by -, which is handled in parse_unary)
-            Some(Token::IntOverflow(s)) => {
-                Err(ParseError {
-                    message: format!("integer literal '{}' overflows i64", s),
-                    span,
-                })
-            }
+            Some(Token::IntOverflow(s)) => Err(ParseError {
+                message: format!("integer literal '{}' overflows i64", s),
+                span,
+            }),
 
             // Root identifier: .name
             Some(Token::Dot) => {
@@ -775,7 +790,11 @@ impl<'a> Parser<'a> {
 
         let end_span = self.expect(&Token::RBracket)?;
 
-        Ok(Spanned::new(self.next_id(), Expr::List(items), start..end_span.end))
+        Ok(Spanned::new(
+            self.next_id(),
+            Expr::List(items),
+            start..end_span.end,
+        ))
     }
 
     /// Parse a map entry: [?]expr: expr
@@ -784,7 +803,11 @@ impl<'a> Parser<'a> {
         let key = self.parse_expr()?;
         self.expect(&Token::Colon)?;
         let value = self.parse_expr()?;
-        Ok(MapEntry { key, value, optional })
+        Ok(MapEntry {
+            key,
+            value,
+            optional,
+        })
     }
 
     /// Parse a map literal: {[?]expr: expr, [?]expr: expr, ...}
@@ -806,7 +829,11 @@ impl<'a> Parser<'a> {
 
         let end_span = self.expect(&Token::RBrace)?;
 
-        Ok(Spanned::new(self.next_id(), Expr::Map(entries), start..end_span.end))
+        Ok(Spanned::new(
+            self.next_id(),
+            Expr::Map(entries),
+            start..end_span.end,
+        ))
     }
 }
 
@@ -899,9 +926,9 @@ pub fn parse_tokens_with_macros(
 
 #[cfg(test)]
 mod tests {
+    use super::super::lexer::lex;
     use super::*;
     use crate::types::{BinaryOp, UnaryOp};
-    use super::super::lexer::lex;
 
     fn parse_expr(input: &str) -> SpannedExpr {
         let tokens = lex(input).unwrap();
@@ -1029,7 +1056,12 @@ mod tests {
 
     #[test]
     fn parse_member_access() {
-        if let Expr::Member { expr, field, optional } = parse_expr_node("a.b") {
+        if let Expr::Member {
+            expr,
+            field,
+            optional,
+        } = parse_expr_node("a.b")
+        {
             assert_eq!(expr.node, Expr::Ident("a".to_string()));
             assert_eq!(field, "b");
             assert!(!optional);
@@ -1040,7 +1072,12 @@ mod tests {
 
     #[test]
     fn parse_index() {
-        if let Expr::Index { expr, index, optional } = parse_expr_node("a[0]") {
+        if let Expr::Index {
+            expr,
+            index,
+            optional,
+        } = parse_expr_node("a[0]")
+        {
             assert_eq!(expr.node, Expr::Ident("a".to_string()));
             assert_eq!(index.node, Expr::Int(0));
             assert!(!optional);
@@ -1162,10 +1199,19 @@ mod tests {
 
         if let Expr::Binary { left, right, .. } = &ast.node {
             // Child nodes should have lower IDs than parent
-            assert!(left.id < ast.id, "left child should have lower ID than parent");
-            assert!(right.id < ast.id, "right child should have lower ID than parent");
+            assert!(
+                left.id < ast.id,
+                "left child should have lower ID than parent"
+            );
+            assert!(
+                right.id < ast.id,
+                "right child should have lower ID than parent"
+            );
             // Left should be parsed before right
-            assert!(left.id < right.id, "left child should have lower ID than right child");
+            assert!(
+                left.id < right.id,
+                "left child should have lower ID than right child"
+            );
         } else {
             panic!("expected binary");
         }
@@ -1176,7 +1222,12 @@ mod tests {
     #[test]
     fn expand_exists_3arg() {
         let ast = parse_expr("[1,2].exists(i, v, i < v)");
-        if let Expr::Comprehension { iter_var, iter_var2, .. } = &ast.node {
+        if let Expr::Comprehension {
+            iter_var,
+            iter_var2,
+            ..
+        } = &ast.node
+        {
             assert_eq!(iter_var, "i");
             assert_eq!(iter_var2, "v");
         } else {
@@ -1187,7 +1238,12 @@ mod tests {
     #[test]
     fn expand_all_3arg() {
         let ast = parse_expr("[1,2,3].all(i, v, v > 0)");
-        if let Expr::Comprehension { iter_var, iter_var2, .. } = &ast.node {
+        if let Expr::Comprehension {
+            iter_var,
+            iter_var2,
+            ..
+        } = &ast.node
+        {
             assert_eq!(iter_var, "i");
             assert_eq!(iter_var2, "v");
         } else {
@@ -1198,7 +1254,12 @@ mod tests {
     #[test]
     fn expand_exists_one_3arg() {
         let ast = parse_expr("[7].exists_one(i, v, i == 0 && v == 7)");
-        if let Expr::Comprehension { iter_var, iter_var2, .. } = &ast.node {
+        if let Expr::Comprehension {
+            iter_var,
+            iter_var2,
+            ..
+        } = &ast.node
+        {
             assert_eq!(iter_var, "i");
             assert_eq!(iter_var2, "v");
         } else {
@@ -1209,7 +1270,12 @@ mod tests {
     #[test]
     fn expand_transform_list_3arg() {
         let ast = parse_expr("[2,4,6].transformList(i, v, v / 2)");
-        if let Expr::Comprehension { iter_var, iter_var2, .. } = &ast.node {
+        if let Expr::Comprehension {
+            iter_var,
+            iter_var2,
+            ..
+        } = &ast.node
+        {
             assert_eq!(iter_var, "i");
             assert_eq!(iter_var2, "v");
         } else {
@@ -1220,7 +1286,12 @@ mod tests {
     #[test]
     fn expand_transform_list_4arg() {
         let ast = parse_expr("[2,4,6].transformList(i, v, i != 1, v / 2)");
-        if let Expr::Comprehension { iter_var, iter_var2, .. } = &ast.node {
+        if let Expr::Comprehension {
+            iter_var,
+            iter_var2,
+            ..
+        } = &ast.node
+        {
             assert_eq!(iter_var, "i");
             assert_eq!(iter_var2, "v");
         } else {
@@ -1231,7 +1302,12 @@ mod tests {
     #[test]
     fn expand_transform_map_3arg() {
         let ast = parse_expr(r#"{"foo": "bar"}.transformMap(k, v, k + v)"#);
-        if let Expr::Comprehension { iter_var, iter_var2, .. } = &ast.node {
+        if let Expr::Comprehension {
+            iter_var,
+            iter_var2,
+            ..
+        } = &ast.node
+        {
             assert_eq!(iter_var, "k");
             assert_eq!(iter_var2, "v");
         } else {
@@ -1242,7 +1318,12 @@ mod tests {
     #[test]
     fn expand_transform_map_4arg() {
         let ast = parse_expr(r#"{"foo": "bar"}.transformMap(k, v, k == "foo", k + v)"#);
-        if let Expr::Comprehension { iter_var, iter_var2, .. } = &ast.node {
+        if let Expr::Comprehension {
+            iter_var,
+            iter_var2,
+            ..
+        } = &ast.node
+        {
             assert_eq!(iter_var, "k");
             assert_eq!(iter_var2, "v");
         } else {
@@ -1254,9 +1335,17 @@ mod tests {
     fn exists_2arg_still_works() {
         // Ensure 2-arg form still works
         let ast = parse_expr("[1,2].exists(x, x > 0)");
-        if let Expr::Comprehension { iter_var, iter_var2, .. } = &ast.node {
+        if let Expr::Comprehension {
+            iter_var,
+            iter_var2,
+            ..
+        } = &ast.node
+        {
             assert_eq!(iter_var, "x");
-            assert!(iter_var2.is_empty(), "2-arg form should have empty iter_var2");
+            assert!(
+                iter_var2.is_empty(),
+                "2-arg form should have empty iter_var2"
+            );
         } else {
             panic!("expected comprehension, got {:?}", ast.node);
         }
@@ -1291,7 +1380,7 @@ mod tests {
 
     #[test]
     fn parse_with_custom_macros() {
-        use super::super::macros::{Macro, MacroStyle, ArgCount, MacroExpansion, MacroContext};
+        use super::super::macros::{ArgCount, Macro, MacroContext, MacroExpansion, MacroStyle};
         use crate::types::Span;
 
         fn custom_has_expander(
@@ -1302,13 +1391,11 @@ mod tests {
         ) -> MacroExpansion {
             let arg = args.into_iter().next().unwrap();
             match arg.node {
-                Expr::Member { expr, field, .. } => {
-                    MacroExpansion::Expanded(Spanned::new(
-                        ctx.next_id(),
-                        Expr::MemberTestOnly { expr, field },
-                        span,
-                    ))
-                }
+                Expr::Member { expr, field, .. } => MacroExpansion::Expanded(Spanned::new(
+                    ctx.next_id(),
+                    Expr::MemberTestOnly { expr, field },
+                    span,
+                )),
                 _ => MacroExpansion::Error("has() requires member expression".to_string()),
             }
         }

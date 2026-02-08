@@ -37,7 +37,10 @@ fn main() {
     let program = env.program(&ast).unwrap();
 
     let mut activation = MapActivation::new();
-    activation.insert("event_time", Value::Timestamp(Timestamp::from_seconds(1704110400)));
+    activation.insert(
+        "event_time",
+        Value::Timestamp(Timestamp::from_seconds(1704110400)),
+    );
     activation.insert("timeout", Value::Duration(Duration::from_seconds(1800)));
 
     let result = program.eval(&activation);

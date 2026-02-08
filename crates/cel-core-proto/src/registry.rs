@@ -8,7 +8,10 @@ use prost_reflect::{
     DescriptorPool, EnumDescriptor, ExtensionDescriptor, FieldDescriptor, Kind, MessageDescriptor,
 };
 
-use cel_core::{CelType, ProtoTypeResolver as ProtoTypeResolverTrait, ResolvedProtoType, proto_message_to_cel_type};
+use cel_core::{
+    proto_message_to_cel_type, CelType, ProtoTypeResolver as ProtoTypeResolverTrait,
+    ResolvedProtoType,
+};
 
 /// Registry for protobuf type information backed by prost-reflect.
 ///
@@ -216,7 +219,9 @@ impl ProtoTypeResolverTrait for ProstProtoRegistry {
             enum_candidates.push(enum_parts.join("."));
 
             for enum_name in &enum_candidates {
-                if let Some(value) = ProtoTypeResolverTrait::get_enum_value(self, enum_name, value_name) {
+                if let Some(value) =
+                    ProtoTypeResolverTrait::get_enum_value(self, enum_name, value_name)
+                {
                     return Some(ResolvedProtoType::EnumValue {
                         enum_name: enum_name.clone(),
                         value,

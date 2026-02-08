@@ -337,12 +337,7 @@ fn format_scientific(d: f64, precision: usize) -> String {
         if precision == 0 {
             return format!("{}0e+00", sign);
         }
-        return format!(
-            "{}0.{:0>width$}e+00",
-            sign,
-            "",
-            width = precision
-        );
+        return format!("{}0.{:0>width$}e+00", sign, "", width = precision);
     }
     let abs = d.abs();
     let exp = abs.log10().floor() as i32;
@@ -350,12 +345,7 @@ fn format_scientific(d: f64, precision: usize) -> String {
     let exp_sign = if exp >= 0 { '+' } else { '-' };
     let exp_abs = exp.unsigned_abs();
     if precision == 0 {
-        format!(
-            "{}e{}{:02}",
-            format!("{:.0}", mantissa),
-            exp_sign,
-            exp_abs
-        )
+        format!("{}e{}{:02}", format!("{:.0}", mantissa), exp_sign, exp_abs)
     } else {
         format!(
             "{:.prec$}e{}{:02}",
@@ -468,8 +458,7 @@ pub fn string_extension() -> Vec<FunctionDecl> {
                     };
                     match s[byte_start..].find(substr.as_ref()) {
                         Some(byte_offset) => {
-                            let cp_index =
-                                s[..byte_start + byte_offset].chars().count() as i64;
+                            let cp_index = s[..byte_start + byte_offset].chars().count() as i64;
                             Value::Int(cp_index)
                         }
                         None => Value::Int(-1),
@@ -653,9 +642,11 @@ pub fn string_extension() -> Vec<FunctionDecl> {
                     if limit < 0 {
                         return Value::String(Arc::from(s.replace(old.as_ref(), new.as_ref())));
                     }
-                    Value::String(Arc::from(
-                        s.replacen(old.as_ref(), new.as_ref(), limit as usize),
-                    ))
+                    Value::String(Arc::from(s.replacen(
+                        old.as_ref(),
+                        new.as_ref(),
+                        limit as usize,
+                    )))
                 }),
             ),
         // split
@@ -742,8 +733,7 @@ pub fn string_extension() -> Vec<FunctionDecl> {
                             start
                         )));
                     }
-                    let byte_start =
-                        codepoint_to_byte_offset(s, start as usize).unwrap_or(s.len());
+                    let byte_start = codepoint_to_byte_offset(s, start as usize).unwrap_or(s.len());
                     Value::String(Arc::from(&s[byte_start..]))
                 }),
             )
@@ -785,23 +775,22 @@ pub fn string_extension() -> Vec<FunctionDecl> {
                             start, end
                         )));
                     }
-                    let byte_start =
-                        codepoint_to_byte_offset(s, start as usize).unwrap_or(s.len());
-                    let byte_end =
-                        codepoint_to_byte_offset(s, end as usize).unwrap_or(s.len());
+                    let byte_start = codepoint_to_byte_offset(s, start as usize).unwrap_or(s.len());
+                    let byte_end = codepoint_to_byte_offset(s, end as usize).unwrap_or(s.len());
                     Value::String(Arc::from(&s[byte_start..byte_end]))
                 }),
             ),
         // trim
         FunctionDecl::new("trim").with_overload(
-            OverloadDecl::method("string_trim", vec![CelType::String], CelType::String)
-                .with_impl(|args| {
+            OverloadDecl::method("string_trim", vec![CelType::String], CelType::String).with_impl(
+                |args| {
                     let s = match &args[0] {
                         Value::String(s) => s,
                         _ => return Value::error(EvalError::invalid_argument("expected string")),
                     };
                     Value::String(Arc::from(s.trim()))
-                }),
+                },
+            ),
         ),
         // reverse
         FunctionDecl::new("reverse").with_overload(
@@ -1000,7 +989,12 @@ mod tests {
 
     // ==================== Runtime Implementation Tests ====================
 
-    fn call_overload(funcs: &[FunctionDecl], name: &str, overload_idx: usize, args: &[Value]) -> Value {
+    fn call_overload(
+        funcs: &[FunctionDecl],
+        name: &str,
+        overload_idx: usize,
+        args: &[Value],
+    ) -> Value {
         let func = funcs.iter().find(|f| f.name == name).unwrap();
         let overload = &func.overloads[overload_idx];
         let imp = overload.implementation.as_ref().expect("no implementation");
@@ -1014,32 +1008,62 @@ mod tests {
     #[test]
     fn test_char_at_impl() {
         let funcs = string_extension();
-        assert_eq!(call_overload(&funcs, "charAt", 0, &[s("tacocat"), Value::Int(3)]), s("o"));
-        assert_eq!(call_overload(&funcs, "charAt", 0, &[s("tacocat"), Value::Int(7)]), s(""));
+        assert_eq!(
+            call_overload(&funcs, "charAt", 0, &[s("tacocat"), Value::Int(3)]),
+            s("o")
+        );
+        assert_eq!(
+            call_overload(&funcs, "charAt", 0, &[s("tacocat"), Value::Int(7)]),
+            s("")
+        );
         // Unicode
-        assert_eq!(call_overload(&funcs, "charAt", 0, &[s("©αT"), Value::Int(0)]), s("©"));
-        assert_eq!(call_overload(&funcs, "charAt", 0, &[s("©αT"), Value::Int(1)]), s("α"));
+        assert_eq!(
+            call_overload(&funcs, "charAt", 0, &[s("©αT"), Value::Int(0)]),
+            s("©")
+        );
+        assert_eq!(
+            call_overload(&funcs, "charAt", 0, &[s("©αT"), Value::Int(1)]),
+            s("α")
+        );
     }
 
     #[test]
     fn test_lower_ascii_impl() {
         let funcs = string_extension();
-        assert_eq!(call_overload(&funcs, "lowerAscii", 0, &[s("TacoCat")]), s("tacocat"));
-        assert_eq!(call_overload(&funcs, "lowerAscii", 0, &[s("TacoCÆt")]), s("tacocÆt"));
+        assert_eq!(
+            call_overload(&funcs, "lowerAscii", 0, &[s("TacoCat")]),
+            s("tacocat")
+        );
+        assert_eq!(
+            call_overload(&funcs, "lowerAscii", 0, &[s("TacoCÆt")]),
+            s("tacocÆt")
+        );
     }
 
     #[test]
     fn test_upper_ascii_impl() {
         let funcs = string_extension();
-        assert_eq!(call_overload(&funcs, "upperAscii", 0, &[s("tacoCat")]), s("TACOCAT"));
-        assert_eq!(call_overload(&funcs, "upperAscii", 0, &[s("tacoCαt")]), s("TACOCαT"));
+        assert_eq!(
+            call_overload(&funcs, "upperAscii", 0, &[s("tacoCat")]),
+            s("TACOCAT")
+        );
+        assert_eq!(
+            call_overload(&funcs, "upperAscii", 0, &[s("tacoCαt")]),
+            s("TACOCαT")
+        );
     }
 
     #[test]
     fn test_trim_impl() {
         let funcs = string_extension();
-        assert_eq!(call_overload(&funcs, "trim", 0, &[s("  hello  ")]), s("hello"));
-        assert_eq!(call_overload(&funcs, "trim", 0, &[s(" \t\n text \r ")]), s("text"));
+        assert_eq!(
+            call_overload(&funcs, "trim", 0, &[s("  hello  ")]),
+            s("hello")
+        );
+        assert_eq!(
+            call_overload(&funcs, "trim", 0, &[s(" \t\n text \r ")]),
+            s("text")
+        );
     }
 
     #[test]
@@ -1047,62 +1071,156 @@ mod tests {
         let funcs = string_extension();
         assert_eq!(call_overload(&funcs, "reverse", 0, &[s("")]), s(""));
         assert_eq!(call_overload(&funcs, "reverse", 0, &[s("☺")]), s("☺"));
-        assert_eq!(call_overload(&funcs, "reverse", 0, &[s("Ta©oCαt")]), s("tαCo©aT"));
+        assert_eq!(
+            call_overload(&funcs, "reverse", 0, &[s("Ta©oCαt")]),
+            s("tαCo©aT")
+        );
     }
 
     #[test]
     fn test_index_of_impl() {
         let funcs = string_extension();
         // Basic
-        assert_eq!(call_overload(&funcs, "indexOf", 0, &[s("tacocat"), s("")]), Value::Int(0));
-        assert_eq!(call_overload(&funcs, "indexOf", 0, &[s("tacocat"), s("ac")]), Value::Int(1));
-        assert_eq!(call_overload(&funcs, "indexOf", 0, &[s("tacocat"), s("none")]), Value::Int(-1));
+        assert_eq!(
+            call_overload(&funcs, "indexOf", 0, &[s("tacocat"), s("")]),
+            Value::Int(0)
+        );
+        assert_eq!(
+            call_overload(&funcs, "indexOf", 0, &[s("tacocat"), s("ac")]),
+            Value::Int(1)
+        );
+        assert_eq!(
+            call_overload(&funcs, "indexOf", 0, &[s("tacocat"), s("none")]),
+            Value::Int(-1)
+        );
         // With offset
-        assert_eq!(call_overload(&funcs, "indexOf", 1, &[s("tacocat"), s("a"), Value::Int(3)]), Value::Int(5));
+        assert_eq!(
+            call_overload(&funcs, "indexOf", 1, &[s("tacocat"), s("a"), Value::Int(3)]),
+            Value::Int(5)
+        );
         // Unicode
-        assert_eq!(call_overload(&funcs, "indexOf", 0, &[s("ta©o©αT"), s("©")]), Value::Int(2));
-        assert_eq!(call_overload(&funcs, "indexOf", 1, &[s("ta©o©αT"), s("©"), Value::Int(3)]), Value::Int(4));
+        assert_eq!(
+            call_overload(&funcs, "indexOf", 0, &[s("ta©o©αT"), s("©")]),
+            Value::Int(2)
+        );
+        assert_eq!(
+            call_overload(&funcs, "indexOf", 1, &[s("ta©o©αT"), s("©"), Value::Int(3)]),
+            Value::Int(4)
+        );
     }
 
     #[test]
     fn test_last_index_of_impl() {
         let funcs = string_extension();
-        assert_eq!(call_overload(&funcs, "lastIndexOf", 0, &[s("tacocat"), s("")]), Value::Int(7));
-        assert_eq!(call_overload(&funcs, "lastIndexOf", 0, &[s("tacocat"), s("at")]), Value::Int(5));
-        assert_eq!(call_overload(&funcs, "lastIndexOf", 0, &[s("tacocat"), s("none")]), Value::Int(-1));
+        assert_eq!(
+            call_overload(&funcs, "lastIndexOf", 0, &[s("tacocat"), s("")]),
+            Value::Int(7)
+        );
+        assert_eq!(
+            call_overload(&funcs, "lastIndexOf", 0, &[s("tacocat"), s("at")]),
+            Value::Int(5)
+        );
+        assert_eq!(
+            call_overload(&funcs, "lastIndexOf", 0, &[s("tacocat"), s("none")]),
+            Value::Int(-1)
+        );
         // With offset
-        assert_eq!(call_overload(&funcs, "lastIndexOf", 1, &[s("tacocat"), s("a"), Value::Int(3)]), Value::Int(1));
+        assert_eq!(
+            call_overload(
+                &funcs,
+                "lastIndexOf",
+                1,
+                &[s("tacocat"), s("a"), Value::Int(3)]
+            ),
+            Value::Int(1)
+        );
         // Unicode
-        assert_eq!(call_overload(&funcs, "lastIndexOf", 0, &[s("ta©o©αT"), s("©")]), Value::Int(4));
-        assert_eq!(call_overload(&funcs, "lastIndexOf", 1, &[s("ta©o©αT"), s("©"), Value::Int(3)]), Value::Int(2));
+        assert_eq!(
+            call_overload(&funcs, "lastIndexOf", 0, &[s("ta©o©αT"), s("©")]),
+            Value::Int(4)
+        );
+        assert_eq!(
+            call_overload(
+                &funcs,
+                "lastIndexOf",
+                1,
+                &[s("ta©o©αT"), s("©"), Value::Int(3)]
+            ),
+            Value::Int(2)
+        );
     }
 
     #[test]
     fn test_substring_impl() {
         let funcs = string_extension();
-        assert_eq!(call_overload(&funcs, "substring", 0, &[s("tacocat"), Value::Int(4)]), s("cat"));
-        assert_eq!(call_overload(&funcs, "substring", 0, &[s("tacocat"), Value::Int(7)]), s(""));
-        assert_eq!(call_overload(&funcs, "substring", 1, &[s("tacocat"), Value::Int(0), Value::Int(4)]), s("taco"));
-        assert_eq!(call_overload(&funcs, "substring", 1, &[s("tacocat"), Value::Int(4), Value::Int(4)]), s(""));
+        assert_eq!(
+            call_overload(&funcs, "substring", 0, &[s("tacocat"), Value::Int(4)]),
+            s("cat")
+        );
+        assert_eq!(
+            call_overload(&funcs, "substring", 0, &[s("tacocat"), Value::Int(7)]),
+            s("")
+        );
+        assert_eq!(
+            call_overload(
+                &funcs,
+                "substring",
+                1,
+                &[s("tacocat"), Value::Int(0), Value::Int(4)]
+            ),
+            s("taco")
+        );
+        assert_eq!(
+            call_overload(
+                &funcs,
+                "substring",
+                1,
+                &[s("tacocat"), Value::Int(4), Value::Int(4)]
+            ),
+            s("")
+        );
         // Unicode
-        assert_eq!(call_overload(&funcs, "substring", 1, &[s("ta©o©αT"), Value::Int(2), Value::Int(6)]), s("©o©α"));
+        assert_eq!(
+            call_overload(
+                &funcs,
+                "substring",
+                1,
+                &[s("ta©o©αT"), Value::Int(2), Value::Int(6)]
+            ),
+            s("©o©α")
+        );
     }
 
     #[test]
     fn test_replace_impl() {
         let funcs = string_extension();
         assert_eq!(
-            call_overload(&funcs, "replace", 0, &[s("{0} days {0} hours"), s("{0}"), s("2")]),
+            call_overload(
+                &funcs,
+                "replace",
+                0,
+                &[s("{0} days {0} hours"), s("{0}"), s("2")]
+            ),
             s("2 days 2 hours")
         );
         // With limit
         assert_eq!(
-            call_overload(&funcs, "replace", 1, &[s("{0} days {0} hours"), s("{0}"), s("2"), Value::Int(1)]),
+            call_overload(
+                &funcs,
+                "replace",
+                1,
+                &[s("{0} days {0} hours"), s("{0}"), s("2"), Value::Int(1)]
+            ),
             s("2 days {0} hours")
         );
         // Limit 0 = no change
         assert_eq!(
-            call_overload(&funcs, "replace", 1, &[s("{0} days {0} hours"), s("{0}"), s("2"), Value::Int(0)]),
+            call_overload(
+                &funcs,
+                "replace",
+                1,
+                &[s("{0} days {0} hours"), s("{0}"), s("2"), Value::Int(0)]
+            ),
             s("{0} days {0} hours")
         );
     }
@@ -1113,11 +1231,24 @@ mod tests {
         let result = call_overload(&funcs, "split", 0, &[s("hello world"), s(" ")]);
         assert_eq!(result, Value::List(Arc::from(vec![s("hello"), s("world")])));
         // With limit 0
-        let result = call_overload(&funcs, "split", 1, &[s("hello world"), s(" "), Value::Int(0)]);
+        let result = call_overload(
+            &funcs,
+            "split",
+            1,
+            &[s("hello world"), s(" "), Value::Int(0)],
+        );
         assert_eq!(result, Value::List(Arc::from(Vec::<Value>::new())));
         // With limit 1
-        let result = call_overload(&funcs, "split", 1, &[s("hello world events!"), s(" "), Value::Int(1)]);
-        assert_eq!(result, Value::List(Arc::from(vec![s("hello world events!")])));
+        let result = call_overload(
+            &funcs,
+            "split",
+            1,
+            &[s("hello world events!"), s(" "), Value::Int(1)],
+        );
+        assert_eq!(
+            result,
+            Value::List(Arc::from(vec![s("hello world events!")]))
+        );
     }
 
     #[test]
@@ -1194,7 +1325,10 @@ mod tests {
         };
 
         assert_eq!(fmt("%e", vec![Value::Double(2.71828)]), s("2.718280e+00"));
-        assert_eq!(fmt("%.6e", vec![Value::Double(1052.032911275)]), s("1.052033e+03"));
+        assert_eq!(
+            fmt("%.6e", vec![Value::Double(1052.032911275)]),
+            s("1.052033e+03")
+        );
         assert_eq!(fmt("%e", vec![Value::Double(f64::NAN)]), s("NaN"));
         assert_eq!(fmt("%e", vec![Value::Double(f64::INFINITY)]), s("Infinity"));
     }
@@ -1206,7 +1340,13 @@ mod tests {
             call_overload(&funcs, "format", 0, &[s(f), Value::List(Arc::from(args))])
         };
 
-        assert_eq!(fmt("%x", vec![s("Hello world!")]), s("48656c6c6f20776f726c6421"));
-        assert_eq!(fmt("%X", vec![s("Hello world!")]), s("48656C6C6F20776F726C6421"));
+        assert_eq!(
+            fmt("%x", vec![s("Hello world!")]),
+            s("48656c6c6f20776f726c6421")
+        );
+        assert_eq!(
+            fmt("%X", vec![s("Hello world!")]),
+            s("48656C6C6F20776F726C6421")
+        );
     }
 }

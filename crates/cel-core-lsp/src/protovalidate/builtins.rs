@@ -12,8 +12,9 @@ use std::sync::LazyLock;
 use crate::types::FunctionDef;
 
 /// Protovalidate-specific extension functions, lazily initialized.
-pub static PROTOVALIDATE_BUILTINS: LazyLock<HashMap<&'static str, FunctionDef>> = LazyLock::new(|| {
-    let defs = vec![
+pub static PROTOVALIDATE_BUILTINS: LazyLock<HashMap<&'static str, FunctionDef>> = LazyLock::new(
+    || {
+        let defs = vec![
         // ==================== String Validation Methods ====================
         FunctionDef {
             name: "isEmail",
@@ -75,8 +76,9 @@ pub static PROTOVALIDATE_BUILTINS: LazyLock<HashMap<&'static str, FunctionDef>> 
         },
     ];
 
-    defs.into_iter().map(|f| (f.name, f)).collect()
-});
+        defs.into_iter().map(|f| (f.name, f)).collect()
+    },
+);
 
 /// Get documentation for a protovalidate function by name.
 pub fn get_protovalidate_builtin(name: &str) -> Option<&'static FunctionDef> {

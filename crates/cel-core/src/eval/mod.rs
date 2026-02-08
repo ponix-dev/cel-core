@@ -36,9 +36,9 @@ mod functions;
 pub(crate) mod message;
 mod operators;
 mod program;
+pub(crate) mod proto_registry;
 mod resolve;
 pub mod time;
-pub(crate) mod proto_registry;
 mod value;
 
 pub use activation::{
@@ -49,5 +49,7 @@ pub(crate) use evaluator::Evaluator;
 pub(crate) use functions::{Function, FunctionRegistry, Overload};
 pub use message::MessageValue;
 pub use program::Program;
-pub use proto_registry::{ProtoTypeResolver, ProtoRegistry, StructFieldValue};
-pub use value::{Duration, EnumValue, MapKey, OptionalValue, Timestamp, TypeValue, Value, ValueError, ValueMap};
+pub use proto_registry::{ProtoRegistry, ProtoTypeResolver, StructFieldValue};
+pub use value::{
+    Duration, EnumValue, MapKey, OptionalValue, Timestamp, TypeValue, Value, ValueError, ValueMap,
+};

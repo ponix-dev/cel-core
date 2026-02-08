@@ -291,7 +291,9 @@ pub fn cel_value_to_google_value(
 ) -> Result<DynamicMessage, Value> {
     let value_desc = registry
         .get_message("google.protobuf.Value")
-        .ok_or_else(|| Value::error(EvalError::internal("google.protobuf.Value not in registry")))?;
+        .ok_or_else(|| {
+            Value::error(EvalError::internal("google.protobuf.Value not in registry"))
+        })?;
 
     let mut msg = DynamicMessage::new(value_desc.clone());
 
@@ -365,17 +367,20 @@ pub fn cel_value_to_google_value(
             }
         }
         Value::Message(msg_val) => {
-            let proto = msg_val.as_any().downcast_ref::<ProstMessage>()
+            let proto = msg_val
+                .as_any()
+                .downcast_ref::<ProstMessage>()
                 .expect("Message must be ProstMessage for WKT conversion");
             match proto.message().descriptor().full_name() {
                 "google.protobuf.Empty" => {
-                    let struct_desc = registry
-                        .get_message("google.protobuf.Struct")
-                        .ok_or_else(|| {
-                            Value::error(EvalError::internal(
-                                "google.protobuf.Struct not in registry",
-                            ))
-                        })?;
+                    let struct_desc =
+                        registry
+                            .get_message("google.protobuf.Struct")
+                            .ok_or_else(|| {
+                                Value::error(EvalError::internal(
+                                    "google.protobuf.Struct not in registry",
+                                ))
+                            })?;
                     let struct_msg = DynamicMessage::new(struct_desc.clone());
                     if let Some(field) = value_desc.get_field_by_name("struct_value") {
                         msg.set_field(&field, prost_reflect::Value::Message(struct_msg));
@@ -413,7 +418,11 @@ pub fn cel_map_to_struct(
 ) -> Result<DynamicMessage, Value> {
     let struct_desc = registry
         .get_message("google.protobuf.Struct")
-        .ok_or_else(|| Value::error(EvalError::internal("google.protobuf.Struct not in registry")))?;
+        .ok_or_else(|| {
+            Value::error(EvalError::internal(
+                "google.protobuf.Struct not in registry",
+            ))
+        })?;
 
     let mut msg = DynamicMessage::new(struct_desc.clone());
 
@@ -475,10 +484,7 @@ pub fn pack_message_into_any(
 ) -> Result<prost_reflect::Value, Value> {
     let mut any_msg = DynamicMessage::new(any_desc.clone());
 
-    let type_url = format!(
-        "type.googleapis.com/{}",
-        source.descriptor().full_name()
-    );
+    let type_url = format!("type.googleapis.com/{}", source.descriptor().full_name());
     let encoded = source.encode_to_vec();
 
     if let Some(type_url_field) = any_desc.get_field_by_name("type_url") {
@@ -506,9 +512,9 @@ pub fn wrap_value_for_any(
 
     let wrapper_msg = match value {
         Value::Bool(b) => {
-            let desc = registry.get_message("google.protobuf.BoolValue").ok_or_else(|| {
-                Value::error(EvalError::internal("BoolValue not in registry"))
-            })?;
+            let desc = registry
+                .get_message("google.protobuf.BoolValue")
+                .ok_or_else(|| Value::error(EvalError::internal("BoolValue not in registry")))?;
             let mut msg = DynamicMessage::new(desc.clone());
             if let Some(f) = desc.get_field_by_name("value") {
                 msg.set_field(&f, prost_reflect::Value::Bool(*b));
@@ -516,9 +522,9 @@ pub fn wrap_value_for_any(
             msg
         }
         Value::Int(i) => {
-            let desc = registry.get_message("google.protobuf.Int64Value").ok_or_else(|| {
-                Value::error(EvalError::internal("Int64Value not in registry"))
-            })?;
+            let desc = registry
+                .get_message("google.protobuf.Int64Value")
+                .ok_or_else(|| Value::error(EvalError::internal("Int64Value not in registry")))?;
             let mut msg = DynamicMessage::new(desc.clone());
             if let Some(f) = desc.get_field_by_name("value") {
                 msg.set_field(&f, prost_reflect::Value::I64(*i));
@@ -526,9 +532,9 @@ pub fn wrap_value_for_any(
             msg
         }
         Value::UInt(u) => {
-            let desc = registry.get_message("google.protobuf.UInt64Value").ok_or_else(|| {
-                Value::error(EvalError::internal("UInt64Value not in registry"))
-            })?;
+            let desc = registry
+                .get_message("google.protobuf.UInt64Value")
+                .ok_or_else(|| Value::error(EvalError::internal("UInt64Value not in registry")))?;
             let mut msg = DynamicMessage::new(desc.clone());
             if let Some(f) = desc.get_field_by_name("value") {
                 msg.set_field(&f, prost_reflect::Value::U64(*u));
@@ -536,9 +542,9 @@ pub fn wrap_value_for_any(
             msg
         }
         Value::Double(d) => {
-            let desc = registry.get_message("google.protobuf.DoubleValue").ok_or_else(|| {
-                Value::error(EvalError::internal("DoubleValue not in registry"))
-            })?;
+            let desc = registry
+                .get_message("google.protobuf.DoubleValue")
+                .ok_or_else(|| Value::error(EvalError::internal("DoubleValue not in registry")))?;
             let mut msg = DynamicMessage::new(desc.clone());
             if let Some(f) = desc.get_field_by_name("value") {
                 msg.set_field(&f, prost_reflect::Value::F64(*d));
@@ -546,9 +552,9 @@ pub fn wrap_value_for_any(
             msg
         }
         Value::String(s) => {
-            let desc = registry.get_message("google.protobuf.StringValue").ok_or_else(|| {
-                Value::error(EvalError::internal("StringValue not in registry"))
-            })?;
+            let desc = registry
+                .get_message("google.protobuf.StringValue")
+                .ok_or_else(|| Value::error(EvalError::internal("StringValue not in registry")))?;
             let mut msg = DynamicMessage::new(desc.clone());
             if let Some(f) = desc.get_field_by_name("value") {
                 msg.set_field(&f, prost_reflect::Value::String(s.to_string()));
@@ -556,9 +562,9 @@ pub fn wrap_value_for_any(
             msg
         }
         Value::Bytes(b) => {
-            let desc = registry.get_message("google.protobuf.BytesValue").ok_or_else(|| {
-                Value::error(EvalError::internal("BytesValue not in registry"))
-            })?;
+            let desc = registry
+                .get_message("google.protobuf.BytesValue")
+                .ok_or_else(|| Value::error(EvalError::internal("BytesValue not in registry")))?;
             let mut msg = DynamicMessage::new(desc.clone());
             if let Some(f) = desc.get_field_by_name("value") {
                 msg.set_field(
@@ -569,9 +575,9 @@ pub fn wrap_value_for_any(
             msg
         }
         Value::Timestamp(ts) => {
-            let desc = registry.get_message("google.protobuf.Timestamp").ok_or_else(|| {
-                Value::error(EvalError::internal("Timestamp not in registry"))
-            })?;
+            let desc = registry
+                .get_message("google.protobuf.Timestamp")
+                .ok_or_else(|| Value::error(EvalError::internal("Timestamp not in registry")))?;
             let mut msg = DynamicMessage::new(desc.clone());
             if let Some(f) = desc.get_field_by_name("seconds") {
                 msg.set_field(&f, prost_reflect::Value::I64(ts.seconds));
@@ -582,9 +588,9 @@ pub fn wrap_value_for_any(
             msg
         }
         Value::Duration(d) => {
-            let desc = registry.get_message("google.protobuf.Duration").ok_or_else(|| {
-                Value::error(EvalError::internal("Duration not in registry"))
-            })?;
+            let desc = registry
+                .get_message("google.protobuf.Duration")
+                .ok_or_else(|| Value::error(EvalError::internal("Duration not in registry")))?;
             let mut msg = DynamicMessage::new(desc.clone());
             if let Some(f) = desc.get_field_by_name("seconds") {
                 msg.set_field(&f, prost_reflect::Value::I64(d.seconds));
@@ -596,9 +602,7 @@ pub fn wrap_value_for_any(
         }
         Value::Map(map) => cel_map_to_struct(map, registry)?,
         Value::List(list) => cel_list_to_list_value(list, registry)?,
-        Value::Null => {
-            cel_value_to_google_value(value, registry)?
-        }
+        Value::Null => cel_value_to_google_value(value, registry)?,
         _ => {
             return Err(Value::error(EvalError::type_mismatch(
                 "Any-wrappable value",
@@ -631,8 +635,7 @@ pub fn wrap_value_for_any(
 
 /// Encode bytes as standard base64 (RFC 4648).
 pub(crate) fn base64_encode(data: &[u8]) -> String {
-    const ALPHABET: &[u8; 64] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
     let mut result = String::with_capacity((data.len() + 2) / 3 * 4);
     for chunk in data.chunks(3) {

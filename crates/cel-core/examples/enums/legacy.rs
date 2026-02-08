@@ -11,7 +11,9 @@ fn main() {
     // Build a proto registry with the conformance test descriptors (which contain enums)
     let mut registry = ProstProtoRegistry::new();
     registry
-        .add_file_descriptor_set(cel_core_proto::gen::cel::expr::conformance::proto3::FILE_DESCRIPTOR_SET)
+        .add_file_descriptor_set(
+            cel_core_proto::gen::cel::expr::conformance::proto3::FILE_DESCRIPTOR_SET,
+        )
         .expect("Failed to add proto3 descriptors");
 
     // Legacy mode: enums behave as plain integers
@@ -29,13 +31,20 @@ fn main() {
         ("GlobalEnum.GAZ", "Enum constant as int"),
         ("TestAllTypes.NestedEnum.BAZ", "Nested enum constant as int"),
         ("type(GlobalEnum.GAZ)", "type() returns int"),
-
         // Comparisons — since enums are ints, int comparisons work directly
         ("GlobalEnum.GAR == 1", "Enum == int (same value -> true)"),
-        ("GlobalEnum.GAR == 2", "Enum == int (different value -> false)"),
-        ("GlobalEnum.GAZ == TestAllTypes.NestedEnum.BAZ", "Two enums with same int value (both 2 -> true)"),
-        ("GlobalEnum.GOO == TestAllTypes.NestedEnum.FOO", "Two enums with same int value (both 0 -> true)"),
-
+        (
+            "GlobalEnum.GAR == 2",
+            "Enum == int (different value -> false)",
+        ),
+        (
+            "GlobalEnum.GAZ == TestAllTypes.NestedEnum.BAZ",
+            "Two enums with same int value (both 2 -> true)",
+        ),
+        (
+            "GlobalEnum.GOO == TestAllTypes.NestedEnum.FOO",
+            "Two enums with same int value (both 0 -> true)",
+        ),
         // Arithmetic — works naturally since enums are just ints
         ("TestAllTypes.NestedEnum.BAR + 1", "Enum + int arithmetic"),
     ];

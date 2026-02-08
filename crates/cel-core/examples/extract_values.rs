@@ -13,7 +13,10 @@ fn main() {
     let mut activation = MapActivation::new();
     activation.insert("count", 42); // i32 automatically widens to i64
     activation.insert("items", Value::list([1, 2, 3]));
-    activation.insert("config", Value::map([("host", "localhost"), ("port", "8080")]));
+    activation.insert(
+        "config",
+        Value::map([("host", "localhost"), ("port", "8080")]),
+    );
 
     // Extract i64
     let ast = env.compile("count * 2").unwrap();

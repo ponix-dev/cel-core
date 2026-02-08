@@ -59,9 +59,7 @@ fn main() {
     println!("   event_time + timeout = {}", result);
 
     // Subtract duration from timestamp
-    let ast = env
-        .compile("event_time - duration('30m')")
-        .unwrap();
+    let ast = env.compile("event_time - duration('30m')").unwrap();
     let program = env.program(&ast).unwrap();
     let result = program.eval(&activation);
     println!("   event_time - duration('30m') = {}", result);
@@ -121,7 +119,10 @@ fn main() {
     // Same timestamp in different timezones
     let timezones = [
         ("UTC", "event_time.getHours()"),
-        ("America/New_York", "event_time.getHours('America/New_York')"),
+        (
+            "America/New_York",
+            "event_time.getHours('America/New_York')",
+        ),
         ("Europe/London", "event_time.getHours('Europe/London')"),
         ("Asia/Tokyo", "event_time.getHours('Asia/Tokyo')"),
         ("+05:30 (India)", "event_time.getHours('+05:30')"),
@@ -207,10 +208,7 @@ fn main() {
     // Simulate timeout
     activation.insert("current_time", Timestamp::new(1710498640, 0)); // 40 seconds later
     let result = program.eval(&activation);
-    println!(
-    "   Is response within deadline? (40s later) = {}",
-    result
-);
+    println!("   Is response within deadline? (40s later) = {}", result);
 
     // -------------------------------------------------------------------------
     // 9. Creating timestamps from integers (Unix epoch seconds)

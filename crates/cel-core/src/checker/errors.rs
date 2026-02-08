@@ -19,7 +19,11 @@ pub struct CheckError {
 impl CheckError {
     /// Create a new check error.
     pub fn new(kind: CheckErrorKind, span: Span, expr_id: i64) -> Self {
-        Self { kind, span, expr_id }
+        Self {
+            kind,
+            span,
+            expr_id,
+        }
     }
 
     /// Create an undeclared reference error.
@@ -47,7 +51,12 @@ impl CheckError {
     }
 
     /// Create a no matching overload error.
-    pub fn no_matching_overload(function: &str, arg_types: Vec<CelType>, span: Span, expr_id: i64) -> Self {
+    pub fn no_matching_overload(
+        function: &str,
+        arg_types: Vec<CelType>,
+        span: Span,
+        expr_id: i64,
+    ) -> Self {
         Self::new(
             CheckErrorKind::NoMatchingOverload {
                 function: function.to_string(),
@@ -159,25 +168,51 @@ impl fmt::Display for CheckErrorKind {
                 if container.is_empty() {
                     write!(f, "undeclared reference to '{}'", name)
                 } else {
-                    write!(f, "undeclared reference to '{}' in container '{}'", name, container)
+                    write!(
+                        f,
+                        "undeclared reference to '{}' in container '{}'",
+                        name, container
+                    )
                 }
             }
-            CheckErrorKind::NoMatchingOverload { function, arg_types } => {
+            CheckErrorKind::NoMatchingOverload {
+                function,
+                arg_types,
+            } => {
                 let types: Vec<_> = arg_types.iter().map(|t| t.display_name()).collect();
-                write!(f, "no matching overload for '{}' with argument types ({})", function, types.join(", "))
+                write!(
+                    f,
+                    "no matching overload for '{}' with argument types ({})",
+                    function,
+                    types.join(", ")
+                )
             }
             CheckErrorKind::TypeMismatch { expected, actual } => {
-                write!(f, "expected type '{}' but found '{}'", expected.display_name(), actual.display_name())
+                write!(
+                    f,
+                    "expected type '{}' but found '{}'",
+                    expected.display_name(),
+                    actual.display_name()
+                )
             }
             CheckErrorKind::UndefinedField { type_name, field } => {
                 write!(f, "undefined field '{}' on type '{}'", field, type_name)
             }
             CheckErrorKind::NotAssignable { from, to } => {
-                write!(f, "type '{}' is not assignable to '{}'", from.display_name(), to.display_name())
+                write!(
+                    f,
+                    "type '{}' is not assignable to '{}'",
+                    from.display_name(),
+                    to.display_name()
+                )
             }
             CheckErrorKind::HeterogeneousAggregate { types } => {
                 let type_names: Vec<_> = types.iter().map(|t| t.display_name()).collect();
-                write!(f, "aggregate literal contains heterogeneous types: {}", type_names.join(", "))
+                write!(
+                    f,
+                    "aggregate literal contains heterogeneous types: {}",
+                    type_names.join(", ")
+                )
             }
             CheckErrorKind::NotAType { expr } => {
                 write!(f, "expression '{}' is not a type", expr)
@@ -200,12 +235,8 @@ mod tests {
 
     #[test]
     fn test_no_matching_overload() {
-        let err = CheckError::no_matching_overload(
-            "_+_",
-            vec![CelType::String, CelType::Int],
-            0..5,
-            1,
-        );
+        let err =
+            CheckError::no_matching_overload("_+_", vec![CelType::String, CelType::Int], 0..5, 1);
         assert!(err.message().contains("no matching overload"));
         assert!(err.message().contains("_+_"));
     }

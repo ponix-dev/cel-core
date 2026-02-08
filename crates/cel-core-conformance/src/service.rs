@@ -9,14 +9,18 @@ use prost::Message;
 use prost_reflect::{prost_types, DynamicMessage};
 
 use crate::{
-    Binding, CheckResponse, ConformanceService, EvalResponse, FunctionTypeDecl, Issue, ParseResponse, TypeDecl,
+    Binding, CheckResponse, ConformanceService, EvalResponse, FunctionTypeDecl, Issue,
+    ParseResponse, TypeDecl,
 };
 use cel_core::{Env, MapActivation, MapKey, Value, ValueMap};
 use cel_core_proto::gen::cel::expr::value::Kind as ProtoValueKind;
 use cel_core_proto::gen::cel::expr::{
     expr_value, ErrorSet, ExprValue, ListValue, MapValue, ParsedExpr, Value as ProtoValue,
 };
-use cel_core_proto::{cel_type_from_proto, from_parsed_expr, maybe_unwrap_well_known, to_checked_expr, ProstMessage, ProstProtoRegistry};
+use cel_core_proto::{
+    cel_type_from_proto, from_parsed_expr, maybe_unwrap_well_known, to_checked_expr, ProstMessage,
+    ProstProtoRegistry,
+};
 
 #[cfg(test)]
 use cel_core::CelType;
@@ -55,16 +59,24 @@ impl CelConformanceService {
             .add_file_descriptor_set(cel_core_proto::gen::cel::expr::FILE_DESCRIPTOR_SET)
             .expect("Failed to add cel.expr descriptors");
         registry
-            .add_file_descriptor_set(cel_core_proto::gen::cel::expr::conformance::FILE_DESCRIPTOR_SET)
+            .add_file_descriptor_set(
+                cel_core_proto::gen::cel::expr::conformance::FILE_DESCRIPTOR_SET,
+            )
             .expect("Failed to add cel.expr.conformance descriptors");
         registry
-            .add_file_descriptor_set(cel_core_proto::gen::cel::expr::conformance::proto2::FILE_DESCRIPTOR_SET)
+            .add_file_descriptor_set(
+                cel_core_proto::gen::cel::expr::conformance::proto2::FILE_DESCRIPTOR_SET,
+            )
             .expect("Failed to add cel.expr.conformance.proto2 descriptors");
         registry
-            .add_file_descriptor_set(cel_core_proto::gen::cel::expr::conformance::proto3::FILE_DESCRIPTOR_SET)
+            .add_file_descriptor_set(
+                cel_core_proto::gen::cel::expr::conformance::proto3::FILE_DESCRIPTOR_SET,
+            )
             .expect("Failed to add cel.expr.conformance.proto3 descriptors");
         registry
-            .add_file_descriptor_set(cel_core_proto::gen::cel::expr::conformance::test::FILE_DESCRIPTOR_SET)
+            .add_file_descriptor_set(
+                cel_core_proto::gen::cel::expr::conformance::test::FILE_DESCRIPTOR_SET,
+            )
             .expect("Failed to add cel.expr.conformance.test descriptors");
 
         let registry = Arc::new(registry);
@@ -106,10 +118,19 @@ impl ConformanceService for CelConformanceService {
             cel_core_proto::to_parsed_expr_with_macros(&ast, source, &result.macro_calls)
         });
 
-        ParseResponse { parsed_expr, issues }
+        ParseResponse {
+            parsed_expr,
+            issues,
+        }
     }
 
-    fn check(&self, parsed: &ParsedExpr, type_env: &[TypeDecl], func_decls: &[FunctionTypeDecl], container: &str) -> CheckResponse {
+    fn check(
+        &self,
+        parsed: &ParsedExpr,
+        type_env: &[TypeDecl],
+        func_decls: &[FunctionTypeDecl],
+        container: &str,
+    ) -> CheckResponse {
         // Convert ParsedExpr back to AST
         // cel_core_proto::from_parsed_expr returns cel_core::SpannedExpr directly now
         let ast = match from_parsed_expr(parsed) {
@@ -168,7 +189,14 @@ impl ConformanceService for CelConformanceService {
         }
     }
 
-    fn eval(&self, expr: &ParsedExpr, bindings: &[Binding], type_env: &[TypeDecl], func_decls: &[FunctionTypeDecl], container: &str) -> EvalResponse {
+    fn eval(
+        &self,
+        expr: &ParsedExpr,
+        bindings: &[Binding],
+        type_env: &[TypeDecl],
+        func_decls: &[FunctionTypeDecl],
+        container: &str,
+    ) -> EvalResponse {
         // Convert ParsedExpr to AST
         let parsed_ast = match from_parsed_expr(expr) {
             Ok(ast) => ast,
@@ -284,7 +312,10 @@ fn bindings_to_activation(
 }
 
 /// Convert a proto Value to a cel_core::eval::Value.
-fn proto_value_to_value(proto: &ProtoValue, registry: &ProstProtoRegistry) -> Result<Value, String> {
+fn proto_value_to_value(
+    proto: &ProtoValue,
+    registry: &ProstProtoRegistry,
+) -> Result<Value, String> {
     match &proto.kind {
         Some(ProtoValueKind::NullValue(_)) => Ok(Value::Null),
         Some(ProtoValueKind::BoolValue(b)) => Ok(Value::Bool(*b)),
@@ -420,7 +451,9 @@ fn value_to_proto_value(value: &Value) -> ProtoValue {
             }
         },
         Value::Message(msg_val) => {
-            let proto = msg_val.as_any().downcast_ref::<ProstMessage>()
+            let proto = msg_val
+                .as_any()
+                .downcast_ref::<ProstMessage>()
                 .expect("Message must be ProstMessage");
             // If the proto message IS an Any, preserve its inner type_url and value
             if proto.type_name() == "google.protobuf.Any" {
@@ -563,17 +596,19 @@ mod tests {
         let service = CelConformanceService::new();
         let parse_result = service.parse("42").parsed_expr.unwrap();
         let eval_result = service.eval(&parse_result, &[], &[], &[], "");
-        assert!(eval_result.is_ok(), "eval should succeed: {:?}", eval_result.issues);
+        assert!(
+            eval_result.is_ok(),
+            "eval should succeed: {:?}",
+            eval_result.issues
+        );
         assert!(eval_result.result.is_some());
 
         let result = eval_result.result.unwrap();
         match &result.kind {
-            Some(expr_value::Kind::Value(v)) => {
-                match &v.kind {
-                    Some(ProtoValueKind::Int64Value(42)) => {}
-                    other => panic!("expected Int64Value(42), got {:?}", other),
-                }
-            }
+            Some(expr_value::Kind::Value(v)) => match &v.kind {
+                Some(ProtoValueKind::Int64Value(42)) => {}
+                other => panic!("expected Int64Value(42), got {:?}", other),
+            },
             other => panic!("expected Value, got {:?}", other),
         }
     }
@@ -594,16 +629,18 @@ mod tests {
         };
 
         let eval_result = service.eval(&parse_result, &[binding], &[], &[], "");
-        assert!(eval_result.is_ok(), "eval should succeed: {:?}", eval_result.issues);
+        assert!(
+            eval_result.is_ok(),
+            "eval should succeed: {:?}",
+            eval_result.issues
+        );
 
         let result = eval_result.result.unwrap();
         match &result.kind {
-            Some(expr_value::Kind::Value(v)) => {
-                match &v.kind {
-                    Some(ProtoValueKind::Int64Value(42)) => {}
-                    other => panic!("expected Int64Value(42), got {:?}", other),
-                }
-            }
+            Some(expr_value::Kind::Value(v)) => match &v.kind {
+                Some(ProtoValueKind::Int64Value(42)) => {}
+                other => panic!("expected Int64Value(42), got {:?}", other),
+            },
             other => panic!("expected Value, got {:?}", other),
         }
     }

@@ -210,8 +210,12 @@ mod tests {
     fn test_registry() {
         let mut registry = FunctionRegistry::new();
 
-        let func = Function::new("double")
-            .with_overload(Overload::new("double_int", false, 1, Arc::new(test_impl)));
+        let func = Function::new("double").with_overload(Overload::new(
+            "double_int",
+            false,
+            1,
+            Arc::new(test_impl),
+        ));
 
         registry.register(func);
 
@@ -228,14 +232,20 @@ mod tests {
     #[test]
     fn test_registry_merge() {
         let mut reg1 = FunctionRegistry::new();
-        reg1.register(
-            Function::new("f1").with_overload(Overload::new("f1_int", false, 1, Arc::new(test_impl))),
-        );
+        reg1.register(Function::new("f1").with_overload(Overload::new(
+            "f1_int",
+            false,
+            1,
+            Arc::new(test_impl),
+        )));
 
         let mut reg2 = FunctionRegistry::new();
-        reg2.register(
-            Function::new("f2").with_overload(Overload::new("f2_int", false, 1, Arc::new(test_impl))),
-        );
+        reg2.register(Function::new("f2").with_overload(Overload::new(
+            "f2_int",
+            false,
+            1,
+            Arc::new(test_impl),
+        )));
 
         reg1.merge(reg2);
 

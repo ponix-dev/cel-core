@@ -62,8 +62,9 @@ fn find_placeholder_member(ast: &SpannedExpr) -> Option<&SpannedExpr> {
         Expr::Member { expr, field, .. } if field == PLACEHOLDER => Some(ast),
         // Recurse into children
         Expr::Member { expr, .. } => find_placeholder_member(expr),
-        Expr::Call { expr, args } => find_placeholder_member(expr)
-            .or_else(|| args.iter().find_map(find_placeholder_member)),
+        Expr::Call { expr, args } => {
+            find_placeholder_member(expr).or_else(|| args.iter().find_map(find_placeholder_member))
+        }
         Expr::Binary { left, right, .. } => {
             find_placeholder_member(left).or_else(|| find_placeholder_member(right))
         }
@@ -82,8 +83,7 @@ fn find_placeholder_member(ast: &SpannedExpr) -> Option<&SpannedExpr> {
             .iter()
             .find_map(|item| find_placeholder_member(&item.expr)),
         Expr::Map(entries) => entries.iter().find_map(|entry| {
-            find_placeholder_member(&entry.key)
-                .or_else(|| find_placeholder_member(&entry.value))
+            find_placeholder_member(&entry.key).or_else(|| find_placeholder_member(&entry.value))
         }),
         Expr::Comprehension {
             iter_range,
@@ -154,7 +154,11 @@ fn resolve_receiver_type(
 
 /// Format a function overload as a detail string.
 fn format_overload_detail(overload: &cel_core::types::OverloadDecl) -> String {
-    let args: Vec<String> = overload.arg_types().iter().map(|t| t.display_name()).collect();
+    let args: Vec<String> = overload
+        .arg_types()
+        .iter()
+        .map(|t| t.display_name())
+        .collect();
     let result = overload.result.display_name();
     format!("({}) -> {}", args.join(", "), result)
 }
@@ -174,7 +178,9 @@ fn member_completions(
             if let Some(fields) = registry.message_field_names(msg_name) {
                 for field_name in fields {
                     if !prefix.is_empty()
-                        && !field_name.to_lowercase().starts_with(&prefix.to_lowercase())
+                        && !field_name
+                            .to_lowercase()
+                            .starts_with(&prefix.to_lowercase())
                     {
                         continue;
                     }
@@ -420,7 +426,11 @@ mod tests {
 
         let items = get_completions_with_env("my", Position::new(0, 2), &env);
         let names = labels(&items);
-        assert!(names.contains(&"myVar"), "should suggest myVar: {:?}", names);
+        assert!(
+            names.contains(&"myVar"),
+            "should suggest myVar: {:?}",
+            names
+        );
         assert!(
             names.contains(&"myOther"),
             "should suggest myOther: {:?}",
@@ -432,11 +442,7 @@ mod tests {
     fn bare_identifier_suggests_functions() {
         let items = get_completions("si", Position::new(0, 2));
         let names = labels(&items);
-        assert!(
-            names.contains(&"size"),
-            "should suggest size: {:?}",
-            names
-        );
+        assert!(names.contains(&"size"), "should suggest size: {:?}", names);
     }
 
     #[test]
@@ -463,11 +469,7 @@ mod tests {
             "should suggest endsWith: {:?}",
             names
         );
-        assert!(
-            names.contains(&"size"),
-            "should suggest size: {:?}",
-            names
-        );
+        assert!(names.contains(&"size"), "should suggest size: {:?}", names);
         assert!(
             names.contains(&"matches"),
             "should suggest matches: {:?}",
@@ -483,11 +485,7 @@ mod tests {
 
         let items = get_completions_with_env("items.", Position::new(0, 6), &env);
         let names = labels(&items);
-        assert!(
-            names.contains(&"size"),
-            "should suggest size: {:?}",
-            names
-        );
+        assert!(names.contains(&"size"), "should suggest size: {:?}", names);
     }
 
     #[test]
@@ -604,11 +602,7 @@ mod tests {
         assert_eq!(contains.insert_text_format, Some(InsertTextFormat::SNIPPET));
         // contains takes one arg
         assert!(
-            contains
-                .insert_text
-                .as_ref()
-                .unwrap()
-                .contains("${1}"),
+            contains.insert_text.as_ref().unwrap().contains("${1}"),
             "should have placeholder: {:?}",
             contains.insert_text
         );
@@ -780,9 +774,7 @@ mod tests {
     #[test]
     fn detect_context_member_access_with_prefix() {
         let ctx = detect_context("foo.ba", 6);
-        assert!(
-            matches!(ctx, CompletionContext::MemberAccess { ref prefix } if prefix == "ba")
-        );
+        assert!(matches!(ctx, CompletionContext::MemberAccess { ref prefix } if prefix == "ba"));
     }
 
     #[test]
@@ -794,8 +786,6 @@ mod tests {
     #[test]
     fn detect_context_empty() {
         let ctx = detect_context("", 0);
-        assert!(
-            matches!(ctx, CompletionContext::Identifier { ref prefix } if prefix.is_empty())
-        );
+        assert!(matches!(ctx, CompletionContext::Identifier { ref prefix } if prefix.is_empty()));
     }
 }

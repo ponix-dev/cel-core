@@ -286,10 +286,9 @@ impl<'a> Evaluator<'a> {
             (Value::String(s), Value::String(pattern)) => {
                 match regex::Regex::new(pattern.as_ref()) {
                     Ok(re) => Value::Bool(re.is_match(s.as_ref())),
-                    Err(e) => Value::error(EvalError::invalid_argument(format!(
-                        "invalid regex: {}",
-                        e
-                    ))),
+                    Err(e) => {
+                        Value::error(EvalError::invalid_argument(format!("invalid regex: {}", e)))
+                    }
                 }
             }
             _ => Value::error(EvalError::no_matching_overload("matches")),
