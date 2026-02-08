@@ -4,51 +4,51 @@
 2026-02-08
 
 ## Just Completed
-- GitHub Issue: #35 — Replace custom LSP validation with cel-core's checker
-- [x] Replaced custom LSP type checker (`types/checker.rs`, `types/validation.rs`) with cel-core's unified checker
-- [x] Added `settings.toml` configuration system for LSP workspaces (variables, extensions, proto file descriptors)
-- [x] Integrated cel-core-proto into the LSP for proto type resolution via file descriptor sets
-- [x] Added completion support using placeholder-based approach with checker type information
-- [x] Added protovalidate `this` context support for field-level CEL expressions
-- [x] Added snapshot-based integration tests using `expect-test`
-- [x] Updated diagnostics, hover, and semantic tokens to use checker AST/type information
+- GitHub Issue: #59 — Clean up public API surface and export patterns
+- [x] Made `checker`, `eval`, `unparser` modules private in cel-core
+- [x] Removed internal types from root re-exports (`check()`, `STANDARD_LIBRARY`, `Evaluator`, `FunctionRegistry`, etc.)
+- [x] Made lexer types (`lex()`, `Token`, `LexError`, `SpannedToken`) `pub(crate)` in parser
+- [x] Made `message` and `registry` modules private in cel-core-proto, kept root re-exports
+- [x] Made `AstConverter`, operator mappings, source_info helpers, and WKT helpers `pub(crate)` in cel-core-proto
+- [x] Made `types`, `protovalidate`, `settings` modules `pub(crate)` in cel-core-lsp
+- [x] Made `Backend` struct `pub(crate)`, only `create_service()` is public
+- [x] Adopted consistent pattern: private modules + selective root re-export
+- [x] Moved test code into `#[cfg(test)] mod tests` modules
+- [x] Bundled imports and fixed dead code warnings
+- [x] Added `cargo fmt` to CLAUDE.md development commands
 
 ### Summary
-Major refactor replacing ~1900 lines of custom validation/checker code with cel-core's checker. The LSP now uses `Env::compile()` for type checking, getting accurate type information, overload resolution, and error diagnostics from the same checker used at runtime. Added a `settings.toml` configuration system so workspaces can declare variables, enable extensions, and point to proto file descriptor sets.
+Major API cleanup across all three crates. Tightened public exports by making internal modules private and removing implementation details from the public API surface. Adopted a consistent "private modules + selective root re-export" pattern. The public API is now minimal and intentional: `cel-core` exposes `Env`, `Ast`, types, parsing, and extension traits; `cel-core-proto` exposes registry, message, and conversion functions; `cel-core-lsp` only exposes `create_service()`.
 
-### Key files added/modified
-- `crates/cel-core-lsp/src/settings.rs` — new settings.toml parser and workspace configuration
-- `crates/cel-core-lsp/src/lsp/completion.rs` — new completion provider using checker types
-- `crates/cel-core-lsp/src/lsp/diagnostics.rs` — updated to use checker errors
-- `crates/cel-core-lsp/src/lsp/hover.rs` — updated to use checker type map
-- `crates/cel-core-lsp/src/lsp/semantic_tokens.rs` — updated to use checker AST
-- `crates/cel-core-lsp/src/document/state.rs` — stores `Arc<Env>` for re-parsing
-- `crates/cel-core-lsp/src/document/region.rs` — proto region state with env
-- `crates/cel-core-lsp/src/protovalidate/proto_parser.rs` — enhanced `this` context and has() support
-- `crates/cel-core-lsp/src/protovalidate/resolver.rs` — updated for checker integration
-- `crates/cel-core-lsp/src/types/checker.rs` — **deleted** (replaced by cel-core checker)
-- `crates/cel-core-lsp/src/types/validation.rs` — **deleted** (replaced by cel-core checker)
-- `crates/cel-core/src/env.rs` — added `methods_for_type()`, `standalone_functions()` for completion
-- `crates/cel-core/src/checker/checker.rs` — enhanced for LSP use cases
-- `crates/cel-core-proto/src/registry.rs` — added `message_field_names()` for completion
+### Key files modified
+- `crates/cel-core/src/lib.rs` — tightened re-exports, made modules private
+- `crates/cel-core/src/checker/` — made `pub(crate)`, restructured exports
+- `crates/cel-core/src/eval/` — made `pub(crate)`, restructured exports
+- `crates/cel-core/src/parser/` — lexer types made `pub(crate)`
+- `crates/cel-core-proto/src/lib.rs` — tightened re-exports, made modules private
+- `crates/cel-core-lsp/src/lib.rs` — made internal modules `pub(crate)`
+- `crates/cel-core-lsp/src/types/builtins.rs` — removed redundant LSP builtins (now from checker)
+- All example files updated to use new public API paths
 
 ### Notable decisions
-- Used placeholder-based completion: inserts `__cel_complete__` at cursor position, re-parses and type-checks, then finds the placeholder in the AST to determine context
-- Settings use TOML format with workspace-relative paths for proto file descriptors
-- Proto file descriptor sets are loaded as binary `.binpb` files (output of `buf build`)
+- Kept `ext` module public in cel-core since extension libraries are user-facing
+- Kept `parser` module public but only exports `parse()`, `ParseResult`, and macro types
+- `types` module remains public for `CelType`, `CelValue`, `Expr`, etc.
+- Conformance crate needed direct access to checker/eval internals, handled via targeted `pub(crate)` within the workspace
 
 ## Previous Work
-- Refactored trait abstractions: split `TypeRegistry` into `ProtoTypeResolver` + `ProtoRegistry`
+- GitHub Issue: #35 — Replace custom LSP validation with cel-core's checker
 - GitHub Issue: #50 — Decoupled prost/prost-reflect from cel-core via trait abstraction
 
 ## Next Up
+- GitHub Issue: #58 — Macro calls with wrong argument count produce misleading 'undeclared reference' error
+  - Parser/checker bug where bad macro arity gives confusing error messages
+  - Should be a focused fix in the macro expansion or checker error reporting
 - GitHub Issue: #38 — Richer hover information using CheckResult.type_map
   - Now that the LSP uses the checker, hover can show precise types from the type map
   - Natural follow-up since the infrastructure is already in place
-- GitHub Issue: #42 — Go-to-definition and find references
-  - Checker AST has reference information that could power navigation features
-- GitHub Issue: #44 — LSP workspace/configuration support
-  - Extend settings.toml with more configuration options
+- GitHub Issue: #48 — Move proto value conversion logic from conformance layer to cel-core-proto
+  - Clean separation of concerns, consolidate proto conversion in one place
 
 ## Open Questions
 - The overload resolution sometimes selects the wrong overload for `(UInt, Int)` args in bit shift functions — it picks `int_int` instead of `uint_int`. Worked around by handling both type combos in the first overload, but root cause may need investigation.
