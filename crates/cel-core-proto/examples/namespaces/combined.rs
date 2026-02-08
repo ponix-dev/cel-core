@@ -1,6 +1,6 @@
 //! Using containers and abbreviations together.
 //!
-//! Run with: cargo run -p cel-core --example combined
+//! Run with: cargo run -p cel-core-proto --example combined
 
 use std::sync::Arc;
 

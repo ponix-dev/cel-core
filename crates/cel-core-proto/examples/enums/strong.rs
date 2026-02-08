@@ -1,6 +1,6 @@
 //! Strong enum mode (default): enum values carry type information.
 //!
-//! Run with: cargo run -p cel-core --example enums_strong
+//! Run with: cargo run -p cel-core-proto --example enums_strong
 
 use std::sync::Arc;
 

@@ -1,6 +1,6 @@
 //! Legacy enum mode: enum values are returned as plain integers.
 //!
-//! Run with: cargo run -p cel-core --example enums_legacy
+//! Run with: cargo run -p cel-core-proto --example enums_legacy
 
 use std::sync::Arc;
 

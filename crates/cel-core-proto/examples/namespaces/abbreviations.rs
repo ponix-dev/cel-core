@@ -1,6 +1,6 @@
 //! Abbreviations let you use short names for fully-qualified protobuf types.
 //!
-//! Run with: cargo run -p cel-core --example abbreviations
+//! Run with: cargo run -p cel-core-proto --example abbreviations
 
 use std::sync::Arc;
 

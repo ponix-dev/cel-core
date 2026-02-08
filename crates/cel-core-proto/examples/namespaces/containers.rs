@@ -1,6 +1,6 @@
 //! Containers set your default protobuf package for type resolution.
 //!
-//! Run with: cargo run -p cel-core --example containers
+//! Run with: cargo run -p cel-core-proto --example containers
 
 use std::sync::Arc;
 

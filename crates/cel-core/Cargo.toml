@@ -13,24 +13,3 @@ chrono-tz = "0.10"
 logos.workspace = true
 regex.workspace = true
 
-
-[[example]]
-name = "enums_legacy"
-path = "examples/enums/legacy.rs"
-
-[[example]]
-name = "enums_strong"
-path = "examples/enums/strong.rs"
-
-[[example]]
-name = "containers"
-path = "examples/namespaces/containers.rs"
-
-[[example]]
-name = "abbreviations"
-path = "examples/namespaces/abbreviations.rs"
-
-[[example]]
-name = "combined"
-path = "examples/namespaces/combined.rs"
-

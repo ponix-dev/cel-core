@@ -143,7 +143,7 @@ match &result {
 }
 ```
 
-> See the [examples](crates/cel-core/examples/) directory for more usage patterns including lists, maps, timestamps/durations, enums, namespaces, and error handling.
+> See the [examples](crates/cel-core/examples/) directory for more usage patterns including lists, maps, timestamps/durations, and error handling. For proto-related examples (enums, namespaces), see [cel-core-proto/examples](crates/cel-core-proto/examples/).
 
 ## Proto Wire Format
 

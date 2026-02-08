@@ -18,3 +18,23 @@ prost.workspace = true
 prost-reflect.workspace = true
 prost-types = "0.14"
 thiserror = "2"
+
+[[example]]
+name = "enums_legacy"
+path = "examples/enums/legacy.rs"
+
+[[example]]
+name = "enums_strong"
+path = "examples/enums/strong.rs"
+
+[[example]]
+name = "containers"
+path = "examples/namespaces/containers.rs"
+
+[[example]]
+name = "abbreviations"
+path = "examples/namespaces/abbreviations.rs"
+
+[[example]]
+name = "combined"
+path = "examples/namespaces/combined.rs"
