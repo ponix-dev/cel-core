@@ -98,7 +98,6 @@ dependencies = [
 name = "cel-core"
 version = "0.3.0"
 dependencies = [
- "cel-core-proto",
  "chrono",
  "chrono-tz",
  "logos 0.14.4",

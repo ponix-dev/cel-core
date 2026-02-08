@@ -13,8 +13,6 @@ chrono-tz = "0.10"
 logos.workspace = true
 regex.workspace = true
 
-[dev-dependencies]
-cel-core-proto.workspace = true
 
 [[example]]
 name = "enums_legacy"
