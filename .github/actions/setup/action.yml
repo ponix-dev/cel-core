@@ -7,4 +7,6 @@ runs:
     - uses: jdx/mise-action@v3
       with:
         cache: true
+    - run: rustup component add rustfmt clippy
+      shell: bash
     - uses: Swatinem/rust-cache@v2
