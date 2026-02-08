@@ -324,12 +324,6 @@ impl AstConverter {
         }
     }
 
-    /// Get the collected source info.
-    #[cfg(test)]
-    pub fn into_source_info(self) -> SourceInfo {
-        build_source_info(self.positions, self.line_offsets)
-    }
-
     /// Convert a proto Expr back to a cel-parser AST.
     ///
     /// Note: Proto only stores start offsets, so spans will be zero-length
@@ -771,9 +765,12 @@ mod tests {
         let source = "";
         let mut converter = AstConverter::new(source);
         let proto_expr = converter.ast_to_expr(ast);
-        let source_info = converter.into_source_info();
+        let parsed = converter.into_parsed_expr(proto_expr);
         let new_converter = AstConverter::new(source);
-        new_converter.expr_to_ast(&proto_expr, &source_info).unwrap()
+        new_converter.expr_to_ast(
+            parsed.expr.as_ref().unwrap(),
+            parsed.source_info.as_ref().unwrap(),
+        ).unwrap()
     }
 
     fn assert_node_eq(a: &Expr, b: &Expr) {
