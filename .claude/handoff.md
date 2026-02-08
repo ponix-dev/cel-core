@@ -1,46 +1,56 @@
 # Roadmap Handoff
 
 ## Last Updated
-2026-02-03
+2026-02-08
 
 ## Just Completed
-- Refactored trait abstraction naming for clarity:
-  - Split `TypeRegistry` into two focused traits: `ProtoTypeResolver` (checker) and `ProtoRegistry` (evaluator)
-  - Renamed `ProstTypeRegistry` → `ProstProtoRegistry`
-  - Renamed `type_registry` field/method → `proto_registry`
-  - Renamed `with_type_registry()` → `with_proto_registry()`
-  - Renamed `check_with_type_registry()` → `check_with_descriptor_pool()`
+- GitHub Issue: #35 — Replace custom LSP validation with cel-core's checker
+- [x] Replaced custom LSP type checker (`types/checker.rs`, `types/validation.rs`) with cel-core's unified checker
+- [x] Added `settings.toml` configuration system for LSP workspaces (variables, extensions, proto file descriptors)
+- [x] Integrated cel-core-proto into the LSP for proto type resolution via file descriptor sets
+- [x] Added completion support using placeholder-based approach with checker type information
+- [x] Added protovalidate `this` context support for field-level CEL expressions
+- [x] Added snapshot-based integration tests using `expect-test`
+- [x] Updated diagnostics, hover, and semantic tokens to use checker AST/type information
 
 ### Summary
-Split the monolithic `TypeRegistry` trait into two focused traits:
-- `ProtoTypeResolver` — checker methods for type lookup (get_field_type, get_enum_value, resolve_qualified, resolve_message_name)
-- `ProtoRegistry` — evaluator methods (construct_message, message_field_access, etc.) + inherits ProtoTypeResolver
+Major refactor replacing ~1900 lines of custom validation/checker code with cel-core's checker. The LSP now uses `Env::compile()` for type checking, getting accurate type information, overload resolution, and error diagnostics from the same checker used at runtime. Added a `settings.toml` configuration system so workspaces can declare variables, enable extensions, and point to proto file descriptor sets.
 
-This better separates concerns: the checker only needs type resolution, while the evaluator needs runtime operations.
+### Key files added/modified
+- `crates/cel-core-lsp/src/settings.rs` — new settings.toml parser and workspace configuration
+- `crates/cel-core-lsp/src/lsp/completion.rs` — new completion provider using checker types
+- `crates/cel-core-lsp/src/lsp/diagnostics.rs` — updated to use checker errors
+- `crates/cel-core-lsp/src/lsp/hover.rs` — updated to use checker type map
+- `crates/cel-core-lsp/src/lsp/semantic_tokens.rs` — updated to use checker AST
+- `crates/cel-core-lsp/src/document/state.rs` — stores `Arc<Env>` for re-parsing
+- `crates/cel-core-lsp/src/document/region.rs` — proto region state with env
+- `crates/cel-core-lsp/src/protovalidate/proto_parser.rs` — enhanced `this` context and has() support
+- `crates/cel-core-lsp/src/protovalidate/resolver.rs` — updated for checker integration
+- `crates/cel-core-lsp/src/types/checker.rs` — **deleted** (replaced by cel-core checker)
+- `crates/cel-core-lsp/src/types/validation.rs` — **deleted** (replaced by cel-core checker)
+- `crates/cel-core/src/env.rs` — added `methods_for_type()`, `standalone_functions()` for completion
+- `crates/cel-core/src/checker/checker.rs` — enhanced for LSP use cases
+- `crates/cel-core-proto/src/registry.rs` — added `message_field_names()` for completion
 
-### Key files modified
-- `crates/cel-core/src/eval/proto_registry.rs` — defines `ProtoTypeResolver` and `ProtoRegistry` traits (renamed from type_registry.rs)
-- `crates/cel-core/src/eval/mod.rs` — exports `ProtoTypeResolver`, `ProtoRegistry`, `StructFieldValue`
-- `crates/cel-core/src/checker/checker.rs` — uses `&dyn ProtoTypeResolver`
-- `crates/cel-core/src/env.rs` — uses `Arc<dyn ProtoRegistry>`, renamed to `proto_registry`
-- `crates/cel-core/src/eval/evaluator.rs` — uses `&dyn ProtoRegistry`
-- `crates/cel-core-proto/src/registry.rs` — `ProstProtoRegistry` implements both traits
-- `crates/cel-core-proto/src/eval_proto.rs` — `impl ProtoRegistry for ProstProtoRegistry`
+### Notable decisions
+- Used placeholder-based completion: inserts `__cel_complete__` at cursor position, re-parses and type-checks, then finds the placeholder in the AST to determine context
+- Settings use TOML format with workspace-relative paths for proto file descriptors
+- Proto file descriptor sets are loaded as binary `.binpb` files (output of `buf build`)
 
 ## Previous Work
-- GitHub Issue: #50 — Decouple prost/prost-reflect from cel-core via trait abstraction
-- Defined `MessageValue` trait in `cel-core::eval::message` — runtime proto message abstraction
-- Moved `ProtoValue` to `cel-core-proto` as `ProstMessage` implementing `MessageValue`
-- Moved WKT handling (`wkt.rs`) and proto evaluation logic from cel-core to cel-core-proto
-- Updated `Value::Proto(ProtoValue)` → `Value::Message(Box<dyn MessageValue>)`
-- Removed `prost` and `prost-reflect` from cel-core's Cargo.toml
+- Refactored trait abstractions: split `TypeRegistry` into `ProtoTypeResolver` + `ProtoRegistry`
+- GitHub Issue: #50 — Decoupled prost/prost-reflect from cel-core via trait abstraction
 
 ## Next Up
-- GitHub Issue: #48 — Move proto value conversion logic from conformance layer to cel-core-proto
-  - `proto_value_to_value()` and `value_to_proto_value()` in conformance service.rs should become public API in cel-core-proto
-  - `bindings_to_activation()` and `convert_function_decl()` should also move
-  - This completes the proto interop story for external users
+- GitHub Issue: #38 — Richer hover information using CheckResult.type_map
+  - Now that the LSP uses the checker, hover can show precise types from the type map
+  - Natural follow-up since the infrastructure is already in place
+- GitHub Issue: #42 — Go-to-definition and find references
+  - Checker AST has reference information that could power navigation features
+- GitHub Issue: #44 — LSP workspace/configuration support
+  - Extend settings.toml with more configuration options
 
 ## Open Questions
-- The overload resolution sometimes selects the wrong overload for `(UInt, Int)` args in bit shift functions — it picks `int_int` instead of `uint_int`. Worked around by handling both type combos in the first overload, but the root cause in overload resolution may need investigation.
-- `type_url` field access on Any values is not yet implemented — may revisit if additional test cases require it.
+- The overload resolution sometimes selects the wrong overload for `(UInt, Int)` args in bit shift functions — it picks `int_int` instead of `uint_int`. Worked around by handling both type combos in the first overload, but root cause may need investigation.
+- Completion for map types could be improved — currently only shows methods, not key access patterns
+- Settings discovery could be enhanced to walk up directory tree (currently only checks workspace root)
