@@ -1,12 +1,14 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use cel_core::Env;
 use cel_core_lsp::settings::{build_env_with_protos, load_proto_registry, load_settings};
 use cel_core_lsp::{
-    proto_to_diagnostics, to_diagnostics, DocumentState, LineIndex, ProtoDocumentState,
+    completion_at_position_proto, proto_to_diagnostics, to_diagnostics, DocumentState, LineIndex,
+    ProtoDocumentState,
 };
 use expect_test::expect;
-use tower_lsp::lsp_types::Diagnostic;
+use tower_lsp::lsp_types::{CompletionResponse, Diagnostic, Position};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -66,7 +68,7 @@ fn check_cel(fixture_dir: &str, source: &str) -> String {
     let settings = load_settings(&fixture_path.join("settings.toml"));
     let env = build_env_with_protos(&settings, &fixture_path);
 
-    let state = DocumentState::with_env(source.to_string(), 0, &env);
+    let state = DocumentState::with_env(source.to_string(), 0, Arc::new(env));
     let line_index = LineIndex::new(source.to_string());
     let diagnostics = to_diagnostics(&state.errors, state.check_errors(), &line_index);
 
@@ -76,7 +78,7 @@ fn check_cel(fixture_dir: &str, source: &str) -> String {
 /// Parse + typecheck with the default environment (standard library + all extensions).
 fn check_cel_default(source: &str) -> String {
     let env = Env::with_standard_library().with_all_extensions();
-    let state = DocumentState::with_env(source.to_string(), 0, &env);
+    let state = DocumentState::with_env(source.to_string(), 0, Arc::new(env));
     let line_index = LineIndex::new(source.to_string());
     let diagnostics = to_diagnostics(&state.errors, state.check_errors(), &line_index);
 
@@ -296,4 +298,145 @@ fn protovalidate_field_string_size() {
     let actual = check_protovalidate_field("string", "name", "this.size() > 0");
     let expected = expect![[r#"OK (no diagnostics)"#]];
     expected.assert_eq(&actual);
+}
+
+// ---------------------------------------------------------------------------
+// Tests — proto completion
+// ---------------------------------------------------------------------------
+
+/// Helper: build a proto file with a field-level CEL expression containing
+/// the cursor at the given position, then return completion labels.
+fn get_proto_completions(
+    field_type: &str,
+    field_name: &str,
+    cel_expr: &str,
+    cursor_col_within_cel: u32,
+) -> Vec<String> {
+    let fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/proto");
+    let settings = load_settings(&fixture_path.join("settings.toml"));
+    let registry = load_proto_registry(&settings, &fixture_path);
+
+    let proto_source = format!(
+        r#"syntax = "proto3";
+package test;
+
+message TestMessage {{
+    {field_type} {field_name} = 1 [(buf.validate.field).cel = {{
+        expression: "{cel_expr}"
+    }}];
+}}"#
+    );
+
+    let state = ProtoDocumentState::new(proto_source, 0, registry.as_ref());
+
+    // The expression string is on line 5 (0-indexed), starting after `expression: "`
+    // Line 5 is: `        expression: "<cel_expr>"`
+    //             0       8         18  21
+    // The CEL content starts at column 21 (after 8 spaces + `expression: "`)
+    let cel_start_col = 21u32;
+    let position = Position::new(5, cel_start_col + cursor_col_within_cel);
+
+    match completion_at_position_proto(&state, position) {
+        Some(CompletionResponse::Array(items)) => {
+            items.into_iter().map(|i| i.label).collect()
+        }
+        _ => vec![],
+    }
+}
+
+/// Helper: build a proto file with a message-level protovalidate CEL expression,
+/// then return completion labels at the given cursor position within the CEL.
+fn get_proto_message_completions(
+    message_name: &str,
+    cel_expr: &str,
+    cursor_col_within_cel: u32,
+) -> Vec<String> {
+    let fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/proto");
+    let settings = load_settings(&fixture_path.join("settings.toml"));
+    let registry = load_proto_registry(&settings, &fixture_path);
+
+    let proto_source = format!(
+        r#"syntax = "proto3";
+package test;
+
+message {message_name} {{
+    option (buf.validate.message).cel = {{
+        expression: "{cel_expr}"
+    }};
+}}"#
+    );
+
+    let state = ProtoDocumentState::new(proto_source, 0, registry.as_ref());
+
+    let cel_start_col = 21u32;
+    let position = Position::new(5, cel_start_col + cursor_col_within_cel);
+
+    match completion_at_position_proto(&state, position) {
+        Some(CompletionResponse::Array(items)) => items.into_iter().map(|i| i.label).collect(),
+        _ => vec![],
+    }
+}
+
+#[test]
+fn proto_completion_has_this_field_access() {
+    // `has(this.)` with cursor after the dot (offset 9 in CEL)
+    let labels = get_proto_message_completions("User", "has(this.)", 9);
+    assert!(
+        labels.contains(&"name".to_string()),
+        "should suggest 'name' field inside has(this.): {:?}",
+        labels
+    );
+    assert!(
+        labels.contains(&"email".to_string()),
+        "should suggest 'email' field inside has(this.): {:?}",
+        labels
+    );
+    assert!(
+        labels.contains(&"address".to_string()),
+        "should suggest 'address' field inside has(this.): {:?}",
+        labels
+    );
+}
+
+#[test]
+fn proto_completion_string_field_member_access() {
+    // `this.` with cursor at end (offset 5 in CEL)
+    let labels = get_proto_completions("string", "email", "this.", 5);
+    assert!(
+        labels.contains(&"isEmail".to_string()),
+        "should suggest isEmail for string field: {:?}",
+        labels
+    );
+    assert!(
+        labels.contains(&"contains".to_string()),
+        "should suggest contains for string field: {:?}",
+        labels
+    );
+}
+
+#[test]
+fn proto_completion_string_field_mid_expression() {
+    // `this.isEmail()` with cursor after dot (offset 5 in CEL)
+    let labels = get_proto_completions("string", "email", "this.isEmail()", 5);
+    assert!(
+        labels.contains(&"isEmail".to_string()),
+        "should suggest isEmail mid-expression: {:?}",
+        labels
+    );
+}
+
+#[test]
+fn proto_completion_int_field_no_string_methods() {
+    // `this.` with cursor at end (offset 5 in CEL) on int field
+    let labels = get_proto_completions("int32", "age", "this.", 5);
+    assert!(
+        !labels.contains(&"isEmail".to_string()),
+        "should NOT suggest isEmail for int field: {:?}",
+        labels
+    );
+    assert!(
+        !labels.contains(&"contains".to_string()),
+        "should NOT suggest contains for int field: {:?}",
+        labels
+    );
 }

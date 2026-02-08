@@ -474,6 +474,48 @@ impl Env {
         &self.functions
     }
 
+    /// Get all member functions compatible with a given receiver type.
+    ///
+    /// Returns (function_name, overload) pairs where at least one member overload
+    /// has a receiver type that is assignable from the given type.
+    /// Handles generic type parameters (e.g., `list(T)`) by treating them as wildcards.
+    pub fn methods_for_type(&self, receiver: &CelType) -> Vec<(&str, &crate::types::OverloadDecl)> {
+        let mut results = Vec::new();
+        for func in self.functions.values() {
+            if !func.has_member_overloads() {
+                continue;
+            }
+            for overload in &func.overloads {
+                if !overload.is_member {
+                    continue;
+                }
+                if let Some(recv_type) = overload.receiver_type() {
+                    if type_compatible_for_completion(recv_type, receiver) {
+                        results.push((func.name.as_str(), overload));
+                        break; // One match per function is enough
+                    }
+                }
+            }
+        }
+        results
+    }
+
+    /// Get all standalone (non-operator) function names.
+    ///
+    /// Filters out internal operator functions (like `_+_`, `_-_`) and other
+    /// internal functions that start with `_` or contain `@`.
+    pub fn standalone_functions(&self) -> Vec<&str> {
+        self.functions
+            .values()
+            .filter(|f| {
+                f.has_standalone_overloads()
+                    && !f.name.starts_with('_')
+                    && !f.name.contains('@')
+            })
+            .map(|f| f.name.as_str())
+            .collect()
+    }
+
     /// Parse a CEL expression.
     ///
     /// This delegates to the parser. The returned `ParseResult` may contain
@@ -661,6 +703,31 @@ impl Env {
         }
 
         registry
+    }
+}
+
+/// Check if a declared type (which may contain TypeParams) is compatible
+/// with a concrete receiver type for completion purposes.
+///
+/// This treats TypeParam as a wildcard that matches any type, unlike
+/// `is_assignable_from` which requires explicit substitution.
+fn type_compatible_for_completion(declared: &CelType, concrete: &CelType) -> bool {
+    // Regular assignability covers most cases
+    if declared.is_assignable_from(concrete) {
+        return true;
+    }
+    match (declared, concrete) {
+        // TypeParam matches anything (it's a generic placeholder)
+        (CelType::TypeParam(_), _) | (_, CelType::TypeParam(_)) => true,
+        // Recurse into list element types
+        (CelType::List(d), CelType::List(c)) => type_compatible_for_completion(d, c),
+        // Recurse into map key/value types
+        (CelType::Map(dk, dv), CelType::Map(ck, cv)) => {
+            type_compatible_for_completion(dk, ck) && type_compatible_for_completion(dv, cv)
+        }
+        // Recurse into optional inner types
+        (CelType::Optional(d), CelType::Optional(c)) => type_compatible_for_completion(d, c),
+        _ => false,
     }
 }
 
@@ -1119,6 +1186,43 @@ mod tests {
             .unwrap();
 
         assert_eq!(abbrevs.resolve("Bar"), None);
+    }
+
+    #[test]
+    fn test_methods_for_type_string() {
+        let env = Env::with_standard_library();
+        let methods = env.methods_for_type(&CelType::String);
+        let names: Vec<&str> = methods.iter().map(|(name, _)| *name).collect();
+        assert!(names.contains(&"contains"));
+        assert!(names.contains(&"startsWith"));
+        assert!(names.contains(&"endsWith"));
+        assert!(names.contains(&"matches"));
+        assert!(names.contains(&"size"));
+        // Operators should not appear
+        assert!(!names.contains(&"_+_"));
+        assert!(!names.contains(&"_==_"));
+    }
+
+    #[test]
+    fn test_methods_for_type_list() {
+        let env = Env::with_standard_library();
+        let methods = env.methods_for_type(&CelType::list(CelType::Int));
+        let names: Vec<&str> = methods.iter().map(|(name, _)| *name).collect();
+        assert!(names.contains(&"size"));
+    }
+
+    #[test]
+    fn test_standalone_functions() {
+        let env = Env::with_standard_library();
+        let funcs = env.standalone_functions();
+        assert!(funcs.contains(&"size"));
+        assert!(funcs.contains(&"int"));
+        assert!(funcs.contains(&"string"));
+        assert!(funcs.contains(&"bool"));
+        // Operators should not appear
+        assert!(!funcs.contains(&"_+_"));
+        assert!(!funcs.contains(&"_-_"));
+        assert!(!funcs.contains(&"_==_"));
     }
 
     #[test]

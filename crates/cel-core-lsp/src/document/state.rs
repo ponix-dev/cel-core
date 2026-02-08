@@ -25,18 +25,23 @@ pub struct DocumentState {
     pub check_result: Option<CheckResult>,
     /// Document version from the client.
     pub version: i32,
+    /// The original source text (needed for completion re-parsing).
+    pub source: String,
+    /// The environment used for type checking (needed for completion).
+    pub env: Arc<Env>,
 }
 
 impl DocumentState {
     /// Create a new document state by parsing and type-checking the source.
     pub fn new(source: String, version: i32) -> Self {
-        Self::with_env(source, version, &Env::with_standard_library().with_all_extensions())
+        let env = Arc::new(Env::with_standard_library().with_all_extensions());
+        Self::with_env(source, version, env)
     }
 
     /// Create a new document state with a custom Env.
-    pub fn with_env(source: String, version: i32, env: &Env) -> Self {
+    pub fn with_env(source: String, version: i32, env: Arc<Env>) -> Self {
         let result = parse(&source);
-        let line_index = LineIndex::new(source);
+        let line_index = LineIndex::new(source.clone());
 
         // Run type checking if we have an AST
         let check_result = result.ast.as_ref().map(|ast| env.check(ast));
@@ -47,6 +52,8 @@ impl DocumentState {
             errors: result.errors,
             check_result,
             version,
+            source,
+            env,
         }
     }
 

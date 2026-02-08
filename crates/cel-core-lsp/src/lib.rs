@@ -15,7 +15,7 @@ pub mod settings;
 pub mod types;
 
 pub use document::{DocumentState, LineIndex, ProtoDocumentState};
-pub use lsp::{proto_to_diagnostics, to_diagnostics};
+pub use lsp::{completion_at_position_proto, proto_to_diagnostics, to_diagnostics};
 
 use document::{DocumentKind, DocumentStore};
 
@@ -97,6 +97,11 @@ impl LanguageServer for Backend {
                     TextDocumentSyncKind::FULL,
                 )),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
+                completion_provider: Some(CompletionOptions {
+                    trigger_characters: Some(vec![".".to_string()]),
+                    resolve_provider: Some(false),
+                    ..Default::default()
+                }),
                 semantic_tokens_provider: Some(
                     SemanticTokensServerCapabilities::SemanticTokensOptions(
                         SemanticTokensOptions {
@@ -174,6 +179,51 @@ impl LanguageServer for Backend {
             }
             DocumentKind::Proto(state) => {
                 Ok(lsp::hover_at_position_proto(state, position))
+            }
+        }
+    }
+
+    async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
+        let uri = &params.text_document_position.text_document.uri;
+        let position = params.text_document_position.position;
+
+        let Some(doc) = self.documents.get(uri) else {
+            eprintln!("[completion] no document found for {}", uri);
+            return Ok(None);
+        };
+
+        match doc.as_ref() {
+            DocumentKind::Cel(state) => Ok(lsp::completion_at_position(
+                &state.line_index,
+                &state.source,
+                &state.env,
+                position,
+            )),
+            DocumentKind::Proto(state) => {
+                let host_offset = state.line_index.position_to_offset(position);
+                eprintln!(
+                    "[completion] proto position={:?} host_offset={:?} regions={}",
+                    position,
+                    host_offset,
+                    state.regions.len()
+                );
+                if let Some(offset) = host_offset {
+                    for (i, r) in state.regions.iter().enumerate() {
+                        let start = r.mapper.host_offset();
+                        let end = start + r.mapper.host_length(r.region.source.len());
+                        eprintln!(
+                            "[completion]   region[{}]: host=[{}..{}] source={:?} contains={}",
+                            i, start, end, r.region.source,
+                            r.contains_host_offset(offset)
+                        );
+                    }
+                }
+                let result = lsp::completion_at_position_proto(state, position);
+                eprintln!("[completion] result items={}", result.as_ref().map(|r| match r {
+                    CompletionResponse::Array(items) => items.len(),
+                    _ => 0,
+                }).unwrap_or(0));
+                Ok(result)
             }
         }
     }

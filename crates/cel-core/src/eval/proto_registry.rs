@@ -62,6 +62,14 @@ pub trait ProtoTypeResolver: fmt::Debug + Send + Sync {
     /// Returns the fully qualified message name if found.
     fn resolve_message_name(&self, name: &str, container: &str) -> Option<String>;
 
+    /// List all field names of a message type.
+    ///
+    /// Returns `None` if the message type is unknown to this registry.
+    /// Default implementation returns `None`.
+    fn message_field_names(&self, _message: &str) -> Option<Vec<String>> {
+        None
+    }
+
     /// Downcast to a concrete type via `Any`.
     fn as_any(&self) -> &dyn Any;
 }

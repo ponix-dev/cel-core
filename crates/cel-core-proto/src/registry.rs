@@ -257,6 +257,11 @@ impl ProtoTypeResolverTrait for ProstProtoRegistry {
         None
     }
 
+    fn message_field_names(&self, message: &str) -> Option<Vec<String>> {
+        let msg = self.get_message(message)?;
+        Some(msg.fields().map(|f| f.name().to_string()).collect())
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }

@@ -115,6 +115,9 @@ pub struct CelRegionState {
 
     /// Check result from type checking (spans are relative to region).
     pub check_result: Option<CheckResult>,
+
+    /// The environment used for type checking (needed for completion).
+    pub env: Arc<Env>,
 }
 
 impl CelRegionState {
@@ -126,7 +129,7 @@ impl CelRegionState {
         proto_registry: Option<&Arc<ProstProtoRegistry>>,
     ) -> Self {
         let result = parse(&region.source);
-        let env = build_protovalidate_env_typed(&context, proto_registry);
+        let env = Arc::new(build_protovalidate_env_typed(&context, proto_registry));
 
         // Run type checking if we have an AST
         let check_result = result.ast.as_ref().map(|ast| env.check(ast));
@@ -137,6 +140,7 @@ impl CelRegionState {
             ast: result.ast,
             parse_errors: result.errors,
             check_result,
+            env,
         }
     }
 
@@ -149,10 +153,12 @@ impl CelRegionState {
     }
 
     /// Check if this region contains the given host document offset.
+    /// Uses `<=` for the end bound so that the cursor at the very end of the
+    /// expression (e.g., right before the closing quote) is still considered inside.
     pub fn contains_host_offset(&self, host_offset: usize) -> bool {
         let start = self.mapper.host_offset();
         let end = start + self.mapper.host_length(self.region.source.len());
-        host_offset >= start && host_offset < end
+        host_offset >= start && host_offset <= end
     }
 
     /// Convert a host offset to a CEL-local offset, if within this region.
@@ -316,12 +322,14 @@ mod tests {
             ast: None,
             parse_errors: vec![],
             check_result: None,
+            env: Arc::new(Env::new()),
         };
 
         assert!(state.contains_host_offset(100));
         assert!(state.contains_host_offset(105));
         assert!(state.contains_host_offset(113)); // last char
-        assert!(!state.contains_host_offset(114)); // one past end
+        assert!(state.contains_host_offset(114)); // cursor at end (before closing quote)
+        assert!(!state.contains_host_offset(115)); // one past end
         assert!(!state.contains_host_offset(99)); // before start
     }
 }
