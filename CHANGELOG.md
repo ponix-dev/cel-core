@@ -2,6 +2,13 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## v0.3.1 - 2026-02-08
+#### Bug Fixes
+- proto examples - (60b1af2) - Simon Rall
+- remove proto dev dep - (544b50d) - Simon Rall
+
+- - -
+
 ## v0.3.0 - 2026-02-08
 #### Features
 - add GitHub Actions CI/CD workflows with mise - (2fc0fc7) - Simon Rall
