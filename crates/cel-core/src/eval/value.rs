@@ -1552,6 +1552,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::approx_constant)]
     fn test_from_primitives() {
         let v: Value = true.into();
         assert_eq!(v, Value::Bool(true));
@@ -1582,6 +1583,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::approx_constant)]
     fn test_try_from_success() {
         let v = Value::Int(42);
         let i: i64 = (&v).try_into().unwrap();

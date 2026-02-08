@@ -73,6 +73,6 @@ pub use parser::{parse, ParseError, ParseResult};
 // Re-export from types module
 pub use types::proto::{proto_message_to_cel_type, ResolvedProtoType};
 pub use types::{
-    BinaryOp, CelType, CelValue, Expr, FunctionDecl, ListElement, MapEntry, OverloadDecl, Span,
-    Spanned, SpannedExpr, StructField, UnaryOp, VariableDecl,
+    BinaryOp, CelType, CelValue, ComprehensionData, Expr, FunctionDecl, ListElement, MapEntry,
+    OverloadDecl, Span, Spanned, SpannedExpr, StructField, UnaryOp, VariableDecl,
 };

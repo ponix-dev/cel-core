@@ -76,8 +76,7 @@ pub(crate) fn proto_field_type_to_cel(proto_type: &str) -> CelType {
         "bytes" => CelType::Bytes,
         // For message types and unknown types, use Dyn or message type
         other => {
-            if other.starts_with("repeated ") {
-                let inner = &other[9..];
+            if let Some(inner) = other.strip_prefix("repeated ") {
                 CelType::list(proto_field_type_to_cel(inner))
             } else if other.starts_with("map<") {
                 // Map types are complex, fall back to dyn for now

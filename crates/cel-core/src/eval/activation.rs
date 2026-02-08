@@ -40,13 +40,6 @@ impl MapActivation {
         Self::default()
     }
 
-    /// Create an activation from an iterator of bindings.
-    pub fn from_iter(bindings: impl IntoIterator<Item = (String, Value)>) -> Self {
-        Self {
-            bindings: bindings.into_iter().collect(),
-        }
-    }
-
     /// Insert a binding.
     pub fn insert(&mut self, name: impl Into<String>, value: impl Into<Value>) {
         self.bindings.insert(name.into(), value.into());
@@ -75,6 +68,14 @@ impl Activation for MapActivation {
 
     fn has(&self, name: &str) -> bool {
         self.bindings.contains_key(name)
+    }
+}
+
+impl FromIterator<(String, Value)> for MapActivation {
+    fn from_iter<T: IntoIterator<Item = (String, Value)>>(iter: T) -> Self {
+        Self {
+            bindings: iter.into_iter().collect(),
+        }
     }
 }
 
@@ -231,10 +232,12 @@ mod tests {
 
     #[test]
     fn test_hierarchical_activation() {
-        let parent = MapActivation::from_iter([
+        let parent: MapActivation = [
             ("x".to_string(), Value::Int(1)),
             ("y".to_string(), Value::Int(2)),
-        ]);
+        ]
+        .into_iter()
+        .collect();
 
         let child = HierarchicalActivation::new(&parent).with_binding("x", 10i64);
 

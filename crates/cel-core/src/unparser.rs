@@ -15,7 +15,9 @@
 //! assert_eq!(source, "x + 1");
 //! ```
 
-use crate::types::{BinaryOp, Expr, ListElement, MapEntry, SpannedExpr, StructField, UnaryOp};
+use crate::types::{
+    BinaryOp, ComprehensionData, Expr, ListElement, MapEntry, SpannedExpr, StructField, UnaryOp,
+};
 
 /// Convert a CEL AST to source text.
 ///
@@ -132,25 +134,7 @@ fn unparse(expr: &Expr) -> String {
         Expr::Struct { type_name, fields } => unparse_struct(type_name, fields),
 
         // Macro expansions - unparse back to macro syntax where possible
-        Expr::Comprehension {
-            iter_var,
-            iter_var2,
-            iter_range,
-            accu_var,
-            accu_init,
-            loop_condition,
-            loop_step,
-            result,
-        } => unparse_comprehension(
-            iter_var,
-            iter_var2,
-            iter_range,
-            accu_var,
-            accu_init,
-            loop_condition,
-            loop_step,
-            result,
-        ),
+        Expr::Comprehension(comp) => unparse_comprehension(comp),
         Expr::MemberTestOnly { expr, field } => {
             format!("has({}.{})", unparse(&expr.node), field)
         }
@@ -379,70 +363,62 @@ fn unparse_struct(type_name: &SpannedExpr, fields: &[StructField]) -> String {
 ///
 /// This attempts to recognize common macro patterns and unparse them appropriately.
 /// For unrecognized patterns, it falls back to a generic representation.
-fn unparse_comprehension(
-    iter_var: &str,
-    iter_var2: &str,
-    iter_range: &SpannedExpr,
-    accu_var: &str,
-    accu_init: &SpannedExpr,
-    loop_condition: &SpannedExpr,
-    loop_step: &SpannedExpr,
-    result: &SpannedExpr,
-) -> String {
+fn unparse_comprehension(comp: &ComprehensionData) -> String {
     // Try to recognize common macro patterns
 
     // Check for `all` pattern: accu_init=true, loop_step=accu && condition, result=accu
-    if matches!(&accu_init.node, Expr::Bool(true)) {
+    if matches!(&comp.accu_init.node, Expr::Bool(true)) {
         if let Expr::Binary {
             op: BinaryOp::And,
             left,
             right,
-        } = &loop_step.node
+        } = &comp.loop_step.node
         {
-            if matches!(&left.node, Expr::Ident(name) if name == accu_var) {
-                if matches!(&result.node, Expr::Ident(name) if name == accu_var) {
-                    let range_str = unparse(&iter_range.node);
-                    let condition_str = unparse(&right.node);
-                    return format!("{}.all({}, {})", range_str, iter_var, condition_str);
-                }
+            if matches!(&left.node, Expr::Ident(name) if name == &comp.accu_var)
+                && matches!(&comp.result.node, Expr::Ident(name) if name == &comp.accu_var)
+            {
+                let range_str = unparse(&comp.iter_range.node);
+                let condition_str = unparse(&right.node);
+                return format!("{}.all({}, {})", range_str, comp.iter_var, condition_str);
             }
         }
     }
 
     // Check for `exists` pattern: accu_init=false, loop_step=accu || condition, result=accu
-    if matches!(&accu_init.node, Expr::Bool(false)) {
+    if matches!(&comp.accu_init.node, Expr::Bool(false)) {
         if let Expr::Binary {
             op: BinaryOp::Or,
             left,
             right,
-        } = &loop_step.node
+        } = &comp.loop_step.node
         {
-            if matches!(&left.node, Expr::Ident(name) if name == accu_var) {
-                if matches!(&result.node, Expr::Ident(name) if name == accu_var) {
-                    let range_str = unparse(&iter_range.node);
-                    let condition_str = unparse(&right.node);
-                    return format!("{}.exists({}, {})", range_str, iter_var, condition_str);
-                }
+            if matches!(&left.node, Expr::Ident(name) if name == &comp.accu_var)
+                && matches!(&comp.result.node, Expr::Ident(name) if name == &comp.accu_var)
+            {
+                let range_str = unparse(&comp.iter_range.node);
+                let condition_str = unparse(&right.node);
+                return format!("{}.exists({}, {})", range_str, comp.iter_var, condition_str);
             }
         }
     }
 
     // Check for `map` pattern: accu_init=[], loop_step=accu + [transform], result=accu
-    if matches!(&accu_init.node, Expr::List(elems) if elems.is_empty()) {
+    if matches!(&comp.accu_init.node, Expr::List(elems) if elems.is_empty()) {
         if let Expr::Binary {
             op: BinaryOp::Add,
             left,
             right,
-        } = &loop_step.node
+        } = &comp.loop_step.node
         {
-            if matches!(&left.node, Expr::Ident(name) if name == accu_var) {
+            if matches!(&left.node, Expr::Ident(name) if name == &comp.accu_var) {
                 if let Expr::List(elems) = &right.node {
-                    if elems.len() == 1 && !elems[0].optional {
-                        if matches!(&result.node, Expr::Ident(name) if name == accu_var) {
-                            let range_str = unparse(&iter_range.node);
-                            let transform_str = unparse(&elems[0].expr.node);
-                            return format!("{}.map({}, {})", range_str, iter_var, transform_str);
-                        }
+                    if elems.len() == 1
+                        && !elems[0].optional
+                        && matches!(&comp.result.node, Expr::Ident(name) if name == &comp.accu_var)
+                    {
+                        let range_str = unparse(&comp.iter_range.node);
+                        let transform_str = unparse(&elems[0].expr.node);
+                        return format!("{}.map({}, {})", range_str, comp.iter_var, transform_str);
                     }
                 }
             }
@@ -451,28 +427,27 @@ fn unparse_comprehension(
 
     // Check for `filter` pattern: accu_init=[], loop_step=accu + ([iter_var] if condition else []), result=accu
     // This is more complex, so we'll use a simplified check
-    if matches!(&accu_init.node, Expr::List(elems) if elems.is_empty()) {
+    if matches!(&comp.accu_init.node, Expr::List(elems) if elems.is_empty()) {
         if let Expr::Ternary {
             cond,
             then_expr,
             else_expr,
-        } = &loop_step.node
+        } = &comp.loop_step.node
         {
             if let Expr::List(then_elems) = &then_expr.node {
                 if then_elems.len() == 1 {
                     if let Expr::Ident(elem_name) = &then_elems[0].expr.node {
-                        if elem_name == iter_var {
+                        if elem_name == &comp.iter_var {
                             if let Expr::List(else_elems) = &else_expr.node {
-                                if else_elems.is_empty() {
-                                    if matches!(&result.node, Expr::Ident(name) if name == accu_var)
-                                    {
-                                        let range_str = unparse(&iter_range.node);
-                                        let condition_str = unparse(&cond.node);
-                                        return format!(
-                                            "{}.filter({}, {})",
-                                            range_str, iter_var, condition_str
-                                        );
-                                    }
+                                if else_elems.is_empty()
+                                    && matches!(&comp.result.node, Expr::Ident(name) if name == &comp.accu_var)
+                                {
+                                    let range_str = unparse(&comp.iter_range.node);
+                                    let condition_str = unparse(&cond.node);
+                                    return format!(
+                                        "{}.filter({}, {})",
+                                        range_str, comp.iter_var, condition_str
+                                    );
                                 }
                             }
                         }
@@ -484,21 +459,21 @@ fn unparse_comprehension(
 
     // Fallback: generic comprehension representation
     // This is not valid CEL syntax but provides a readable representation
-    let iter_vars = if iter_var2.is_empty() {
-        iter_var.to_string()
+    let iter_vars = if comp.iter_var2.is_empty() {
+        comp.iter_var.to_string()
     } else {
-        format!("{}, {}", iter_var, iter_var2)
+        format!("{}, {}", comp.iter_var, comp.iter_var2)
     };
 
     format!(
         "__comprehension__({}, {}, {}, {}, {}, {}, {})",
-        unparse(&iter_range.node),
+        unparse(&comp.iter_range.node),
         iter_vars,
-        accu_var,
-        unparse(&accu_init.node),
-        unparse(&loop_condition.node),
-        unparse(&loop_step.node),
-        unparse(&result.node)
+        comp.accu_var,
+        unparse(&comp.accu_init.node),
+        unparse(&comp.loop_condition.node),
+        unparse(&comp.loop_step.node),
+        unparse(&comp.result.node)
     )
 }
 

@@ -464,8 +464,8 @@ mod tests {
             // ParsedExpr roundtrip
             let parsed = ast.to_parsed_expr();
             let parsed_bytes = parsed.encode_to_vec();
-            let decoded_parsed =
-                ParsedExpr::decode(parsed_bytes.as_slice()).expect(&format!("decode {}", source));
+            let decoded_parsed = ParsedExpr::decode(parsed_bytes.as_slice())
+                .unwrap_or_else(|_| panic!("decode {}", source));
             assert_eq!(
                 parsed, decoded_parsed,
                 "ParsedExpr mismatch for: {}",
@@ -476,7 +476,7 @@ mod tests {
             let checked = ast.to_checked_expr().unwrap();
             let checked_bytes = checked.encode_to_vec();
             let decoded_checked = CheckedExpr::decode(checked_bytes.as_slice())
-                .expect(&format!("decode checked {}", source));
+                .unwrap_or_else(|_| panic!("decode checked {}", source));
             assert_eq!(
                 checked, decoded_checked,
                 "CheckedExpr mismatch for: {}",

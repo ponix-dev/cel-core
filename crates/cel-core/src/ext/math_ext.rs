@@ -340,7 +340,7 @@ fn build_minmax_function(name: &str, is_greatest: bool) -> FunctionDecl {
     ] {
         decl = decl.with_overload(
             OverloadDecl::function(
-                &format!("{}_{}", base, suffix),
+                format!("{}_{}", base, suffix),
                 vec![cel_type.clone()],
                 cel_type,
             )
@@ -356,7 +356,7 @@ fn build_minmax_function(name: &str, is_greatest: bool) -> FunctionDecl {
     ] {
         decl = decl.with_overload(
             OverloadDecl::function(
-                &format!("{}_{}_{}", base, suffix, suffix),
+                format!("{}_{}_{}", base, suffix, suffix),
                 vec![cel_type.clone(), cel_type.clone()],
                 cel_type,
             )
@@ -375,7 +375,7 @@ fn build_minmax_function(name: &str, is_greatest: bool) -> FunctionDecl {
             if name1 != name2 {
                 decl = decl.with_overload(
                     OverloadDecl::function(
-                        &format!("{}_{}_{}", base, name1, name2),
+                        format!("{}_{}_{}", base, name1, name2),
                         vec![type1.clone(), type2.clone()],
                         CelType::Dyn,
                     )
@@ -395,7 +395,7 @@ fn build_minmax_function(name: &str, is_greatest: bool) -> FunctionDecl {
         ] {
             decl = decl.with_overload(
                 OverloadDecl::function(
-                    &format!("{}_{}{}", base, suffix, arity),
+                    format!("{}_{}{}", base, suffix, arity),
                     vec![cel_type.clone(); arity],
                     cel_type,
                 )
@@ -405,7 +405,7 @@ fn build_minmax_function(name: &str, is_greatest: bool) -> FunctionDecl {
         // Mixed -> Dyn (just one overload for mixed types)
         decl = decl.with_overload(
             OverloadDecl::function(
-                &format!("{}_dyn{}", base, arity),
+                format!("{}_dyn{}", base, arity),
                 vec![CelType::Dyn; arity],
                 CelType::Dyn,
             )
@@ -421,7 +421,7 @@ fn build_minmax_function(name: &str, is_greatest: bool) -> FunctionDecl {
     ] {
         decl = decl.with_overload(
             OverloadDecl::function(
-                &format!("{}_list_{}", base, suffix),
+                format!("{}_list_{}", base, suffix),
                 vec![CelType::list(cel_type.clone())],
                 cel_type,
             )
@@ -430,7 +430,7 @@ fn build_minmax_function(name: &str, is_greatest: bool) -> FunctionDecl {
     }
     decl = decl.with_overload(
         OverloadDecl::function(
-            &format!("{}_list_dyn", base),
+            format!("{}_list_dyn", base),
             vec![CelType::list(CelType::Dyn)],
             CelType::Dyn,
         )

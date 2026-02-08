@@ -30,7 +30,7 @@ fn find_node_at_position<'a>(
 }
 
 /// Find the innermost node containing the given offset.
-fn find_node_containing_offset<'a>(ast: &'a SpannedExpr, offset: usize) -> Option<&'a SpannedExpr> {
+fn find_node_containing_offset(ast: &SpannedExpr, offset: usize) -> Option<&SpannedExpr> {
     if !ast.span.contains(&offset) {
         return None;
     }
@@ -69,18 +69,11 @@ fn find_node_containing_offset<'a>(ast: &'a SpannedExpr, offset: usize) -> Optio
                     .iter()
                     .find_map(|field| find_node_containing_offset(&field.value, offset))
             }),
-        Expr::Comprehension {
-            iter_range,
-            accu_init,
-            loop_condition,
-            loop_step,
-            result,
-            ..
-        } => find_node_containing_offset(iter_range, offset)
-            .or_else(|| find_node_containing_offset(accu_init, offset))
-            .or_else(|| find_node_containing_offset(loop_condition, offset))
-            .or_else(|| find_node_containing_offset(loop_step, offset))
-            .or_else(|| find_node_containing_offset(result, offset)),
+        Expr::Comprehension(comp) => find_node_containing_offset(&comp.iter_range, offset)
+            .or_else(|| find_node_containing_offset(&comp.accu_init, offset))
+            .or_else(|| find_node_containing_offset(&comp.loop_condition, offset))
+            .or_else(|| find_node_containing_offset(&comp.loop_step, offset))
+            .or_else(|| find_node_containing_offset(&comp.result, offset)),
         Expr::MemberTestOnly { expr, .. } => find_node_containing_offset(expr, offset),
         Expr::Bind { init, body, .. } => find_node_containing_offset(init, offset)
             .or_else(|| find_node_containing_offset(body, offset)),

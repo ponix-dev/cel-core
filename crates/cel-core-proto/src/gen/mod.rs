@@ -1,4 +1,5 @@
 // @generated
+#[allow(clippy::module_inception, clippy::doc_overindented_list_items)]
 pub mod cel {
     // @@protoc_insertion_point(attribute:cel.expr)
     pub mod expr {

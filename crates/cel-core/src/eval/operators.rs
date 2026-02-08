@@ -400,7 +400,7 @@ impl<'a> Evaluator<'a> {
 /// Normalize nanoseconds to be in the range 0..999_999_999 for timestamps.
 /// Returns (extra_seconds, normalized_nanos).
 pub(super) fn normalize_nanos(nanos: i64) -> (i64, i32) {
-    if nanos >= 0 && nanos < 1_000_000_000 {
+    if (0..1_000_000_000).contains(&nanos) {
         (0, nanos as i32)
     } else if nanos >= 1_000_000_000 {
         let extra_secs = nanos / 1_000_000_000;
@@ -409,7 +409,7 @@ pub(super) fn normalize_nanos(nanos: i64) -> (i64, i32) {
     } else {
         // Negative nanos - need to borrow from seconds
         // e.g., -999999998 nanos -> -1 second + 2 nanos
-        let abs_nanos = (-nanos) as i64;
+        let abs_nanos = -nanos;
         let borrow_secs = (abs_nanos + 999_999_999) / 1_000_000_000;
         let remaining = (borrow_secs * 1_000_000_000 - abs_nanos) as i32;
         (-borrow_secs, remaining)

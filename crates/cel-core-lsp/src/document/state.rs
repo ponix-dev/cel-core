@@ -126,7 +126,7 @@ impl ProtoDocumentState {
 #[derive(Debug, Clone)]
 pub enum DocumentKind {
     /// A .cel file containing a single CEL expression.
-    Cel(DocumentState),
+    Cel(Box<DocumentState>),
     /// A .proto file containing embedded CEL expressions.
     Proto(ProtoDocumentState),
 }
@@ -157,7 +157,7 @@ impl DocumentStore {
         let kind = if is_proto_file(&uri) {
             DocumentKind::Proto(ProtoDocumentState::new(source, version, proto_registry))
         } else {
-            DocumentKind::Cel(DocumentState::new(source, version))
+            DocumentKind::Cel(Box::new(DocumentState::new(source, version)))
         };
         let state = Arc::new(kind);
         self.documents.insert(uri, Arc::clone(&state));

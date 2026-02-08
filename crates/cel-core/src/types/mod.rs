@@ -17,7 +17,8 @@ use std::sync::Arc;
 // AST module
 mod ast;
 pub use ast::{
-    BinaryOp, Expr, ListElement, MapEntry, Span, Spanned, SpannedExpr, StructField, UnaryOp,
+    BinaryOp, ComprehensionData, Expr, ListElement, MapEntry, Span, Spanned, SpannedExpr,
+    StructField, UnaryOp,
 };
 
 // Declarations module

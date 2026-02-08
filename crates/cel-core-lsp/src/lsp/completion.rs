@@ -85,18 +85,11 @@ fn find_placeholder_member(ast: &SpannedExpr) -> Option<&SpannedExpr> {
         Expr::Map(entries) => entries.iter().find_map(|entry| {
             find_placeholder_member(&entry.key).or_else(|| find_placeholder_member(&entry.value))
         }),
-        Expr::Comprehension {
-            iter_range,
-            accu_init,
-            loop_condition,
-            loop_step,
-            result,
-            ..
-        } => find_placeholder_member(iter_range)
-            .or_else(|| find_placeholder_member(accu_init))
-            .or_else(|| find_placeholder_member(loop_condition))
-            .or_else(|| find_placeholder_member(loop_step))
-            .or_else(|| find_placeholder_member(result)),
+        Expr::Comprehension(comp) => find_placeholder_member(&comp.iter_range)
+            .or_else(|| find_placeholder_member(&comp.accu_init))
+            .or_else(|| find_placeholder_member(&comp.loop_condition))
+            .or_else(|| find_placeholder_member(&comp.loop_step))
+            .or_else(|| find_placeholder_member(&comp.result)),
         Expr::MemberTestOnly { expr, field } if field == PLACEHOLDER => Some(ast),
         Expr::MemberTestOnly { expr, .. } => find_placeholder_member(expr),
         Expr::Bind { init, body, .. } => {
