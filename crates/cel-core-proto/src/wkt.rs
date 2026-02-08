@@ -8,8 +8,8 @@ use std::sync::Arc;
 use prost::Message;
 use prost_reflect::{DynamicMessage, MessageDescriptor, ReflectMessage};
 
-use cel_core::eval::time;
-use cel_core::eval::{Duration, EvalError, MapKey, Timestamp, Value, ValueMap};
+use cel_core::time;
+use cel_core::{Duration, EvalError, MapKey, Timestamp, Value, ValueMap};
 
 use crate::message::ProstMessage;
 use crate::registry::ProstProtoRegistry;

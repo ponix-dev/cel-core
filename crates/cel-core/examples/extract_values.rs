@@ -2,7 +2,7 @@
 //!
 //! Run with: cargo run -p cel-core --example extract_values
 
-use cel_core::eval::{MapActivation, OptionalValue, Value, ValueMap};
+use cel_core::{MapActivation, OptionalValue, Value, ValueMap};
 use cel_core::{CelType, Env};
 
 fn main() {

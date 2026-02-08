@@ -31,7 +31,7 @@
 //! Use `TryFrom` to extract native types from values:
 //!
 //! ```rust
-//! use cel_core::eval::{Value, Timestamp, Duration, ValueMap, OptionalValue, MapKey};
+//! use cel_core::{Value, Timestamp, Duration, ValueMap, OptionalValue, MapKey};
 //! use std::convert::TryFrom;
 //!
 //! // Primitive types

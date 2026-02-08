@@ -7,8 +7,8 @@
 //! # Example
 //!
 //! ```
-//! use cel_core::unparser::ast_to_string;
-//! use cel_core::parser::parse;
+//! use cel_core::ast_to_string;
+//! use cel_core::parse;
 //!
 //! let ast = parse("x + 1").ast.unwrap();
 //! let source = ast_to_string(&ast);

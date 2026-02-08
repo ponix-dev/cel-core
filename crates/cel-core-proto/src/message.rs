@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use prost_reflect::{DynamicMessage, ReflectMessage};
 
-use cel_core::eval::message::MessageValue;
+use cel_core::MessageValue;
 
 /// A protobuf message value backed by prost-reflect.
 ///

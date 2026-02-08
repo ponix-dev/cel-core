@@ -12,7 +12,7 @@ use prost_reflect::DynamicMessage;
 use crate::{
     Binding, CheckResponse, ConformanceService, EvalResponse, FunctionTypeDecl, Issue, ParseResponse, TypeDecl,
 };
-use cel_core::eval::{MapActivation, MapKey, Value, ValueMap};
+use cel_core::{MapActivation, MapKey, Value, ValueMap};
 use cel_core::Env;
 use cel_core_proto::gen::cel::expr::value::Kind as ProtoValueKind;
 use cel_core_proto::gen::cel::expr::{
@@ -72,7 +72,7 @@ impl CelConformanceService {
         let registry = Arc::new(registry);
         let mut env = Env::with_standard_library()
             .with_all_extensions()
-            .with_proto_registry(registry as Arc<dyn cel_core::eval::ProtoRegistry>);
+            .with_proto_registry(registry as Arc<dyn cel_core::ProtoRegistry>);
         if !strong {
             env = env.with_legacy_enums();
         }
@@ -250,8 +250,8 @@ impl ConformanceService for CelConformanceService {
 }
 
 /// Convert a proto FunctionTypeDecl to a cel_core FunctionDecl.
-fn convert_function_decl(proto: &FunctionTypeDecl) -> cel_core::types::FunctionDecl {
-    let mut func = cel_core::types::FunctionDecl::new(&proto.name);
+fn convert_function_decl(proto: &FunctionTypeDecl) -> cel_core::FunctionDecl {
+    let mut func = cel_core::FunctionDecl::new(&proto.name);
     for overload in &proto.overloads {
         let params: Vec<_> = overload.params.iter().map(cel_type_from_proto).collect();
         let result = overload
@@ -260,9 +260,9 @@ fn convert_function_decl(proto: &FunctionTypeDecl) -> cel_core::types::FunctionD
             .map(cel_type_from_proto)
             .unwrap_or(cel_core::CelType::Dyn);
         let mut ovl = if overload.is_instance_function {
-            cel_core::types::OverloadDecl::method(&overload.overload_id, params, result)
+            cel_core::OverloadDecl::method(&overload.overload_id, params, result)
         } else {
-            cel_core::types::OverloadDecl::function(&overload.overload_id, params, result)
+            cel_core::OverloadDecl::function(&overload.overload_id, params, result)
         };
         if !overload.type_params.is_empty() {
             ovl = ovl.with_type_params(overload.type_params.clone());
@@ -416,8 +416,8 @@ fn value_to_proto_value(value: &Value) -> ProtoValue {
             })
         }
         Value::Optional(opt) => match opt {
-            cel_core::eval::OptionalValue::None => ProtoValueKind::NullValue(0),
-            cel_core::eval::OptionalValue::Some(v) => {
+            cel_core::OptionalValue::None => ProtoValueKind::NullValue(0),
+            cel_core::OptionalValue::Some(v) => {
                 return value_to_proto_value(v);
             }
         },

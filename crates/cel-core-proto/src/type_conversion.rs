@@ -24,7 +24,7 @@ use crate::gen::cel::expr::r#type::{
     TypeKind as ProtoTypeKind, WellKnownType as ProtoWellKnownType,
 };
 use crate::gen::cel::expr::{Constant as ProtoConstant, Type as ProtoType};
-use cel_core::types::{CelType, CelValue};
+use cel_core::{CelType, CelValue};
 use std::sync::Arc;
 
 /// Convert a proto Type to a CelType.

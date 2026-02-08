@@ -539,10 +539,12 @@ impl fmt::Display for CelType {
 
 /// Context for tracking type variable bindings during unification.
 #[derive(Default)]
-pub struct UnificationContext {
+#[cfg(test)]
+struct UnificationContext {
     bindings: std::collections::HashMap<u64, CelType>,
 }
 
+#[cfg(test)]
 impl UnificationContext {
     /// Create a new unification context.
     pub fn new() -> Self {

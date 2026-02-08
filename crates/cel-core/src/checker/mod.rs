@@ -13,9 +13,10 @@ mod overload;
 mod scope;
 mod standard_library;
 
-pub use checker::{
+pub(crate) use checker::{
     check, check_with_abbreviations, check_with_type_resolver,
-    check_with_type_resolver_and_abbreviations, CheckResult, Checker, ReferenceInfo,
+    check_with_type_resolver_and_abbreviations,
 };
+pub use checker::{CheckResult, ReferenceInfo};
 pub use errors::{CheckError, CheckErrorKind};
-pub use standard_library::STANDARD_LIBRARY;
+pub(crate) use standard_library::STANDARD_LIBRARY;

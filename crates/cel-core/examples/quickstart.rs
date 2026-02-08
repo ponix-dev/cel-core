@@ -2,7 +2,7 @@
 //!
 //! Run with: cargo run -p cel-core --example quickstart
 
-use cel_core::eval::MapActivation;
+use cel_core::MapActivation;
 use cel_core::{CelType, Env, Value};
 
 fn main() {

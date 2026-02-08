@@ -10,12 +10,13 @@ use tower_lsp::{Client, LanguageServer, LspService};
 
 mod document;
 mod lsp;
-pub mod protovalidate;
-pub mod settings;
-pub mod types;
+pub(crate) mod protovalidate;
+pub(crate) mod settings;
+pub(crate) mod types;
 
 pub use document::{DocumentState, LineIndex, ProtoDocumentState};
 pub use lsp::{completion_at_position_proto, proto_to_diagnostics, to_diagnostics};
+pub use settings::{build_env_with_protos, load_proto_registry, load_settings};
 
 use document::{DocumentKind, DocumentStore};
 
@@ -27,7 +28,7 @@ pub struct Backend {
 }
 
 impl Backend {
-    pub fn new(client: Client) -> Self {
+    pub(crate) fn new(client: Client) -> Self {
         Self {
             client,
             documents: DocumentStore::new(),

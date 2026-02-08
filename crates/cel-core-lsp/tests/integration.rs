@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use cel_core::Env;
-use cel_core_lsp::settings::{build_env_with_protos, load_proto_registry, load_settings};
+use cel_core_lsp::{build_env_with_protos, load_proto_registry, load_settings};
 use cel_core_lsp::{
     completion_at_position_proto, proto_to_diagnostics, to_diagnostics, DocumentState, LineIndex,
     ProtoDocumentState,

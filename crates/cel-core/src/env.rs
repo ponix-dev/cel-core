@@ -225,7 +225,7 @@ impl std::error::Error for CompileError {}
 ///
 /// ```
 /// use cel_core::Env;
-/// use cel_core::types::CelType;
+/// use cel_core::CelType;
 ///
 /// let env = Env::with_standard_library()
 ///     .with_variable("x", CelType::Int);
@@ -305,7 +305,7 @@ impl Env {
     ///
     /// ```
     /// use cel_core::Env;
-    /// use cel_core::types::CelType;
+    /// use cel_core::CelType;
     ///
     /// let env = Env::with_standard_library()
     ///     .with_variable("x", CelType::Int)
@@ -568,7 +568,7 @@ impl Env {
     ///
     /// ```
     /// use cel_core::Env;
-    /// use cel_core::types::CelType;
+    /// use cel_core::CelType;
     ///
     /// let env = Env::with_standard_library()
     ///     .with_variable("x", CelType::Int);
@@ -630,7 +630,7 @@ impl Env {
     ///
     /// ```
     /// use cel_core::{Env, CelType};
-    /// use cel_core::eval::{Value, MapActivation, Activation};
+    /// use cel_core::{Value, MapActivation, Activation};
     ///
     /// let env = Env::with_standard_library()
     ///     .with_variable("x", CelType::Int);

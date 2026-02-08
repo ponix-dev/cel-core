@@ -2,7 +2,7 @@
 //!
 //! Run with: cargo run -p cel-core --example time
 
-use cel_core::eval::{Duration, MapActivation, Timestamp};
+use cel_core::{Duration, MapActivation, Timestamp};
 use cel_core::{CelType, Env};
 
 fn main() {
