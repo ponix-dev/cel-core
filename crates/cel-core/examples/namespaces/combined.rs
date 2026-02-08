@@ -4,8 +4,7 @@
 
 use std::sync::Arc;
 
-use cel_core::{Duration, MapActivation, Timestamp, Value};
-use cel_core::{Abbreviations, CelType, Env};
+use cel_core::{Abbreviations, CelType, Duration, Env, MapActivation, Timestamp, Value};
 use cel_core_proto::ProstProtoRegistry;
 
 fn main() {

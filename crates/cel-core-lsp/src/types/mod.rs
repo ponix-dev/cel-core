@@ -8,6 +8,5 @@
 mod builtins;
 mod function;
 
-pub use builtins::{get_builtin, is_builtin, BUILTINS};
-pub use cel_core::CelType;
-pub use function::{Arity, FunctionDef, FunctionKind};
+pub use builtins::{get_builtin, is_builtin};
+pub use function::FunctionDef;

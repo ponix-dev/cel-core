@@ -11,8 +11,7 @@ use prost_reflect::{
     ReflectMessage,
 };
 
-use cel_core::{MessageValue, ProtoRegistry, StructFieldValue};
-use cel_core::{EvalError, EvalErrorKind, EnumValue, MapKey, OptionalValue, Value, ValueMap};
+use cel_core::{EnumValue, EvalError, EvalErrorKind, MapKey, MessageValue, OptionalValue, ProtoRegistry, StructFieldValue, Value, ValueMap};
 
 use crate::message::ProstMessage;
 use crate::registry::ProstProtoRegistry;

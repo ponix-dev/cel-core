@@ -6,14 +6,12 @@
 use std::sync::Arc;
 
 use prost::Message;
-use prost_reflect::prost_types;
-use prost_reflect::DynamicMessage;
+use prost_reflect::{prost_types, DynamicMessage};
 
 use crate::{
     Binding, CheckResponse, ConformanceService, EvalResponse, FunctionTypeDecl, Issue, ParseResponse, TypeDecl,
 };
-use cel_core::{MapActivation, MapKey, Value, ValueMap};
-use cel_core::Env;
+use cel_core::{Env, MapActivation, MapKey, Value, ValueMap};
 use cel_core_proto::gen::cel::expr::value::Kind as ProtoValueKind;
 use cel_core_proto::gen::cel::expr::{
     expr_value, ErrorSet, ExprValue, ListValue, MapValue, ParsedExpr, Value as ProtoValue,

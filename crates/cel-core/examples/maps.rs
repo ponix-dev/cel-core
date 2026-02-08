@@ -2,8 +2,7 @@
 //!
 //! Run with: cargo run -p cel-core --example maps
 
-use cel_core::{MapActivation, Value};
-use cel_core::{CelType, Env};
+use cel_core::{CelType, Env, MapActivation, Value};
 
 fn main() {
     let env =

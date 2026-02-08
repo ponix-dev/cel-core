@@ -5,8 +5,7 @@
 
 use std::collections::HashMap;
 
-use cel_core::{CheckResult, ReferenceInfo};
-use cel_core::{CelType, SpannedExpr};
+use cel_core::{CelType, CheckResult, ReferenceInfo, SpannedExpr};
 
 use crate::error::ConversionError;
 use crate::gen::cel::expr::{CheckedExpr, ParsedExpr, Reference};

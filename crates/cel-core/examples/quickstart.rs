@@ -2,8 +2,7 @@
 //!
 //! Run with: cargo run -p cel-core --example quickstart
 
-use cel_core::MapActivation;
-use cel_core::{CelType, Env, Value};
+use cel_core::{CelType, Env, MapActivation, Value};
 
 fn main() {
     // 1. Create an environment with the standard library and declare variables

@@ -325,6 +325,7 @@ impl AstConverter {
     }
 
     /// Get the collected source info.
+    #[cfg(test)]
     pub fn into_source_info(self) -> SourceInfo {
         build_source_info(self.positions, self.line_offsets)
     }

@@ -8,9 +8,7 @@ use prost_reflect::{
     DescriptorPool, EnumDescriptor, ExtensionDescriptor, FieldDescriptor, Kind, MessageDescriptor,
 };
 
-use cel_core::ProtoTypeResolver as ProtoTypeResolverTrait;
-use cel_core::{proto_message_to_cel_type, ResolvedProtoType};
-use cel_core::CelType;
+use cel_core::{CelType, ProtoTypeResolver as ProtoTypeResolverTrait, ResolvedProtoType, proto_message_to_cel_type};
 
 /// Registry for protobuf type information backed by prost-reflect.
 ///

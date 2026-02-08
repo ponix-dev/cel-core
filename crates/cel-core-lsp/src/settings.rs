@@ -220,6 +220,7 @@ pub fn load_proto_registry(
 ///
 /// This creates an Env with the standard library and applies all settings.
 /// Note: Proto descriptor loading requires workspace_root; use `build_env_with_protos` instead.
+#[cfg(test)]
 pub fn build_env_from_settings(settings: &Settings) -> Env {
     build_env_from_settings_impl(settings, None)
 }
@@ -408,6 +409,7 @@ pub fn protovalidate_extension() -> Vec<FunctionDecl> {
 /// Build a protovalidate environment with standard + protovalidate extensions.
 ///
 /// This creates an Env suitable for validating protovalidate CEL expressions.
+#[cfg(test)]
 pub fn build_protovalidate_env() -> Env {
     Env::with_standard_library()
         .with_all_extensions()

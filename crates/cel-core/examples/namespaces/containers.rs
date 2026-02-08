@@ -4,8 +4,7 @@
 
 use std::sync::Arc;
 
-use cel_core::MapActivation;
-use cel_core::Env;
+use cel_core::{Env, MapActivation};
 use cel_core_proto::ProstProtoRegistry;
 
 fn main() {

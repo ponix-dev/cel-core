@@ -2,8 +2,7 @@
 //!
 //! Run with: cargo run -p cel-core --example lists
 
-use cel_core::{MapActivation, Value};
-use cel_core::{CelType, Env};
+use cel_core::{CelType, Env, MapActivation, Value};
 
 fn main() {
     let env = Env::with_standard_library().with_variable("numbers", CelType::list(CelType::Int));

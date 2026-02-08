@@ -10,10 +10,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::types::{BinaryOp, Expr, FunctionDecl, ListElement, MapEntry, SpannedExpr, StructField, UnaryOp, VariableDecl};
-use crate::types::{CelType, CelValue};
+use crate::types::{BinaryOp, CelType, CelValue, Expr, FunctionDecl, ListElement, MapEntry, ResolvedProtoType, SpannedExpr, StructField, UnaryOp, VariableDecl};
 use crate::eval::proto_registry::ProtoTypeResolver;
-use crate::types::ResolvedProtoType;
 use super::errors::CheckError;
 use super::overload::{finalize_type, resolve_overload, substitute_type};
 use super::scope::ScopeStack;

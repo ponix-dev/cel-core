@@ -2,8 +2,7 @@
 //!
 //! Run with: cargo run -p cel-core --example time
 
-use cel_core::{Duration, MapActivation, Timestamp};
-use cel_core::{CelType, Env};
+use cel_core::{CelType, Duration, Env, MapActivation, Timestamp};
 
 fn main() {
     println!("=== CEL Timestamp and Duration Examples ===\n");

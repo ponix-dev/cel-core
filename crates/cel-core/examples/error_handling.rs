@@ -2,8 +2,7 @@
 //!
 //! Run with: cargo run -p cel-core --example error_handling
 
-use cel_core::MapActivation;
-use cel_core::{CelType, Env, Value};
+use cel_core::{CelType, Env, MapActivation, Value};
 
 fn main() {
     let env = Env::with_standard_library()

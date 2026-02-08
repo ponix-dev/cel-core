@@ -2,8 +2,7 @@
 //!
 //! This module provides structured error types for reporting type check failures.
 
-use crate::types::Span;
-use crate::types::CelType;
+use crate::types::{CelType, Span};
 use std::fmt;
 
 /// A type checking error.
