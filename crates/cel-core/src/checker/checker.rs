@@ -10,13 +10,14 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::types::{BinaryOp, Expr, FunctionDecl, ListElement, MapEntry, SpannedExpr, StructField, UnaryOp, VariableDecl};
-use crate::types::{CelType, CelValue};
-use crate::eval::proto_registry::ProtoTypeResolver;
-use crate::types::ResolvedProtoType;
 use super::errors::CheckError;
 use super::overload::{finalize_type, resolve_overload, substitute_type};
 use super::scope::ScopeStack;
+use crate::eval::proto_registry::ProtoTypeResolver;
+use crate::types::{
+    BinaryOp, CelType, CelValue, Expr, FunctionDecl, ListElement, MapEntry, ResolvedProtoType,
+    SpannedExpr, StructField, UnaryOp, VariableDecl,
+};
 
 /// Reference information for a resolved identifier or function.
 #[derive(Debug, Clone)]
@@ -205,16 +206,22 @@ impl<'a> Checker<'a> {
 
             Expr::Unary { op, expr: inner } => self.check_unary(*op, inner, expr),
             Expr::Binary { op, left, right } => self.check_binary(*op, left, right, expr),
-            Expr::Ternary { cond, then_expr, else_expr } => {
-                self.check_ternary(cond, then_expr, else_expr, expr)
-            }
+            Expr::Ternary {
+                cond,
+                then_expr,
+                else_expr,
+            } => self.check_ternary(cond, then_expr, else_expr, expr),
 
-            Expr::Member { expr: obj, field, optional } => {
-                self.check_member(obj, field, *optional, expr)
-            }
-            Expr::Index { expr: obj, index, optional } => {
-                self.check_index(obj, index, *optional, expr)
-            }
+            Expr::Member {
+                expr: obj,
+                field,
+                optional,
+            } => self.check_member(obj, field, *optional, expr),
+            Expr::Index {
+                expr: obj,
+                index,
+                optional,
+            } => self.check_index(obj, index, *optional, expr),
             Expr::Call { expr: callee, args } => self.check_call(callee, args, expr),
             Expr::Struct { type_name, fields } => self.check_struct(type_name, fields, expr),
 
@@ -239,13 +246,13 @@ impl<'a> Checker<'a> {
                 expr,
             ),
 
-            Expr::MemberTestOnly { expr: obj, field } => {
-                self.check_member_test(obj, field, expr)
-            }
+            Expr::MemberTestOnly { expr: obj, field } => self.check_member_test(obj, field, expr),
 
-            Expr::Bind { var_name, init, body } => {
-                self.check_bind(var_name, init, body, expr)
-            }
+            Expr::Bind {
+                var_name,
+                init,
+                body,
+            } => self.check_bind(var_name, init, body, expr),
 
             Expr::Error => CelType::Error,
         };
@@ -294,7 +301,11 @@ impl<'a> Checker<'a> {
             return cel_type;
         }
 
-        self.report_error(CheckError::undeclared_reference(name, expr.span.clone(), expr.id));
+        self.report_error(CheckError::undeclared_reference(
+            name,
+            expr.span.clone(),
+            expr.id,
+        ));
         CelType::Error
     }
 
@@ -366,9 +377,9 @@ impl<'a> Checker<'a> {
         }
 
         // Verify all types are compatible with the best candidate
-        let all_compatible = types.iter().all(|t| {
-            best.is_assignable_from(t) || t.is_assignable_from(best)
-        });
+        let all_compatible = types
+            .iter()
+            .all(|t| best.is_assignable_from(t) || t.is_assignable_from(best));
 
         if all_compatible {
             best.clone()
@@ -432,7 +443,13 @@ impl<'a> Checker<'a> {
     }
 
     /// Check a member access expression.
-    fn check_member(&mut self, obj: &SpannedExpr, field: &str, optional: bool, expr: &SpannedExpr) -> CelType {
+    fn check_member(
+        &mut self,
+        obj: &SpannedExpr,
+        field: &str,
+        optional: bool,
+        expr: &SpannedExpr,
+    ) -> CelType {
         // First, try to resolve as qualified identifier (e.g., pkg.Type),
         // but only if the leftmost identifier doesn't resolve locally.
         // This ensures comprehension variables shadow qualified names.
@@ -508,7 +525,12 @@ impl<'a> Checker<'a> {
     }
 
     /// Wrap a type in optional if needed.
-    fn wrap_optional_if_needed(&self, result: CelType, optional: bool, was_optional: bool) -> CelType {
+    fn wrap_optional_if_needed(
+        &self,
+        result: CelType,
+        optional: bool,
+        was_optional: bool,
+    ) -> CelType {
         // Wrap in optional if using optional select (.?) or receiver was optional
         // But flatten nested optionals - CEL semantics say chaining doesn't create optional<optional<T>>
         if optional || was_optional {
@@ -522,7 +544,11 @@ impl<'a> Checker<'a> {
     }
 
     /// Try to resolve a qualified name as a proto type.
-    fn resolve_proto_qualified(&mut self, qualified_name: &str, expr: &SpannedExpr) -> Option<CelType> {
+    fn resolve_proto_qualified(
+        &mut self,
+        qualified_name: &str,
+        expr: &SpannedExpr,
+    ) -> Option<CelType> {
         let registry = self.type_resolver?;
 
         // Try to expand abbreviations first
@@ -532,12 +558,15 @@ impl<'a> Checker<'a> {
 
         match registry.resolve_qualified(&parts, self.container)? {
             ResolvedProtoType::EnumValue { enum_name, value } => {
-                self.set_reference(expr.id, ReferenceInfo {
-                    name: name_to_resolve.to_string(),
-                    overload_ids: vec![],
-                    value: Some(CelValue::Int(value as i64)),
-                    enum_type: Some(enum_name),
-                });
+                self.set_reference(
+                    expr.id,
+                    ReferenceInfo {
+                        name: name_to_resolve.to_string(),
+                        overload_ids: vec![],
+                        value: Some(CelValue::Int(value as i64)),
+                        enum_type: Some(enum_name),
+                    },
+                );
                 Some(CelType::Int)
             }
             ResolvedProtoType::Enum { name, cel_type } => {
@@ -555,7 +584,12 @@ impl<'a> Checker<'a> {
     ///
     /// Handles patterns like `TestAllTypes.NestedEnum(1)` and `GlobalEnum("BAZ")`.
     /// Enum constructors accept either an int or a string argument.
-    fn try_enum_constructor(&mut self, name: &str, args: &[SpannedExpr], expr: &SpannedExpr) -> Option<CelType> {
+    fn try_enum_constructor(
+        &mut self,
+        name: &str,
+        args: &[SpannedExpr],
+        expr: &SpannedExpr,
+    ) -> Option<CelType> {
         let registry = self.type_resolver?;
 
         // Try to expand abbreviations
@@ -565,7 +599,9 @@ impl<'a> Checker<'a> {
 
         // Check if this resolves to an enum type
         match registry.resolve_qualified(&parts, self.container)? {
-            ResolvedProtoType::Enum { name: enum_name, .. } => {
+            ResolvedProtoType::Enum {
+                name: enum_name, ..
+            } => {
                 // Check args: expect exactly 1 arg that is int or string
                 if args.len() != 1 {
                     return None;
@@ -575,12 +611,15 @@ impl<'a> Checker<'a> {
                 match &arg_type {
                     CelType::Int | CelType::String | CelType::Dyn => {
                         // Store reference so evaluator knows this is an enum constructor
-                        self.set_reference(expr.id, ReferenceInfo {
-                            name: enum_name.clone(),
-                            overload_ids: vec!["enum_constructor".to_string()],
-                            value: None,
-                            enum_type: Some(enum_name),
-                        });
+                        self.set_reference(
+                            expr.id,
+                            ReferenceInfo {
+                                name: enum_name.clone(),
+                                overload_ids: vec!["enum_constructor".to_string()],
+                                value: None,
+                                enum_type: Some(enum_name),
+                            },
+                        );
                         Some(CelType::Int)
                     }
                     _ => None,
@@ -604,7 +643,10 @@ impl<'a> Checker<'a> {
         // Check if it's an abbreviation
         if let Some(qualified) = abbrevs.get(first_segment) {
             // If the name has more segments, append them to the expanded name
-            if let Some(rest) = name.strip_prefix(first_segment).and_then(|s| s.strip_prefix('.')) {
+            if let Some(rest) = name
+                .strip_prefix(first_segment)
+                .and_then(|s| s.strip_prefix('.'))
+            {
                 Some(format!("{}.{}", qualified, rest))
             } else {
                 Some(qualified.clone())
@@ -632,7 +674,11 @@ impl<'a> Checker<'a> {
         match &obj.node {
             Expr::Ident(name) => Some(format!("{}.{}", name, field)),
             Expr::RootIdent(name) => Some(format!(".{}.{}", name, field)),
-            Expr::Member { expr: inner, field: inner_field, .. } => {
+            Expr::Member {
+                expr: inner,
+                field: inner_field,
+                ..
+            } => {
                 let prefix = self.try_qualified_name(inner, inner_field)?;
                 Some(format!("{}.{}", prefix, field))
             }
@@ -673,7 +719,13 @@ impl<'a> Checker<'a> {
     }
 
     /// Check an index access expression.
-    fn check_index(&mut self, obj: &SpannedExpr, index: &SpannedExpr, optional: bool, expr: &SpannedExpr) -> CelType {
+    fn check_index(
+        &mut self,
+        obj: &SpannedExpr,
+        index: &SpannedExpr,
+        optional: bool,
+        expr: &SpannedExpr,
+    ) -> CelType {
         let obj_type = self.check_expr(obj);
         let index_type = self.check_expr(index);
 
@@ -699,12 +751,22 @@ impl<'a> Checker<'a> {
     }
 
     /// Check a function call expression.
-    fn check_call(&mut self, callee: &SpannedExpr, args: &[SpannedExpr], expr: &SpannedExpr) -> CelType {
+    fn check_call(
+        &mut self,
+        callee: &SpannedExpr,
+        args: &[SpannedExpr],
+        expr: &SpannedExpr,
+    ) -> CelType {
         // Determine if this is a method call or standalone call
         match &callee.node {
-            Expr::Member { expr: receiver, field: func_name, .. } => {
+            Expr::Member {
+                expr: receiver,
+                field: func_name,
+                ..
+            } => {
                 // First, try to resolve as a namespaced function (e.g., math.greatest)
-                if let Some(qualified_name) = self.try_qualified_function_name(receiver, func_name) {
+                if let Some(qualified_name) = self.try_qualified_function_name(receiver, func_name)
+                {
                     if self.functions.contains_key(&qualified_name) {
                         let arg_types: Vec<_> = args.iter().map(|a| self.check_expr(a)).collect();
                         return self.resolve_function_call(&qualified_name, None, &arg_types, expr);
@@ -748,7 +810,11 @@ impl<'a> Checker<'a> {
     fn try_qualified_function_name(&self, obj: &SpannedExpr, field: &str) -> Option<String> {
         match &obj.node {
             Expr::Ident(name) => Some(format!("{}.{}", name, field)),
-            Expr::Member { expr: inner, field: inner_field, .. } => {
+            Expr::Member {
+                expr: inner,
+                field: inner_field,
+                ..
+            } => {
                 let prefix = self.try_qualified_function_name(inner, inner_field)?;
                 Some(format!("{}.{}", prefix, field))
             }
@@ -785,16 +851,20 @@ impl<'a> Checker<'a> {
         args: &[CelType],
         expr: &SpannedExpr,
     ) -> CelType {
-        if let Some(result) = resolve_overload(
-            func,
-            receiver.as_ref(),
-            args,
-            &mut self.substitutions,
-        ) {
-            self.set_reference(expr.id, ReferenceInfo::function(&func.name, result.overload_ids));
+        if let Some(result) =
+            resolve_overload(func, receiver.as_ref(), args, &mut self.substitutions)
+        {
+            self.set_reference(
+                expr.id,
+                ReferenceInfo::function(&func.name, result.overload_ids),
+            );
             result.result_type
         } else {
-            let all_args: Vec<_> = receiver.iter().cloned().chain(args.iter().cloned()).collect();
+            let all_args: Vec<_> = receiver
+                .iter()
+                .cloned()
+                .chain(args.iter().cloned())
+                .collect();
             self.report_error(CheckError::no_matching_overload(
                 &func.name,
                 all_args,
@@ -828,7 +898,8 @@ impl<'a> Checker<'a> {
 
             // Try to resolve to fully qualified name using proto registry
             let fq_name = if let Some(registry) = self.type_resolver {
-                registry.resolve_message_name(name_to_resolve, self.container)
+                registry
+                    .resolve_message_name(name_to_resolve, self.container)
                     .unwrap_or_else(|| name_to_resolve.clone())
             } else {
                 name_to_resolve.clone()
@@ -849,7 +920,9 @@ impl<'a> Checker<'a> {
         match &expr.node {
             Expr::Ident(name) => Some(name.clone()),
             Expr::RootIdent(name) => Some(format!(".{}", name)),
-            Expr::Member { expr: inner, field, .. } => {
+            Expr::Member {
+                expr: inner, field, ..
+            } => {
                 let prefix = self.get_type_name(inner)?;
                 Some(format!("{}.{}", prefix, field))
             }
@@ -1044,8 +1117,7 @@ pub fn check_with_type_resolver(
     container: &str,
     type_resolver: &dyn ProtoTypeResolver,
 ) -> CheckResult {
-    let checker = Checker::new(variables, functions, container)
-        .with_type_resolver(type_resolver);
+    let checker = Checker::new(variables, functions, container).with_type_resolver(type_resolver);
     checker.check(expr)
 }
 
@@ -1059,8 +1131,7 @@ pub fn check_with_abbreviations(
     container: &str,
     abbreviations: &HashMap<String, String>,
 ) -> CheckResult {
-    let checker = Checker::new(variables, functions, container)
-        .with_abbreviations(abbreviations);
+    let checker = Checker::new(variables, functions, container).with_abbreviations(abbreviations);
     checker.check(expr)
 }
 
@@ -1103,17 +1174,21 @@ fn type_specificity(ty: &CelType) -> u32 {
     match ty {
         CelType::Dyn | CelType::TypeVar(_) => 0,
         CelType::Null => 1,
-        CelType::Bool | CelType::Int | CelType::UInt | CelType::Double
-        | CelType::String | CelType::Bytes | CelType::Timestamp | CelType::Duration => 2,
+        CelType::Bool
+        | CelType::Int
+        | CelType::UInt
+        | CelType::Double
+        | CelType::String
+        | CelType::Bytes
+        | CelType::Timestamp
+        | CelType::Duration => 2,
         CelType::Message(_) | CelType::Enum(_) => 2,
         CelType::List(elem) => 2 + type_specificity(elem),
         CelType::Map(key, val) => 2 + type_specificity(key) + type_specificity(val),
         CelType::Optional(inner) => 2 + type_specificity(inner),
         CelType::Wrapper(inner) => 3 + type_specificity(inner), // Wrappers get extra specificity
         CelType::Type(inner) => 2 + type_specificity(inner),
-        CelType::Abstract { params, .. } => {
-            2 + params.iter().map(type_specificity).sum::<u32>()
-        }
+        CelType::Abstract { params, .. } => 2 + params.iter().map(type_specificity).sum::<u32>(),
         _ => 1,
     }
 }
@@ -1142,9 +1217,9 @@ fn binary_op_to_function(op: BinaryOp) -> &'static str {
 mod tests {
     use std::any::Any;
 
-    use super::*;
     use super::super::errors::CheckErrorKind;
     use super::super::standard_library::STANDARD_LIBRARY;
+    use super::*;
     use crate::eval::proto_registry::ProtoTypeResolver;
     use crate::parser::parse;
     use crate::types::ResolvedProtoType;
@@ -1166,10 +1241,19 @@ mod tests {
         vars.insert("double".to_string(), CelType::type_of(CelType::Double));
         vars.insert("string".to_string(), CelType::type_of(CelType::String));
         vars.insert("bytes".to_string(), CelType::type_of(CelType::Bytes));
-        vars.insert("list".to_string(), CelType::type_of(CelType::list(CelType::Dyn)));
-        vars.insert("map".to_string(), CelType::type_of(CelType::map(CelType::Dyn, CelType::Dyn)));
+        vars.insert(
+            "list".to_string(),
+            CelType::type_of(CelType::list(CelType::Dyn)),
+        );
+        vars.insert(
+            "map".to_string(),
+            CelType::type_of(CelType::map(CelType::Dyn, CelType::Dyn)),
+        );
         vars.insert("null_type".to_string(), CelType::type_of(CelType::Null));
-        vars.insert("type".to_string(), CelType::type_of(CelType::type_of(CelType::Dyn)));
+        vars.insert(
+            "type".to_string(),
+            CelType::type_of(CelType::type_of(CelType::Dyn)),
+        );
         vars.insert("dyn".to_string(), CelType::type_of(CelType::Dyn));
         vars
     }
@@ -1214,14 +1298,17 @@ mod tests {
         }
 
         fn with_field(mut self, message: &str, field: &str, cel_type: CelType) -> Self {
-            self.fields.insert((message.to_string(), field.to_string()), cel_type);
+            self.fields
+                .insert((message.to_string(), field.to_string()), cel_type);
             self
         }
     }
 
     impl ProtoTypeResolver for MockProtoResolver {
         fn get_field_type(&self, message: &str, field: &str) -> Option<CelType> {
-            self.fields.get(&(message.to_string(), field.to_string())).cloned()
+            self.fields
+                .get(&(message.to_string(), field.to_string()))
+                .cloned()
         }
 
         fn has_message(&self, message: &str) -> bool {
@@ -1236,7 +1323,11 @@ mod tests {
             None
         }
 
-        fn resolve_qualified(&self, _parts: &[&str], _container: &str) -> Option<ResolvedProtoType> {
+        fn resolve_qualified(
+            &self,
+            _parts: &[&str],
+            _container: &str,
+        ) -> Option<ResolvedProtoType> {
             None
         }
 
@@ -1305,7 +1396,9 @@ mod tests {
         let result = check_expr("[1, 2, 3]");
         assert!(result.is_ok());
         // Find the list type
-        let list_types: Vec<_> = result.type_map.values()
+        let list_types: Vec<_> = result
+            .type_map
+            .values()
             .filter(|t| matches!(t, CelType::List(_)))
             .collect();
         assert_eq!(list_types.len(), 1);
@@ -1317,7 +1410,9 @@ mod tests {
         let result = check_expr("{\"a\": 1, \"b\": 2}");
         assert!(result.is_ok());
         // Find the map type
-        let map_types: Vec<_> = result.type_map.values()
+        let map_types: Vec<_> = result
+            .type_map
+            .values()
             .filter(|t| matches!(t, CelType::Map(_, _)))
             .collect();
         assert_eq!(map_types.len(), 1);
@@ -1329,7 +1424,9 @@ mod tests {
         let result = check_expr_with_var("x > 0", "x", CelType::Int);
         assert!(result.is_ok());
         // The result type should be Bool
-        let bool_types: Vec<_> = result.type_map.values()
+        let bool_types: Vec<_> = result
+            .type_map
+            .values()
             .filter(|t| matches!(t, CelType::Bool))
             .collect();
         assert!(!bool_types.is_empty());
@@ -1340,7 +1437,9 @@ mod tests {
         let result = check_expr("\"hello\".contains(\"lo\")");
         assert!(result.is_ok());
         // The result should be Bool
-        let bool_types: Vec<_> = result.type_map.values()
+        let bool_types: Vec<_> = result
+            .type_map
+            .values()
             .filter(|t| matches!(t, CelType::Bool))
             .collect();
         assert!(!bool_types.is_empty());
@@ -1350,7 +1449,9 @@ mod tests {
     fn test_size_method() {
         let result = check_expr("\"hello\".size()");
         assert!(result.is_ok());
-        let int_types: Vec<_> = result.type_map.values()
+        let int_types: Vec<_> = result
+            .type_map
+            .values()
             .filter(|t| matches!(t, CelType::Int))
             .collect();
         assert!(!int_types.is_empty());
@@ -1377,7 +1478,9 @@ mod tests {
         let result = check_expr("[]");
         assert!(result.is_ok());
         // Empty list should have a type variable element type that gets finalized to Dyn
-        let list_types: Vec<_> = result.type_map.values()
+        let list_types: Vec<_> = result
+            .type_map
+            .values()
             .filter(|t| matches!(t, CelType::List(_)))
             .collect();
         assert_eq!(list_types.len(), 1);
@@ -1398,9 +1501,10 @@ mod tests {
 
     #[test]
     fn test_has_undefined_field() {
-        let resolver = MockProtoResolver::new()
-            .with_message("Msg")
-            .with_field("Msg", "name", CelType::String);
+        let resolver =
+            MockProtoResolver::new()
+                .with_message("Msg")
+                .with_field("Msg", "name", CelType::String);
         let result = check_expr_with_var_and_resolver(
             "has(x.nonexistent)",
             "x",
@@ -1416,9 +1520,10 @@ mod tests {
 
     #[test]
     fn test_has_valid_field() {
-        let resolver = MockProtoResolver::new()
-            .with_message("Msg")
-            .with_field("Msg", "name", CelType::String);
+        let resolver =
+            MockProtoResolver::new()
+                .with_message("Msg")
+                .with_field("Msg", "name", CelType::String);
         let result = check_expr_with_var_and_resolver(
             "has(x.name)",
             "x",
@@ -1427,7 +1532,9 @@ mod tests {
         );
         assert!(result.is_ok());
         // has() always returns Bool
-        let bool_types: Vec<_> = result.type_map.values()
+        let bool_types: Vec<_> = result
+            .type_map
+            .values()
             .filter(|t| matches!(t, CelType::Bool))
             .collect();
         assert!(!bool_types.is_empty());
@@ -1445,11 +1552,7 @@ mod tests {
 
     #[test]
     fn test_has_dyn_field() {
-        let result = check_expr_with_var(
-            "has(d.anything)",
-            "d",
-            CelType::Dyn,
-        );
+        let result = check_expr_with_var("has(d.anything)", "d", CelType::Dyn);
         assert!(result.is_ok());
     }
 }

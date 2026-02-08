@@ -6,7 +6,6 @@ mod parser;
 
 use crate::types::{Span, SpannedExpr};
 
-pub use lexer::{lex, LexError, SpannedToken, Token};
 pub use macros::{
     ArgCount, Macro, MacroContext, MacroExpander, MacroExpansion, MacroRegistry, MacroStyle,
 };

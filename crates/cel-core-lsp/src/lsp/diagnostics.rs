@@ -27,10 +27,7 @@ fn parse_errors_to_diagnostics(errors: &[ParseError], line_index: &LineIndex) ->
 }
 
 /// Convert check errors to LSP diagnostics.
-fn check_errors_to_diagnostics(
-    errors: &[CheckError],
-    line_index: &LineIndex,
-) -> Vec<Diagnostic> {
+fn check_errors_to_diagnostics(errors: &[CheckError], line_index: &LineIndex) -> Vec<Diagnostic> {
     errors
         .iter()
         .map(|error| {

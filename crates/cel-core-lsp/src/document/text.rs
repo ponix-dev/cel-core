@@ -44,7 +44,7 @@ impl LineIndex {
     pub fn offset_to_position(&self, offset: usize) -> Position {
         // Binary search to find the line
         let line = match self.line_starts.binary_search(&offset) {
-            Ok(line) => line,           // Exact match (start of line)
+            Ok(line) => line,                    // Exact match (start of line)
             Err(line) => line.saturating_sub(1), // In the middle of a line
         };
 

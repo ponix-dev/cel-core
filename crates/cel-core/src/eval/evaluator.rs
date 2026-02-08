@@ -13,11 +13,11 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use super::{
-    Activation, EvalError, FunctionRegistry, HierarchicalActivation, MapKey,
-    OptionalValue, Value, ValueMap,
-};
 use super::proto_registry::ProtoRegistry;
+use super::{
+    Activation, EvalError, FunctionRegistry, HierarchicalActivation, MapKey, OptionalValue, Value,
+    ValueMap,
+};
 use crate::checker::ReferenceInfo;
 use crate::types::{Expr, SpannedExpr};
 
@@ -424,7 +424,13 @@ impl<'a> Evaluator<'a> {
         }
     }
 
-    fn eval_member(&self, receiver: &SpannedExpr, field: &str, optional: bool, member_expr: &SpannedExpr) -> Value {
+    fn eval_member(
+        &self,
+        receiver: &SpannedExpr,
+        field: &str,
+        optional: bool,
+        member_expr: &SpannedExpr,
+    ) -> Value {
         // First, check reference_map for a pre-resolved qualified name (from checker)
         if let Some(ref_map) = self.reference_map {
             if let Some(ref_info) = ref_map.get(&member_expr.id) {
@@ -466,7 +472,9 @@ impl<'a> Evaluator<'a> {
         // Handle optional select
         if optional {
             match &value {
-                Value::Optional(OptionalValue::None) => return Value::Optional(OptionalValue::None),
+                Value::Optional(OptionalValue::None) => {
+                    return Value::Optional(OptionalValue::None)
+                }
                 Value::Optional(OptionalValue::Some(inner)) => {
                     return self.access_field(inner, field, true);
                 }
@@ -550,7 +558,9 @@ impl<'a> Evaluator<'a> {
         // Handle optional index
         if optional {
             match &value {
-                Value::Optional(OptionalValue::None) => return Value::Optional(OptionalValue::None),
+                Value::Optional(OptionalValue::None) => {
+                    return Value::Optional(OptionalValue::None)
+                }
                 Value::Optional(OptionalValue::Some(inner)) => {
                     return self.access_index(inner, &index_val, true);
                 }
@@ -578,11 +588,7 @@ impl<'a> Evaluator<'a> {
 
                 // Handle negative indices
                 let len = list.len() as i64;
-                let actual_idx = if idx < 0 {
-                    idx + len
-                } else {
-                    idx
-                };
+                let actual_idx = if idx < 0 { idx + len } else { idx };
 
                 if actual_idx < 0 || actual_idx >= len {
                     if optional {
@@ -711,19 +717,17 @@ impl<'a> Evaluator<'a> {
                 }
             }
             Value::Optional(opt) => match opt {
-                OptionalValue::Some(inner) => {
-                    match inner.as_ref() {
-                        Value::List(_) | Value::Map(_) => {
-                            let result = self.access_index(inner, index, false);
-                            if result.is_error() {
-                                Value::optional_none()
-                            } else {
-                                Value::optional_some(result)
-                            }
+                OptionalValue::Some(inner) => match inner.as_ref() {
+                    Value::List(_) | Value::Map(_) => {
+                        let result = self.access_index(inner, index, false);
+                        if result.is_error() {
+                            Value::optional_none()
+                        } else {
+                            Value::optional_some(result)
                         }
-                        _ => self.access_index(inner, index, false),
                     }
-                }
+                    _ => self.access_index(inner, index, false),
+                },
                 OptionalValue::None => Value::optional_none(),
             },
             _ => {
@@ -739,11 +743,20 @@ impl<'a> Evaluator<'a> {
         }
     }
 
-    fn eval_call(&self, expr: &SpannedExpr, args: &[SpannedExpr], call_expr: &SpannedExpr) -> Value {
+    fn eval_call(
+        &self,
+        expr: &SpannedExpr,
+        args: &[SpannedExpr],
+        call_expr: &SpannedExpr,
+    ) -> Value {
         // Check reference_map for enum constructor calls
         if let Some(ref_map) = self.reference_map {
             if let Some(ref_info) = ref_map.get(&call_expr.id) {
-                if ref_info.overload_ids.iter().any(|id| id == "enum_constructor") {
+                if ref_info
+                    .overload_ids
+                    .iter()
+                    .any(|id| id == "enum_constructor")
+                {
                     if let Some(ref enum_type) = ref_info.enum_type {
                         return self.eval_enum_constructor(enum_type, args);
                     }
@@ -777,7 +790,8 @@ impl<'a> Evaluator<'a> {
         let (func_name, receiver, is_member) = self.resolve_call_target(expr);
 
         // Evaluate arguments
-        let mut arg_values = Vec::with_capacity(args.len() + if receiver.is_some() { 1 } else { 0 });
+        let mut arg_values =
+            Vec::with_capacity(args.len() + if receiver.is_some() { 1 } else { 0 });
 
         if let Some(recv) = receiver {
             let recv_val = self.eval_expr(recv);
@@ -863,7 +877,9 @@ impl<'a> Evaluator<'a> {
                         )))
                     }
                 } else {
-                    Value::error(EvalError::internal("no type registry available for enum lookup"))
+                    Value::error(EvalError::internal(
+                        "no type registry available for enum lookup",
+                    ))
                 }
             }
             _ => Value::error(EvalError::no_matching_overload("enum constructor")),
@@ -931,8 +947,8 @@ impl<'a> Evaluator<'a> {
             Value::List(list) => {
                 for (i, elem) in list.iter().enumerate() {
                     // Create nested activation with iteration variables
-                    let mut iter_activation =
-                        HierarchicalActivation::new(self.activation).with_binding(accu_var, accu.clone());
+                    let mut iter_activation = HierarchicalActivation::new(self.activation)
+                        .with_binding(accu_var, accu.clone());
 
                     if !iter_var.is_empty() {
                         if !iter_var2.is_empty() {
@@ -969,8 +985,8 @@ impl<'a> Evaluator<'a> {
             }
             Value::Map(map) => {
                 for (key, val) in map.iter() {
-                    let mut iter_activation =
-                        HierarchicalActivation::new(self.activation).with_binding(accu_var, accu.clone());
+                    let mut iter_activation = HierarchicalActivation::new(self.activation)
+                        .with_binding(accu_var, accu.clone());
 
                     if !iter_var.is_empty() {
                         iter_activation.insert(iter_var, key.to_value());
@@ -1120,7 +1136,6 @@ impl<'a> Evaluator<'a> {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1128,7 +1143,11 @@ mod tests {
 
     fn eval_expr(source: &str) -> Value {
         let result = parse(source);
-        assert!(result.errors.is_empty(), "parse errors: {:?}", result.errors);
+        assert!(
+            result.errors.is_empty(),
+            "parse errors: {:?}",
+            result.errors
+        );
         let ast = result.ast.unwrap();
 
         let activation = super::super::EmptyActivation;
@@ -1139,7 +1158,11 @@ mod tests {
 
     fn eval_expr_with_vars(source: &str, vars: &[(&str, Value)]) -> Value {
         let result = parse(source);
-        assert!(result.errors.is_empty(), "parse errors: {:?}", result.errors);
+        assert!(
+            result.errors.is_empty(),
+            "parse errors: {:?}",
+            result.errors
+        );
         let ast = result.ast.unwrap();
 
         let mut activation = super::super::MapActivation::new();
@@ -1209,14 +1232,8 @@ mod tests {
     fn test_string_operations() {
         assert_eq!(eval_expr("\"hello\" + \" world\""), "hello world".into());
         assert_eq!(eval_expr("size(\"hello\")"), Value::Int(5));
-        assert_eq!(
-            eval_expr("\"hello\".contains(\"ell\")"),
-            Value::Bool(true)
-        );
-        assert_eq!(
-            eval_expr("\"hello\".startsWith(\"he\")"),
-            Value::Bool(true)
-        );
+        assert_eq!(eval_expr("\"hello\".contains(\"ell\")"), Value::Bool(true));
+        assert_eq!(eval_expr("\"hello\".startsWith(\"he\")"), Value::Bool(true));
         assert_eq!(eval_expr("\"hello\".endsWith(\"lo\")"), Value::Bool(true));
     }
 
@@ -1247,7 +1264,10 @@ mod tests {
             Value::Int(42)
         );
         assert_eq!(
-            eval_expr_with_vars("x && y", &[("x", Value::Bool(true)), ("y", Value::Bool(false))]),
+            eval_expr_with_vars(
+                "x && y",
+                &[("x", Value::Bool(true)), ("y", Value::Bool(false))]
+            ),
             Value::Bool(false)
         );
     }

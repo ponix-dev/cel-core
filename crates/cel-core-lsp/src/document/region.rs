@@ -264,7 +264,7 @@ fn build_protovalidate_env_typed(
         .with_variable("now", CelType::Timestamp);
 
     if let Some(registry) = proto_registry {
-        env = env.with_proto_registry(Arc::clone(registry) as Arc<dyn cel_core::eval::ProtoRegistry>);
+        env = env.with_proto_registry(Arc::clone(registry) as Arc<dyn cel_core::ProtoRegistry>);
     }
 
     env

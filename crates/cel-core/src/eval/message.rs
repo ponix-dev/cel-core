@@ -45,7 +45,7 @@ pub trait MessageValue: fmt::Debug + Send + Sync {
     /// Used by optionals extension for `hasValue()` / `or()` semantics.
     /// Returns `None` if the implementation cannot determine default status.
     fn is_default(&self) -> Option<bool> {
-        None  // Unknown - implementations should override
+        None // Unknown - implementations should override
     }
 }
 

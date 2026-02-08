@@ -40,11 +40,11 @@
 
 mod ast;
 mod env;
-pub mod unparser;
+mod unparser;
 
 // Core modules
-pub mod checker;
-pub mod eval;
+mod checker;
+mod eval;
 pub mod ext;
 pub mod parser;
 pub mod types;
@@ -54,20 +54,24 @@ pub use env::{AbbrevError, Abbreviations, CompileError, Env};
 pub use unparser::ast_to_string;
 
 // Re-export from checker module
-pub use checker::{
-    check, CheckError, CheckErrorKind, CheckResult, ReferenceInfo, STANDARD_LIBRARY,
-};
+pub use checker::{CheckError, CheckErrorKind, CheckResult, ReferenceInfo};
 
 // Re-export from eval module
+pub use eval::time;
 pub use eval::{
-    Activation, EmptyActivation, EvalError, EvalErrorKind, Evaluator, FunctionRegistry,
-    HierarchicalActivation, MapActivation, Program, Value, ValueError,
+    Activation, EmptyActivation, EvalError, EvalErrorKind, HierarchicalActivation, MapActivation,
+    Program, Value, ValueError,
 };
+pub use eval::{
+    Duration, EnumValue, MapKey, OptionalValue, SharedActivation, Timestamp, TypeValue, ValueMap,
+};
+pub use eval::{MessageValue, ProtoRegistry, ProtoTypeResolver, StructFieldValue};
 
 // Re-export from parser module
-pub use parser::{parse, ParseError, ParseOptions, ParseResult};
+pub use parser::{parse, ParseError, ParseResult};
 
 // Re-export from types module
+pub use types::proto::{proto_message_to_cel_type, ResolvedProtoType};
 pub use types::{
     BinaryOp, CelType, CelValue, Expr, FunctionDecl, ListElement, MapEntry, OverloadDecl, Span,
     Spanned, SpannedExpr, StructField, UnaryOp, VariableDecl,

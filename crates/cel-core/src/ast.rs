@@ -160,8 +160,7 @@ mod tests {
 
     #[test]
     fn test_ast_is_checked() {
-        let env = Env::with_standard_library()
-            .with_variable("x", CelType::Int);
+        let env = Env::with_standard_library().with_variable("x", CelType::Int);
 
         let ast = env.compile("x + 1").unwrap();
         assert!(ast.is_checked());
@@ -172,8 +171,7 @@ mod tests {
 
     #[test]
     fn test_ast_result_type() {
-        let env = Env::with_standard_library()
-            .with_variable("x", CelType::Int);
+        let env = Env::with_standard_library().with_variable("x", CelType::Int);
 
         let ast = env.compile("x + 1").unwrap();
         assert_eq!(ast.result_type(), Some(&CelType::Int));
@@ -184,8 +182,7 @@ mod tests {
 
     #[test]
     fn test_ast_to_cel_string() {
-        let env = Env::with_standard_library()
-            .with_variable("x", CelType::Int);
+        let env = Env::with_standard_library().with_variable("x", CelType::Int);
 
         let ast = env.compile("x + 1").unwrap();
         assert_eq!(ast.to_cel_string(), "x + 1");

@@ -26,7 +26,8 @@ impl Scope {
     /// Add a variable to this scope.
     pub fn add_variable(&mut self, name: impl Into<String>, cel_type: CelType) {
         let name = name.into();
-        self.variables.insert(name.clone(), VariableDecl::new(name, cel_type));
+        self.variables
+            .insert(name.clone(), VariableDecl::new(name, cel_type));
     }
 
     /// Add a variable declaration to this scope.
@@ -84,12 +85,16 @@ impl ScopeStack {
     /// Get the current (innermost) scope.
     #[allow(dead_code)]
     pub fn current(&self) -> &Scope {
-        self.scopes.last().expect("scope stack should never be empty")
+        self.scopes
+            .last()
+            .expect("scope stack should never be empty")
     }
 
     /// Get the current (innermost) scope mutably.
     pub fn current_mut(&mut self) -> &mut Scope {
-        self.scopes.last_mut().expect("scope stack should never be empty")
+        self.scopes
+            .last_mut()
+            .expect("scope stack should never be empty")
     }
 
     /// Add a variable to the current scope.

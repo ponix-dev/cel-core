@@ -38,7 +38,11 @@ impl ProtovalidateContext {
     /// Returns the appropriate type if we can determine it, otherwise Dyn.
     pub fn this_type(&self) -> CelType {
         match self {
-            ProtovalidateContext::Field { message_type, field_name: _, field_type } => {
+            ProtovalidateContext::Field {
+                message_type,
+                field_name: _,
+                field_type,
+            } => {
                 // If we have a field type, try to use it
                 if let Some(ft) = field_type {
                     proto_field_type_to_cel(ft)
@@ -78,7 +82,13 @@ pub(crate) fn proto_field_type_to_cel(proto_type: &str) -> CelType {
             } else if other.starts_with("map<") {
                 // Map types are complex, fall back to dyn for now
                 CelType::map(CelType::Dyn, CelType::Dyn)
-            } else if other.contains('.') || other.chars().next().map(|c| c.is_uppercase()).unwrap_or(false) {
+            } else if other.contains('.')
+                || other
+                    .chars()
+                    .next()
+                    .map(|c| c.is_uppercase())
+                    .unwrap_or(false)
+            {
                 // Likely a message type
                 CelType::message(other)
             } else {
@@ -147,9 +157,8 @@ enum ContextType {
 
 /// Pattern for finding expression field within a CEL option block.
 /// Note: Pattern does NOT include the opening quote - we find it separately.
-static EXPRESSION_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"expression\s*:\s*"#).unwrap()
-});
+static EXPRESSION_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"expression\s*:\s*"#).unwrap());
 
 /// Extract all CEL regions from a proto file.
 pub fn extract_cel_regions(source: &str) -> Vec<ExtractedRegion> {
@@ -205,7 +214,10 @@ pub fn extract_cel_regions(source: &str) -> Vec<ExtractedRegion> {
 }
 
 /// Try to extract the field context (message type, field name, field type) from surrounding proto.
-fn extract_field_context(source: &str, annotation_start: usize) -> (Option<String>, Option<String>, Option<String>) {
+fn extract_field_context(
+    source: &str,
+    annotation_start: usize,
+) -> (Option<String>, Option<String>, Option<String>) {
     // Look backwards for field definition: "type name = number"
     // This is a simplified heuristic - a full parser would be more accurate.
     let before = &source[..annotation_start];
@@ -215,9 +227,8 @@ fn extract_field_context(source: &str, annotation_start: usize) -> (Option<Strin
     let line = &source[line_start..annotation_start];
 
     // Try to match a field pattern: type name = number
-    static FIELD_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"^\s*(?:repeated\s+)?(\w[\w.]*)\s+(\w+)\s*=\s*\d+").unwrap()
-    });
+    static FIELD_PATTERN: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"^\s*(?:repeated\s+)?(\w[\w.]*)\s+(\w+)\s*=\s*\d+").unwrap());
 
     let (field_type, field_name) = if let Some(caps) = FIELD_PATTERN.captures(line.trim()) {
         (
@@ -240,9 +251,8 @@ fn extract_message_context(source: &str, position: usize) -> Option<String> {
     // This is a simplified heuristic.
     let before = &source[..position];
 
-    static MESSAGE_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"message\s+(\w+)\s*\{").unwrap()
-    });
+    static MESSAGE_PATTERN: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"message\s+(\w+)\s*\{").unwrap());
 
     // Find all message declarations before this position and track nesting
     let mut messages: Vec<(usize, String)> = Vec::new();
@@ -459,7 +469,10 @@ message User {
         assert_eq!(regions.len(), 1);
         assert_eq!(regions[0].source, "this.isEmail()");
         // Should be field context
-        assert!(matches!(regions[0].context, ProtovalidateContext::Field { .. }));
+        assert!(matches!(
+            regions[0].context,
+            ProtovalidateContext::Field { .. }
+        ));
     }
 
     #[test]
@@ -591,7 +604,11 @@ message User {
         assert_eq!(regions.len(), 1);
 
         match &regions[0].context {
-            ProtovalidateContext::Field { message_type, field_name, field_type } => {
+            ProtovalidateContext::Field {
+                message_type,
+                field_name,
+                field_type,
+            } => {
                 assert_eq!(message_type.as_deref(), Some("User"));
                 assert_eq!(field_name.as_deref(), Some("email"));
                 assert_eq!(field_type.as_deref(), Some("string"));

@@ -15,8 +15,8 @@ use chrono_tz::Tz;
 /// - "2009-02-13T23:31:30+01:00"
 pub fn parse_timestamp(s: &str) -> Result<Timestamp, String> {
     // Try parsing with chrono's RFC 3339 parser
-    let dt = DateTime::parse_from_rfc3339(s)
-        .map_err(|e| format!("invalid timestamp format: {}", e))?;
+    let dt =
+        DateTime::parse_from_rfc3339(s).map_err(|e| format!("invalid timestamp format: {}", e))?;
 
     let ts = Timestamp {
         seconds: dt.timestamp(),
@@ -69,7 +69,10 @@ pub fn parse_duration(s: &str) -> Result<Duration, String> {
             .unwrap_or(remaining.len());
 
         if num_end == 0 {
-            return Err(format!("invalid duration format: expected number at '{}'", remaining));
+            return Err(format!(
+                "invalid duration format: expected number at '{}'",
+                remaining
+            ));
         }
 
         let num_str = &remaining[..num_end];
@@ -81,7 +84,10 @@ pub fn parse_duration(s: &str) -> Result<Duration, String> {
             .unwrap_or(remaining.len());
 
         if unit_end == 0 {
-            return Err(format!("invalid duration: missing unit after '{}'", num_str));
+            return Err(format!(
+                "invalid duration: missing unit after '{}'",
+                num_str
+            ));
         }
 
         let unit = &remaining[..unit_end];
@@ -89,12 +95,12 @@ pub fn parse_duration(s: &str) -> Result<Duration, String> {
 
         // Convert to nanoseconds based on unit
         let multiplier: i128 = match unit {
-            "h" => 3_600_000_000_000,      // hours
-            "m" => 60_000_000_000,          // minutes
-            "s" => 1_000_000_000,           // seconds
-            "ms" => 1_000_000,              // milliseconds
-            "us" | "\u{00b5}s" => 1_000,    // microseconds (supports μs)
-            "ns" => 1,                       // nanoseconds
+            "h" => 3_600_000_000_000,    // hours
+            "m" => 60_000_000_000,       // minutes
+            "s" => 1_000_000_000,        // seconds
+            "ms" => 1_000_000,           // milliseconds
+            "us" | "\u{00b5}s" => 1_000, // microseconds (supports μs)
+            "ns" => 1,                   // nanoseconds
             _ => return Err(format!("invalid duration unit: '{}'", unit)),
         };
 
@@ -253,9 +259,7 @@ impl TimezoneInfo {
                 let offset = local.offset().fix();
                 Some(local.with_timezone(&offset))
             }
-            TimezoneInfo::Fixed(offset) => {
-                Some(utc_dt.with_timezone(offset))
-            }
+            TimezoneInfo::Fixed(offset) => Some(utc_dt.with_timezone(offset)),
         }
     }
 }

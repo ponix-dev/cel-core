@@ -1,6 +1,9 @@
 //! Semantic tokens for CEL syntax highlighting.
 
-use cel_core::{types::{BinaryOp, Expr, UnaryOp}, SpannedExpr};
+use cel_core::{
+    types::{BinaryOp, Expr, UnaryOp},
+    SpannedExpr,
+};
 use tower_lsp::lsp_types::{
     SemanticToken, SemanticTokenModifier, SemanticTokenType, SemanticTokensLegend,
 };
@@ -214,7 +217,9 @@ impl<'a> TokenCollector<'a> {
 
                 self.visit_expr(else_expr);
             }
-            Expr::Member { expr: inner, field, .. } => {
+            Expr::Member {
+                expr: inner, field, ..
+            } => {
                 self.visit_expr(inner);
 
                 // Dot
@@ -227,7 +232,9 @@ impl<'a> TokenCollector<'a> {
                 let field_start = expr.span.end - field.len();
                 self.push(field_start, expr.span.end, token_types::VARIABLE, 0);
             }
-            Expr::Index { expr: inner, index, .. } => {
+            Expr::Index {
+                expr: inner, index, ..
+            } => {
                 self.visit_expr(inner);
 
                 // Opening bracket - find it after the inner expression
@@ -255,7 +262,9 @@ impl<'a> TokenCollector<'a> {
                             modifiers,
                         );
                     }
-                    Expr::Member { expr: obj, field, .. } => {
+                    Expr::Member {
+                        expr: obj, field, ..
+                    } => {
                         self.visit_expr(obj);
 
                         // Dot
@@ -315,12 +324,7 @@ impl<'a> TokenCollector<'a> {
                         // Field name is just before the colon (with possible whitespace)
                         let field_name_end = colon_pos;
                         let field_name_start = field_name_end.saturating_sub(field.name.len());
-                        self.push(
-                            field_name_start,
-                            field_name_end,
-                            token_types::VARIABLE,
-                            0,
-                        );
+                        self.push(field_name_start, field_name_end, token_types::VARIABLE, 0);
                         // Colon
                         self.push_punctuation(colon_pos, 1);
                     }
@@ -384,7 +388,12 @@ impl<'a> TokenCollector<'a> {
 
                 // Field name
                 let field_start = expr.span.end - 1 - field.len();
-                self.push(field_start, field_start + field.len(), token_types::VARIABLE, 0);
+                self.push(
+                    field_start,
+                    field_start + field.len(),
+                    token_types::VARIABLE,
+                    0,
+                );
 
                 // Closing parenthesis
                 self.push_punctuation(expr.span.end - 1, 1);
@@ -610,7 +619,10 @@ mod tests {
         // Should have: function(has), (, variable(msg), ., variable(field), )
         assert_eq!(tokens.len(), 6);
         assert_eq!(tokens[0].token_type, token_types::FUNCTION); // has
-        assert_eq!(tokens[0].token_modifiers_bitset, token_modifiers::DEFAULT_LIBRARY);
+        assert_eq!(
+            tokens[0].token_modifiers_bitset,
+            token_modifiers::DEFAULT_LIBRARY
+        );
         assert_eq!(tokens[1].token_type, token_types::PUNCTUATION); // (
         assert_eq!(tokens[2].token_type, token_types::VARIABLE); // msg
         assert_eq!(tokens[3].token_type, token_types::PUNCTUATION); // .

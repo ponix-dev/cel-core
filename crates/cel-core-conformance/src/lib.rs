@@ -85,7 +85,10 @@ impl ParseResponse {
     /// Check if parsing was successful (no errors).
     pub fn is_ok(&self) -> bool {
         self.parsed_expr.is_some()
-            && !self.issues.iter().any(|i| i.severity == IssueSeverity::Error)
+            && !self
+                .issues
+                .iter()
+                .any(|i| i.severity == IssueSeverity::Error)
     }
 }
 
@@ -102,7 +105,10 @@ impl CheckResponse {
     /// Check if type checking was successful (no errors).
     pub fn is_ok(&self) -> bool {
         self.checked_expr.is_some()
-            && !self.issues.iter().any(|i| i.severity == IssueSeverity::Error)
+            && !self
+                .issues
+                .iter()
+                .any(|i| i.severity == IssueSeverity::Error)
     }
 }
 
@@ -119,7 +125,10 @@ impl EvalResponse {
     /// Check if evaluation was successful (no errors).
     pub fn is_ok(&self) -> bool {
         self.result.is_some()
-            && !self.issues.iter().any(|i| i.severity == IssueSeverity::Error)
+            && !self
+                .issues
+                .iter()
+                .any(|i| i.severity == IssueSeverity::Error)
     }
 }
 
@@ -148,7 +157,13 @@ pub trait ConformanceService {
     ///
     /// # Returns
     /// A CheckResponse containing the checked expression or issues.
-    fn check(&self, parsed: &ParsedExpr, type_env: &[TypeDecl], func_decls: &[FunctionTypeDecl], container: &str) -> CheckResponse;
+    fn check(
+        &self,
+        parsed: &ParsedExpr,
+        type_env: &[TypeDecl],
+        func_decls: &[FunctionTypeDecl],
+        container: &str,
+    ) -> CheckResponse;
 
     /// Evaluate an expression with the given bindings.
     ///
@@ -161,7 +176,14 @@ pub trait ConformanceService {
     ///
     /// # Returns
     /// An EvalResponse containing the result or issues.
-    fn eval(&self, expr: &ParsedExpr, bindings: &[Binding], type_env: &[TypeDecl], func_decls: &[FunctionTypeDecl], container: &str) -> EvalResponse;
+    fn eval(
+        &self,
+        expr: &ParsedExpr,
+        bindings: &[Binding],
+        type_env: &[TypeDecl],
+        func_decls: &[FunctionTypeDecl],
+        container: &str,
+    ) -> EvalResponse;
 }
 
 /// A type declaration for a variable in the type environment.

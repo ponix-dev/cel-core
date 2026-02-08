@@ -9,7 +9,10 @@ use crate::types::{get_builtin, FunctionDef};
 
 /// Format builtin function documentation as markdown.
 fn format_builtin_docs(builtin: &FunctionDef) -> String {
-    let mut doc = format!("**{}**`{}`\n\n{}", builtin.name, builtin.signature, builtin.description);
+    let mut doc = format!(
+        "**{}**`{}`\n\n{}",
+        builtin.name, builtin.signature, builtin.description
+    );
     if let Some(example) = builtin.example {
         doc.push_str(&format!("\n\n*Example:* `{}`", example));
     }
@@ -40,7 +43,8 @@ fn find_node_containing_offset<'a>(ast: &'a SpannedExpr, offset: usize) -> Optio
             .iter()
             .find_map(|item| find_node_containing_offset(&item.expr, offset)),
         Expr::Map(entries) => entries.iter().find_map(|entry| {
-            find_node_containing_offset(&entry.key, offset).or_else(|| find_node_containing_offset(&entry.value, offset))
+            find_node_containing_offset(&entry.key, offset)
+                .or_else(|| find_node_containing_offset(&entry.value, offset))
         }),
         Expr::Unary { expr, .. } => find_node_containing_offset(expr, offset),
         Expr::Binary { left, right, .. } => find_node_containing_offset(left, offset)
@@ -55,10 +59,16 @@ fn find_node_containing_offset<'a>(ast: &'a SpannedExpr, offset: usize) -> Optio
         Expr::Member { expr, .. } => find_node_containing_offset(expr, offset),
         Expr::Index { expr, index, .. } => find_node_containing_offset(expr, offset)
             .or_else(|| find_node_containing_offset(index, offset)),
-        Expr::Call { expr, args } => find_node_containing_offset(expr, offset)
-            .or_else(|| args.iter().find_map(|arg| find_node_containing_offset(arg, offset))),
+        Expr::Call { expr, args } => find_node_containing_offset(expr, offset).or_else(|| {
+            args.iter()
+                .find_map(|arg| find_node_containing_offset(arg, offset))
+        }),
         Expr::Struct { type_name, fields } => find_node_containing_offset(type_name, offset)
-            .or_else(|| fields.iter().find_map(|field| find_node_containing_offset(&field.value, offset))),
+            .or_else(|| {
+                fields
+                    .iter()
+                    .find_map(|field| find_node_containing_offset(&field.value, offset))
+            }),
         Expr::Comprehension {
             iter_range,
             accu_init,
@@ -90,7 +100,10 @@ fn format_check_error(error: &CheckError) -> String {
                 name
             )
         }
-        CheckErrorKind::NoMatchingOverload { function, arg_types } => {
+        CheckErrorKind::NoMatchingOverload {
+            function,
+            arg_types,
+        } => {
             let types: Vec<_> = arg_types.iter().map(|t| t.display_name()).collect();
             format!(
                 "**Error:** No matching overload for `{}`\n\n\
@@ -144,10 +157,7 @@ fn format_check_error(error: &CheckError) -> String {
 }
 
 /// Find a check error that overlaps with the given node.
-fn find_check_error_at<'a>(
-    node: &SpannedExpr,
-    errors: &'a [CheckError],
-) -> Option<&'a CheckError> {
+fn find_check_error_at<'a>(node: &SpannedExpr, errors: &'a [CheckError]) -> Option<&'a CheckError> {
     errors.iter().find(|e| {
         // Check if error span overlaps with node span
         e.span.start < node.span.end && e.span.end > node.span.start

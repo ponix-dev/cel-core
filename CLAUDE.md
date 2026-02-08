@@ -208,6 +208,10 @@ if let Some(ast) = result.ast {
 - `Expr::Error` nodes mark unparseable sections in partial ASTs
 - Errors include span information for diagnostic display
 
+### Formatting
+- Always run `cargo fmt` after making code changes
+- This is a required final step before committing or presenting changes
+
 ### Testing
 - Unit tests in each crate's `src/` directory
 - Integration tests in `crates/cel-core/tests/`

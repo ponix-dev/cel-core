@@ -62,7 +62,13 @@ pub fn resolve_overload(
 
         // Try to match this overload with scoped type params
         let mut local_subs = substitutions.clone();
-        if let Some(res) = try_match_overload(&full_args, &overload.params, &overload.result, &overload.type_params, &mut local_subs) {
+        if let Some(res) = try_match_overload(
+            &full_args,
+            &overload.params,
+            &overload.result,
+            &overload.type_params,
+            &mut local_subs,
+        ) {
             matching_overloads.push(overload);
             result_type = Some(res);
 
@@ -104,14 +110,20 @@ fn rename_type_params(ty: &CelType, rename_map: &HashMap<String, String>) -> Cel
         CelType::Optional(inner) => CelType::optional(rename_type_params(inner, rename_map)),
         CelType::Function { params, result } => CelType::Function {
             params: Arc::from(
-                params.iter().map(|p| rename_type_params(p, rename_map)).collect::<Vec<_>>(),
+                params
+                    .iter()
+                    .map(|p| rename_type_params(p, rename_map))
+                    .collect::<Vec<_>>(),
             ),
             result: Arc::new(rename_type_params(result, rename_map)),
         },
         CelType::Abstract { name, params } => CelType::Abstract {
             name: name.clone(),
             params: Arc::from(
-                params.iter().map(|p| rename_type_params(p, rename_map)).collect::<Vec<_>>(),
+                params
+                    .iter()
+                    .map(|p| rename_type_params(p, rename_map))
+                    .collect::<Vec<_>>(),
             ),
         },
         _ => ty.clone(),
@@ -137,7 +149,10 @@ fn try_match_overload(
         .collect();
 
     // Rename type params in parameter types and result type
-    let scoped_params: Vec<CelType> = params.iter().map(|p| rename_type_params(p, &rename_map)).collect();
+    let scoped_params: Vec<CelType> = params
+        .iter()
+        .map(|p| rename_type_params(p, &rename_map))
+        .collect();
     let scoped_result = rename_type_params(result, &rename_map);
 
     // Check each argument against its (scoped) parameter
@@ -233,21 +248,30 @@ fn is_assignable(
         // Underlying type is assignable to wrapper (boxing)
         (inner, CelType::Wrapper(param_inner)) => is_assignable(inner, param_inner, substitutions),
         // Wrapper is assignable to underlying type (unboxing)
-        (CelType::Wrapper(arg_inner), inner) => is_assignable(arg_inner.as_ref(), inner, substitutions),
+        (CelType::Wrapper(arg_inner), inner) => {
+            is_assignable(arg_inner.as_ref(), inner, substitutions)
+        }
         // Optional types
         (CelType::Optional(arg_inner), CelType::Optional(param_inner)) => {
             is_assignable(arg_inner, param_inner, substitutions)
         }
         // Abstract types - match by name and parameter types
         (
-            CelType::Abstract { name: arg_name, params: arg_params },
-            CelType::Abstract { name: param_name, params: param_params },
+            CelType::Abstract {
+                name: arg_name,
+                params: arg_params,
+            },
+            CelType::Abstract {
+                name: param_name,
+                params: param_params,
+            },
         ) => {
             arg_name == param_name
                 && arg_params.len() == param_params.len()
-                && arg_params.iter().zip(param_params.iter()).all(|(a, p)| {
-                    is_assignable(a, p, substitutions)
-                })
+                && arg_params
+                    .iter()
+                    .zip(param_params.iter())
+                    .all(|(a, p)| is_assignable(a, p, substitutions))
         }
         _ => false,
     }
@@ -279,7 +303,9 @@ fn should_widen_binding(bound: &CelType, arg: &CelType) -> bool {
         return true;
     }
     // TypeVar/Dyn should be widened to concrete types
-    if (matches!(bound, CelType::TypeVar(_)) || matches!(bound, CelType::Dyn)) && !matches!(arg, CelType::TypeVar(_) | CelType::Dyn) {
+    if (matches!(bound, CelType::TypeVar(_)) || matches!(bound, CelType::Dyn))
+        && !matches!(arg, CelType::TypeVar(_) | CelType::Dyn)
+    {
         return true;
     }
     // Types with TypeVars should be widened to types without
@@ -332,7 +358,10 @@ pub fn substitute_type(ty: &CelType, substitutions: &HashMap<Arc<str>, CelType>)
             ),
             result: Arc::new(substitute_type(result, substitutions)),
         },
-        CelType::Abstract { name, params: abs_params } => CelType::Abstract {
+        CelType::Abstract {
+            name,
+            params: abs_params,
+        } => CelType::Abstract {
             name: name.clone(),
             params: Arc::from(
                 abs_params
@@ -357,16 +386,15 @@ pub fn finalize_type(ty: &CelType) -> CelType {
         CelType::Wrapper(inner) => CelType::wrapper(finalize_type(inner)),
         CelType::Optional(inner) => CelType::optional(finalize_type(inner)),
         CelType::Function { params, result } => CelType::Function {
-            params: Arc::from(
-                params.iter().map(finalize_type).collect::<Vec<_>>(),
-            ),
+            params: Arc::from(params.iter().map(finalize_type).collect::<Vec<_>>()),
             result: Arc::new(finalize_type(result)),
         },
-        CelType::Abstract { name, params: abs_params } => CelType::Abstract {
+        CelType::Abstract {
+            name,
+            params: abs_params,
+        } => CelType::Abstract {
             name: name.clone(),
-            params: Arc::from(
-                abs_params.iter().map(finalize_type).collect::<Vec<_>>(),
-            ),
+            params: Arc::from(abs_params.iter().map(finalize_type).collect::<Vec<_>>()),
         },
         _ => ty.clone(),
     }
@@ -402,12 +430,11 @@ mod tests {
 
     #[test]
     fn test_resolve_method_overload() {
-        let func = FunctionDecl::new("contains")
-            .with_overload(OverloadDecl::method(
-                "string_contains_string",
-                vec![CelType::String, CelType::String],
-                CelType::Bool,
-            ));
+        let func = FunctionDecl::new("contains").with_overload(OverloadDecl::method(
+            "string_contains_string",
+            vec![CelType::String, CelType::String],
+            CelType::Bool,
+        ));
 
         let mut subs = HashMap::new();
         let result = resolve_overload(&func, Some(&CelType::String), &[CelType::String], &mut subs);
@@ -419,15 +446,14 @@ mod tests {
 
     #[test]
     fn test_resolve_generic_overload() {
-        let func = FunctionDecl::new("_==_")
-            .with_overload(
-                OverloadDecl::function(
-                    "equals",
-                    vec![CelType::type_param("T"), CelType::type_param("T")],
-                    CelType::Bool,
-                )
-                .with_type_params(vec!["T".to_string()]),
-            );
+        let func = FunctionDecl::new("_==_").with_overload(
+            OverloadDecl::function(
+                "equals",
+                vec![CelType::type_param("T"), CelType::type_param("T")],
+                CelType::Bool,
+            )
+            .with_type_params(vec!["T".to_string()]),
+        );
 
         let mut subs = HashMap::new();
         let result = resolve_overload(&func, None, &[CelType::Int, CelType::Int], &mut subs);
@@ -439,12 +465,11 @@ mod tests {
 
     #[test]
     fn test_resolve_no_match() {
-        let func = FunctionDecl::new("_+_")
-            .with_overload(OverloadDecl::function(
-                "add_int64_int64",
-                vec![CelType::Int, CelType::Int],
-                CelType::Int,
-            ));
+        let func = FunctionDecl::new("_+_").with_overload(OverloadDecl::function(
+            "add_int64_int64",
+            vec![CelType::Int, CelType::Int],
+            CelType::Int,
+        ));
 
         let mut subs = HashMap::new();
         let result = resolve_overload(&func, None, &[CelType::String, CelType::Int], &mut subs);

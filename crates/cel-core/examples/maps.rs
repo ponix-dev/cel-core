@@ -2,12 +2,11 @@
 //!
 //! Run with: cargo run -p cel-core --example maps
 
-use cel_core::eval::{MapActivation, Value};
-use cel_core::{CelType, Env};
+use cel_core::{CelType, Env, MapActivation, Value};
 
 fn main() {
-    let env =
-        Env::with_standard_library().with_variable("user", CelType::map(CelType::String, CelType::Dyn));
+    let env = Env::with_standard_library()
+        .with_variable("user", CelType::map(CelType::String, CelType::Dyn));
 
     // Mixed value types require explicit Value::from()
     let user = Value::map([
@@ -44,9 +43,7 @@ fn main() {
     println!("has(user.email): {}", result);
 
     // Combine conditions
-    let ast = env
-        .compile(r#"user.active && user.age >= 21"#)
-        .unwrap();
+    let ast = env.compile(r#"user.active && user.age >= 21"#).unwrap();
     let program = env.program(&ast).unwrap();
     let result = program.eval(&activation);
     println!("active && age >= 21: {}", result);

@@ -30,27 +30,19 @@
 //! - [`to_checked_expr`] / [`to_checked_expr_from_ast`] - Convert check results to proto `CheckedExpr`
 //!
 //! ```
-//! use cel_core_proto::{to_parsed_expr, to_checked_expr, from_parsed_expr};
-//! use cel_core::{check, STANDARD_LIBRARY, CelType};
-//! use std::collections::HashMap;
+//! use cel_core::{Env, CelType};
+//! use cel_core_proto::{to_parsed_expr, to_checked_expr, from_parsed_expr, AstToProto};
 //!
-//! // Parse a CEL expression
-//! let source = "x + 1";
-//! let ast = cel_core::parse(source).ast.unwrap();
+//! // Parse and type-check via Env
+//! let env = Env::with_standard_library()
+//!     .with_variable("x", CelType::Int);
+//! let ast = env.compile("x + 1").unwrap();
 //!
 //! // Convert to proto ParsedExpr
-//! let parsed_expr = to_parsed_expr(&ast, source);
-//!
-//! // Type check
-//! let mut variables = HashMap::new();
-//! variables.insert("x".to_string(), CelType::Int);
-//! let functions: HashMap<_, _> = STANDARD_LIBRARY.iter()
-//!     .map(|f| (f.name.clone(), f.clone()))
-//!     .collect();
-//! let check_result = check(&ast, &variables, &functions, "");
+//! let parsed_expr = ast.to_parsed_expr();
 //!
 //! // Convert to proto CheckedExpr
-//! let checked_expr = to_checked_expr(&check_result, &parsed_expr);
+//! let checked_expr = ast.to_checked_expr().unwrap();
 //!
 //! // Convert back to AST
 //! let roundtripped = from_parsed_expr(&parsed_expr).unwrap();
@@ -61,35 +53,28 @@ mod converter;
 
 pub use checked_expr::{check_result_from_proto, to_checked_expr, to_checked_expr_from_ast};
 mod error;
+mod eval_proto;
 pub mod gen;
-pub mod message;
+mod message;
 mod operators;
-pub mod registry;
+mod registry;
 mod source_info;
 mod type_conversion;
 pub(crate) mod wkt;
-mod eval_proto;
 
 pub use message::ProstMessage;
 pub use registry::ProstProtoRegistry;
 pub use wkt::maybe_unwrap_well_known;
 
-pub use converter::AstConverter;
 pub use error::ConversionError;
-pub use operators::{
-    binary_op_to_function, function_to_binary_op, function_to_unary_op, is_index_function,
-    is_ternary_function, unary_op_to_function, INDEX_FUNCTION, TERNARY_FUNCTION,
-};
-pub use source_info::{build_source_info, compute_line_offsets, get_position};
-pub use type_conversion::{
-    cel_type_from_proto, cel_type_to_proto, cel_value_from_proto, cel_value_to_proto,
-};
+pub use type_conversion::{cel_type_from_proto, cel_type_to_proto};
 
 // Re-export proto types for convenience
 pub use gen::cel::expr::{CheckedExpr, Constant, Expr, ParsedExpr, SourceInfo, Type, Value};
 
 use cel_core::parser::MacroCalls;
 use cel_core::SpannedExpr;
+use converter::AstConverter;
 
 /// Convert a cel-parser AST to a proto ParsedExpr.
 ///

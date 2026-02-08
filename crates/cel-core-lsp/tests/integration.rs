@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use cel_core::Env;
-use cel_core_lsp::settings::{build_env_with_protos, load_proto_registry, load_settings};
+use cel_core_lsp::{build_env_with_protos, load_proto_registry, load_settings};
 use cel_core_lsp::{
     completion_at_position_proto, proto_to_diagnostics, to_diagnostics, DocumentState, LineIndex,
     ProtoDocumentState,
@@ -124,28 +124,35 @@ fn valid_ternary() {
 #[test]
 fn undeclared_variable() {
     let actual = check_cel_default("unknown_var + 1");
-    let expected = expect![[r#"0:0-0:11 error [undeclared-reference]: undeclared reference to 'unknown_var'"#]];
+    let expected = expect![[
+        r#"0:0-0:11 error [undeclared-reference]: undeclared reference to 'unknown_var'"#
+    ]];
     expected.assert_eq(&actual);
 }
 
 #[test]
 fn undeclared_variable_with_settings() {
     let actual = check_cel("basic", "x + y");
-    let expected = expect![[r#"0:4-0:5 error [undeclared-reference]: undeclared reference to 'y'"#]];
+    let expected =
+        expect![[r#"0:4-0:5 error [undeclared-reference]: undeclared reference to 'y'"#]];
     expected.assert_eq(&actual);
 }
 
 #[test]
 fn type_mismatch_addition() {
     let actual = check_cel("basic", "x + name");
-    let expected = expect![[r#"0:0-0:8 error [no-matching-overload]: no matching overload for '_+_' with argument types (int, string)"#]];
+    let expected = expect![[
+        r#"0:0-0:8 error [no-matching-overload]: no matching overload for '_+_' with argument types (int, string)"#
+    ]];
     expected.assert_eq(&actual);
 }
 
 #[test]
 fn type_mismatch_comparison() {
     let actual = check_cel("basic", "x > name");
-    let expected = expect![[r#"0:0-0:8 error [no-matching-overload]: no matching overload for '_>_' with argument types (int, string)"#]];
+    let expected = expect![[
+        r#"0:0-0:8 error [no-matching-overload]: no matching overload for '_>_' with argument types (int, string)"#
+    ]];
     expected.assert_eq(&actual);
 }
 
@@ -181,7 +188,9 @@ fn proto_field_access() {
 #[test]
 fn proto_undefined_field() {
     let actual = check_cel("proto", "user.nonexistent");
-    let expected = expect![[r#"0:0-0:16 error [undefined-field]: undefined field 'nonexistent' on type 'test.User'"#]];
+    let expected = expect![[
+        r#"0:0-0:16 error [undefined-field]: undefined field 'nonexistent' on type 'test.User'"#
+    ]];
     expected.assert_eq(&actual);
 }
 
@@ -200,8 +209,7 @@ fn proto_nested_access() {
 /// parse it as a ProtoDocumentState with the proto fixture registry,
 /// and return formatted diagnostics.
 fn check_protovalidate_message(message_name: &str, cel_expr: &str) -> String {
-    let fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/proto");
+    let fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/proto");
     let settings = load_settings(&fixture_path.join("settings.toml"));
     let registry = load_proto_registry(&settings, &fixture_path);
 
@@ -232,7 +240,9 @@ fn protovalidate_this_field_access() {
 #[test]
 fn protovalidate_this_undefined_field() {
     let actual = check_protovalidate_message("User", "this.nonexistent");
-    let expected = expect![[r#"5:21-5:37 error [undefined-field]: undefined field 'nonexistent' on type 'test.User'"#]];
+    let expected = expect![[
+        r#"5:21-5:37 error [undefined-field]: undefined field 'nonexistent' on type 'test.User'"#
+    ]];
     expected.assert_eq(&actual);
 }
 
@@ -246,7 +256,9 @@ fn protovalidate_this_nested_field_access() {
 #[test]
 fn protovalidate_has_undefined_field() {
     let actual = check_protovalidate_message("User", "has(this.nonexistent)");
-    let expected = expect![[r#"5:21-5:42 error [undefined-field]: undefined field 'nonexistent' on type 'test.User'"#]];
+    let expected = expect![[
+        r#"5:21-5:42 error [undefined-field]: undefined field 'nonexistent' on type 'test.User'"#
+    ]];
     expected.assert_eq(&actual);
 }
 
@@ -258,8 +270,7 @@ fn protovalidate_has_undefined_field() {
 /// parse it as a ProtoDocumentState with the proto fixture registry,
 /// and return formatted diagnostics.
 fn check_protovalidate_field(field_type: &str, field_name: &str, cel_expr: &str) -> String {
-    let fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/proto");
+    let fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/proto");
     let settings = load_settings(&fixture_path.join("settings.toml"));
     let registry = load_proto_registry(&settings, &fixture_path);
 
@@ -337,9 +348,7 @@ message TestMessage {{
     let position = Position::new(5, cel_start_col + cursor_col_within_cel);
 
     match completion_at_position_proto(&state, position) {
-        Some(CompletionResponse::Array(items)) => {
-            items.into_iter().map(|i| i.label).collect()
-        }
+        Some(CompletionResponse::Array(items)) => items.into_iter().map(|i| i.label).collect(),
         _ => vec![],
     }
 }

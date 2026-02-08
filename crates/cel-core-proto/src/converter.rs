@@ -16,7 +16,7 @@ use crate::operators::{
     TERNARY_FUNCTION,
 };
 use crate::source_info::{build_source_info, compute_line_offsets, get_position};
-use cel_core::types::{Expr, ListElement, MapEntry, Spanned, SpannedExpr, StructField};
+use cel_core::{Expr, ListElement, MapEntry, Spanned, SpannedExpr, StructField};
 use std::collections::HashMap;
 
 /// Bidirectional converter between cel-parser AST and proto Expr.
@@ -103,7 +103,8 @@ impl AstConverter {
                 })))
             }
             Expr::List(elements) => {
-                let converted: Vec<_> = elements.iter().map(|e| self.ast_to_expr(&e.expr)).collect();
+                let converted: Vec<_> =
+                    elements.iter().map(|e| self.ast_to_expr(&e.expr)).collect();
                 let optional_indices: Vec<i32> = elements
                     .iter()
                     .enumerate()
@@ -164,7 +165,11 @@ impl AstConverter {
                     self.ast_to_expr(else_expr),
                 ],
             }))),
-            Expr::Member { expr, field, optional } => {
+            Expr::Member {
+                expr,
+                field,
+                optional,
+            } => {
                 if *optional {
                     // Optional select: x.?y -> CallExpr with function "_?._"
                     Some(ExprKind::CallExpr(Box::new(Call {
@@ -180,7 +185,11 @@ impl AstConverter {
                     })))
                 }
             }
-            Expr::Index { expr, index, optional } => {
+            Expr::Index {
+                expr,
+                index,
+                optional,
+            } => {
                 let function = if *optional {
                     OPTIONAL_INDEX_FUNCTION
                 } else {
@@ -220,7 +229,8 @@ impl AstConverter {
                     .map(|field| {
                         // Use value's ID for entry ID
                         let entry_id = field.value.id;
-                        self.positions.insert(entry_id, field.value.span.start as i32);
+                        self.positions
+                            .insert(entry_id, field.value.span.start as i32);
                         Entry {
                             id: entry_id,
                             key_kind: Some(KeyKind::FieldKey(field.name.clone())),
@@ -260,7 +270,11 @@ impl AstConverter {
             }))),
             // cel.bind(var, init, body) is represented as a comprehension:
             // The variable is bound via the accumulator, and the body is evaluated as the result.
-            Expr::Bind { var_name, init, body } => {
+            Expr::Bind {
+                var_name,
+                init,
+                body,
+            } => {
                 // Create a synthetic list with just the init value to iterate over once
                 let init_list = crate::gen::cel::expr::Expr {
                     id: 0,
@@ -322,11 +336,6 @@ impl AstConverter {
                 macro_calls,
             )),
         }
-    }
-
-    /// Get the collected source info.
-    pub fn into_source_info(self) -> SourceInfo {
-        build_source_info(self.positions, self.line_offsets)
     }
 
     /// Convert a proto Expr back to a cel-parser AST.
@@ -627,13 +636,13 @@ impl AstConverter {
                 expr_id,
                 field: "accu_init",
             })?;
-        let loop_condition =
-            comp.loop_condition
-                .as_ref()
-                .ok_or(ConversionError::MissingField {
-                    expr_id,
-                    field: "loop_condition",
-                })?;
+        let loop_condition = comp
+            .loop_condition
+            .as_ref()
+            .ok_or(ConversionError::MissingField {
+                expr_id,
+                field: "loop_condition",
+            })?;
         let loop_step = comp
             .loop_step
             .as_ref()
@@ -759,7 +768,7 @@ fn build_type_name_expr(name: &str, pos: usize, struct_id: i64) -> SpannedExpr {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cel_core::types::{BinaryOp, UnaryOp};
+    use cel_core::{BinaryOp, UnaryOp};
 
     fn make_ast(node: Expr) -> SpannedExpr {
         // Use ID 0 for test nodes since exact ID doesn't matter for roundtrip tests
@@ -770,9 +779,14 @@ mod tests {
         let source = "";
         let mut converter = AstConverter::new(source);
         let proto_expr = converter.ast_to_expr(ast);
-        let source_info = converter.into_source_info();
+        let parsed = converter.into_parsed_expr(proto_expr);
         let new_converter = AstConverter::new(source);
-        new_converter.expr_to_ast(&proto_expr, &source_info).unwrap()
+        new_converter
+            .expr_to_ast(
+                parsed.expr.as_ref().unwrap(),
+                parsed.source_info.as_ref().unwrap(),
+            )
+            .unwrap()
     }
 
     fn assert_node_eq(a: &Expr, b: &Expr) {
@@ -802,10 +816,7 @@ mod tests {
                     assert_node_eq(&e1.value.node, &e2.value.node);
                 }
             }
-            (
-                Expr::Unary { op: op1, expr: e1 },
-                Expr::Unary { op: op2, expr: e2 },
-            ) => {
+            (Expr::Unary { op: op1, expr: e1 }, Expr::Unary { op: op2, expr: e2 }) => {
                 assert_eq!(op1, op2);
                 assert_node_eq(&e1.node, &e2.node);
             }
@@ -842,25 +853,38 @@ mod tests {
                 assert_node_eq(&e1.node, &e2.node);
             }
             (
-                Expr::Member { expr: e1, field: f1, optional: o1 },
-                Expr::Member { expr: e2, field: f2, optional: o2 },
+                Expr::Member {
+                    expr: e1,
+                    field: f1,
+                    optional: o1,
+                },
+                Expr::Member {
+                    expr: e2,
+                    field: f2,
+                    optional: o2,
+                },
             ) => {
                 assert_eq!(f1, f2);
                 assert_eq!(o1, o2);
                 assert_node_eq(&e1.node, &e2.node);
             }
             (
-                Expr::Index { expr: e1, index: i1, optional: o1 },
-                Expr::Index { expr: e2, index: i2, optional: o2 },
+                Expr::Index {
+                    expr: e1,
+                    index: i1,
+                    optional: o1,
+                },
+                Expr::Index {
+                    expr: e2,
+                    index: i2,
+                    optional: o2,
+                },
             ) => {
                 assert_eq!(o1, o2);
                 assert_node_eq(&e1.node, &e2.node);
                 assert_node_eq(&i1.node, &i2.node);
             }
-            (
-                Expr::Call { expr: e1, args: a1 },
-                Expr::Call { expr: e2, args: a2 },
-            ) => {
+            (Expr::Call { expr: e1, args: a1 }, Expr::Call { expr: e2, args: a2 }) => {
                 assert_node_eq(&e1.node, &e2.node);
                 assert_eq!(a1.len(), a2.len());
                 for (x, y) in a1.iter().zip(a2.iter()) {
@@ -956,8 +980,14 @@ mod tests {
     #[test]
     fn test_roundtrip_list() {
         let ast = make_ast(Expr::List(vec![
-            ListElement { expr: make_ast(Expr::Int(1)), optional: false },
-            ListElement { expr: make_ast(Expr::Int(2)), optional: false },
+            ListElement {
+                expr: make_ast(Expr::Int(1)),
+                optional: false,
+            },
+            ListElement {
+                expr: make_ast(Expr::Int(2)),
+                optional: false,
+            },
         ]));
         let result = roundtrip(&ast);
         assert_node_eq(&ast.node, &result.node);
@@ -1108,9 +1138,18 @@ mod tests {
     #[test]
     fn test_roundtrip_list_with_optional() {
         let ast = make_ast(Expr::List(vec![
-            ListElement { expr: make_ast(Expr::Int(1)), optional: false },
-            ListElement { expr: make_ast(Expr::Int(2)), optional: true },
-            ListElement { expr: make_ast(Expr::Int(3)), optional: false },
+            ListElement {
+                expr: make_ast(Expr::Int(1)),
+                optional: false,
+            },
+            ListElement {
+                expr: make_ast(Expr::Int(2)),
+                optional: true,
+            },
+            ListElement {
+                expr: make_ast(Expr::Int(3)),
+                optional: false,
+            },
         ]));
         let result = roundtrip(&ast);
         assert_node_eq(&ast.node, &result.node);

@@ -2,9 +2,7 @@
 
 use std::sync::Arc;
 
-use super::{
-    EvalError, MapKey, Value,
-};
+use super::{EvalError, MapKey, Value};
 use crate::types::{BinaryOp, SpannedExpr, UnaryOp};
 
 use super::evaluator::Evaluator;
@@ -46,7 +44,12 @@ impl<'a> Evaluator<'a> {
         }
     }
 
-    pub(super) fn eval_binary(&self, op: BinaryOp, left: &SpannedExpr, right: &SpannedExpr) -> Value {
+    pub(super) fn eval_binary(
+        &self,
+        op: BinaryOp,
+        left: &SpannedExpr,
+        right: &SpannedExpr,
+    ) -> Value {
         // Short-circuit evaluation for && and ||
         match op {
             BinaryOp::And => return self.eval_and(left, right),
@@ -192,12 +195,16 @@ impl<'a> Evaluator<'a> {
 
     fn eval_sub(&self, left: Value, right: Value) -> Value {
         match (&left, &right) {
-            (Value::Int(a), Value::Int(b)) => a.checked_sub(*b).map(Value::Int).unwrap_or_else(|| {
-                Value::error(EvalError::overflow("integer subtraction overflow"))
-            }),
-            (Value::UInt(a), Value::UInt(b)) => a.checked_sub(*b).map(Value::UInt).unwrap_or_else(
-                || Value::error(EvalError::overflow("unsigned subtraction overflow")),
-            ),
+            (Value::Int(a), Value::Int(b)) => {
+                a.checked_sub(*b).map(Value::Int).unwrap_or_else(|| {
+                    Value::error(EvalError::overflow("integer subtraction overflow"))
+                })
+            }
+            (Value::UInt(a), Value::UInt(b)) => {
+                a.checked_sub(*b).map(Value::UInt).unwrap_or_else(|| {
+                    Value::error(EvalError::overflow("unsigned subtraction overflow"))
+                })
+            }
             (Value::Double(a), Value::Double(b)) => Value::Double(a - b),
             (Value::Timestamp(a), Value::Timestamp(b)) => {
                 let nanos = a.nanos as i64 - b.nanos as i64;
@@ -271,12 +278,16 @@ impl<'a> Evaluator<'a> {
 
     fn eval_mul(&self, left: Value, right: Value) -> Value {
         match (&left, &right) {
-            (Value::Int(a), Value::Int(b)) => a.checked_mul(*b).map(Value::Int).unwrap_or_else(|| {
-                Value::error(EvalError::overflow("integer multiplication overflow"))
-            }),
-            (Value::UInt(a), Value::UInt(b)) => a.checked_mul(*b).map(Value::UInt).unwrap_or_else(
-                || Value::error(EvalError::overflow("unsigned multiplication overflow")),
-            ),
+            (Value::Int(a), Value::Int(b)) => {
+                a.checked_mul(*b).map(Value::Int).unwrap_or_else(|| {
+                    Value::error(EvalError::overflow("integer multiplication overflow"))
+                })
+            }
+            (Value::UInt(a), Value::UInt(b)) => {
+                a.checked_mul(*b).map(Value::UInt).unwrap_or_else(|| {
+                    Value::error(EvalError::overflow("unsigned multiplication overflow"))
+                })
+            }
             (Value::Double(a), Value::Double(b)) => Value::Double(a * b),
             _ => Value::error(EvalError::no_matching_overload("_*_")),
         }
@@ -285,9 +296,10 @@ impl<'a> Evaluator<'a> {
     fn eval_div(&self, left: Value, right: Value) -> Value {
         match (&left, &right) {
             (Value::Int(_), Value::Int(0)) => Value::error(EvalError::division_by_zero()),
-            (Value::Int(a), Value::Int(b)) => a.checked_div(*b).map(Value::Int).unwrap_or_else(|| {
-                Value::error(EvalError::overflow("integer division overflow"))
-            }),
+            (Value::Int(a), Value::Int(b)) => a
+                .checked_div(*b)
+                .map(Value::Int)
+                .unwrap_or_else(|| Value::error(EvalError::overflow("integer division overflow"))),
             (Value::UInt(_), Value::UInt(0)) => Value::error(EvalError::division_by_zero()),
             (Value::UInt(a), Value::UInt(b)) => Value::UInt(a / b),
             (Value::Double(a), Value::Double(b)) => Value::Double(a / b),
@@ -298,9 +310,10 @@ impl<'a> Evaluator<'a> {
     fn eval_mod(&self, left: Value, right: Value) -> Value {
         match (&left, &right) {
             (Value::Int(_), Value::Int(0)) => Value::error(EvalError::modulo_by_zero()),
-            (Value::Int(a), Value::Int(b)) => a.checked_rem(*b).map(Value::Int).unwrap_or_else(|| {
-                Value::error(EvalError::overflow("integer modulo overflow"))
-            }),
+            (Value::Int(a), Value::Int(b)) => a
+                .checked_rem(*b)
+                .map(Value::Int)
+                .unwrap_or_else(|| Value::error(EvalError::overflow("integer modulo overflow"))),
             (Value::UInt(_), Value::UInt(0)) => Value::error(EvalError::modulo_by_zero()),
             (Value::UInt(a), Value::UInt(b)) => Value::UInt(a % b),
             _ => Value::error(EvalError::no_matching_overload("_%_")),
@@ -341,7 +354,9 @@ impl<'a> Evaluator<'a> {
 
     fn eval_ge(&self, left: Value, right: Value) -> Value {
         match left.compare(&right) {
-            Some(std::cmp::Ordering::Greater) | Some(std::cmp::Ordering::Equal) => Value::Bool(true),
+            Some(std::cmp::Ordering::Greater) | Some(std::cmp::Ordering::Equal) => {
+                Value::Bool(true)
+            }
             Some(_) => Value::Bool(false),
             None => Value::error(EvalError::no_matching_overload("_>=_")),
         }

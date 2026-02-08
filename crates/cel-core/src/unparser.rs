@@ -7,8 +7,8 @@
 //! # Example
 //!
 //! ```
-//! use cel_core::unparser::ast_to_string;
-//! use cel_core::parser::parse;
+//! use cel_core::ast_to_string;
+//! use cel_core::parse;
 //!
 //! let ast = parse("x + 1").ast.unwrap();
 //! let source = ast_to_string(&ast);
@@ -30,7 +30,13 @@ fn precedence(op: BinaryOp) -> u8 {
     match op {
         BinaryOp::Or => 1,
         BinaryOp::And => 2,
-        BinaryOp::Eq | BinaryOp::Ne | BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge | BinaryOp::In => 3,
+        BinaryOp::Eq
+        | BinaryOp::Ne
+        | BinaryOp::Lt
+        | BinaryOp::Le
+        | BinaryOp::Gt
+        | BinaryOp::Ge
+        | BinaryOp::In => 3,
         BinaryOp::Add | BinaryOp::Sub => 4,
         BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => 5,
     }
@@ -87,7 +93,11 @@ fn unparse(expr: &Expr) -> String {
         // Operations
         Expr::Unary { op, expr } => unparse_unary(*op, expr),
         Expr::Binary { op, left, right } => unparse_binary(*op, left, right),
-        Expr::Ternary { cond, then_expr, else_expr } => {
+        Expr::Ternary {
+            cond,
+            then_expr,
+            else_expr,
+        } => {
             format!(
                 "{} ? {} : {}",
                 unparse_with_parens_if_needed(&cond.node, Some(0)),
@@ -97,26 +107,64 @@ fn unparse(expr: &Expr) -> String {
         }
 
         // Access
-        Expr::Member { expr, field, optional } => {
+        Expr::Member {
+            expr,
+            field,
+            optional,
+        } => {
             let op = if *optional { ".?" } else { "." };
             format!("{}{}{}", unparse_primary(&expr.node), op, field)
         }
-        Expr::Index { expr, index, optional } => {
+        Expr::Index {
+            expr,
+            index,
+            optional,
+        } => {
             let brackets = if *optional { "[?" } else { "[" };
-            format!("{}{}{}]", unparse_primary(&expr.node), brackets, unparse(&index.node))
+            format!(
+                "{}{}{}]",
+                unparse_primary(&expr.node),
+                brackets,
+                unparse(&index.node)
+            )
         }
         Expr::Call { expr, args } => unparse_call(expr, args),
         Expr::Struct { type_name, fields } => unparse_struct(type_name, fields),
 
         // Macro expansions - unparse back to macro syntax where possible
-        Expr::Comprehension { iter_var, iter_var2, iter_range, accu_var, accu_init, loop_condition, loop_step, result } => {
-            unparse_comprehension(iter_var, iter_var2, iter_range, accu_var, accu_init, loop_condition, loop_step, result)
-        }
+        Expr::Comprehension {
+            iter_var,
+            iter_var2,
+            iter_range,
+            accu_var,
+            accu_init,
+            loop_condition,
+            loop_step,
+            result,
+        } => unparse_comprehension(
+            iter_var,
+            iter_var2,
+            iter_range,
+            accu_var,
+            accu_init,
+            loop_condition,
+            loop_step,
+            result,
+        ),
         Expr::MemberTestOnly { expr, field } => {
             format!("has({}.{})", unparse(&expr.node), field)
         }
-        Expr::Bind { var_name, init, body } => {
-            format!("cel.bind({}, {}, {})", var_name, unparse(&init.node), unparse(&body.node))
+        Expr::Bind {
+            var_name,
+            init,
+            body,
+        } => {
+            format!(
+                "cel.bind({}, {}, {})",
+                var_name,
+                unparse(&init.node),
+                unparse(&body.node)
+            )
         }
 
         Expr::Error => "<error>".to_string(),
@@ -278,13 +326,31 @@ fn unparse_call(expr: &SpannedExpr, args: &[SpannedExpr]) -> String {
             // Global function call
             format!("{}({})", name, args_str.join(", "))
         }
-        Expr::Member { expr: receiver, field, optional: false } => {
+        Expr::Member {
+            expr: receiver,
+            field,
+            optional: false,
+        } => {
             // Method call: receiver.method(args)
-            format!("{}.{}({})", unparse_primary(&receiver.node), field, args_str.join(", "))
+            format!(
+                "{}.{}({})",
+                unparse_primary(&receiver.node),
+                field,
+                args_str.join(", ")
+            )
         }
-        Expr::Member { expr: receiver, field, optional: true } => {
+        Expr::Member {
+            expr: receiver,
+            field,
+            optional: true,
+        } => {
             // Optional method call: receiver.?method(args)
-            format!("{}.?{}({})", unparse_primary(&receiver.node), field, args_str.join(", "))
+            format!(
+                "{}.?{}({})",
+                unparse_primary(&receiver.node),
+                field,
+                args_str.join(", ")
+            )
         }
         _ => {
             // Generic callable expression
@@ -327,7 +393,12 @@ fn unparse_comprehension(
 
     // Check for `all` pattern: accu_init=true, loop_step=accu && condition, result=accu
     if matches!(&accu_init.node, Expr::Bool(true)) {
-        if let Expr::Binary { op: BinaryOp::And, left, right } = &loop_step.node {
+        if let Expr::Binary {
+            op: BinaryOp::And,
+            left,
+            right,
+        } = &loop_step.node
+        {
             if matches!(&left.node, Expr::Ident(name) if name == accu_var) {
                 if matches!(&result.node, Expr::Ident(name) if name == accu_var) {
                     let range_str = unparse(&iter_range.node);
@@ -340,7 +411,12 @@ fn unparse_comprehension(
 
     // Check for `exists` pattern: accu_init=false, loop_step=accu || condition, result=accu
     if matches!(&accu_init.node, Expr::Bool(false)) {
-        if let Expr::Binary { op: BinaryOp::Or, left, right } = &loop_step.node {
+        if let Expr::Binary {
+            op: BinaryOp::Or,
+            left,
+            right,
+        } = &loop_step.node
+        {
             if matches!(&left.node, Expr::Ident(name) if name == accu_var) {
                 if matches!(&result.node, Expr::Ident(name) if name == accu_var) {
                     let range_str = unparse(&iter_range.node);
@@ -353,7 +429,12 @@ fn unparse_comprehension(
 
     // Check for `map` pattern: accu_init=[], loop_step=accu + [transform], result=accu
     if matches!(&accu_init.node, Expr::List(elems) if elems.is_empty()) {
-        if let Expr::Binary { op: BinaryOp::Add, left, right } = &loop_step.node {
+        if let Expr::Binary {
+            op: BinaryOp::Add,
+            left,
+            right,
+        } = &loop_step.node
+        {
             if matches!(&left.node, Expr::Ident(name) if name == accu_var) {
                 if let Expr::List(elems) = &right.node {
                     if elems.len() == 1 && !elems[0].optional {
@@ -371,17 +452,26 @@ fn unparse_comprehension(
     // Check for `filter` pattern: accu_init=[], loop_step=accu + ([iter_var] if condition else []), result=accu
     // This is more complex, so we'll use a simplified check
     if matches!(&accu_init.node, Expr::List(elems) if elems.is_empty()) {
-        if let Expr::Ternary { cond, then_expr, else_expr } = &loop_step.node {
+        if let Expr::Ternary {
+            cond,
+            then_expr,
+            else_expr,
+        } = &loop_step.node
+        {
             if let Expr::List(then_elems) = &then_expr.node {
                 if then_elems.len() == 1 {
                     if let Expr::Ident(elem_name) = &then_elems[0].expr.node {
                         if elem_name == iter_var {
                             if let Expr::List(else_elems) = &else_expr.node {
                                 if else_elems.is_empty() {
-                                    if matches!(&result.node, Expr::Ident(name) if name == accu_var) {
+                                    if matches!(&result.node, Expr::Ident(name) if name == accu_var)
+                                    {
                                         let range_str = unparse(&iter_range.node);
                                         let condition_str = unparse(&cond.node);
-                                        return format!("{}.filter({}, {})", range_str, iter_var, condition_str);
+                                        return format!(
+                                            "{}.filter({}, {})",
+                                            range_str, iter_var, condition_str
+                                        );
                                     }
                                 }
                             }
@@ -518,7 +608,10 @@ mod tests {
     fn test_method_calls() {
         assert_eq!(roundtrip("x.size()"), "x.size()");
         assert_eq!(roundtrip("x.contains(y)"), "x.contains(y)");
-        assert_eq!(roundtrip("\"hello\".startsWith(\"h\")"), "\"hello\".startsWith(\"h\")");
+        assert_eq!(
+            roundtrip("\"hello\".startsWith(\"h\")"),
+            "\"hello\".startsWith(\"h\")"
+        );
     }
 
     #[test]

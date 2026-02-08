@@ -67,6 +67,14 @@ Create or update `.claude/handoff.md` with the following template:
 - Technical debt introduced (if any)
 ```
 
+## Format Code
+
+Before committing, run `cargo fmt` to ensure all code is properly formatted:
+
+```bash
+cargo fmt
+```
+
 ## Commit Guidelines
 
 1. **Follow conventional commits**: `type: short description`

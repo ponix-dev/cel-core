@@ -4,8 +4,7 @@
 
 use std::sync::Arc;
 
-use cel_core::eval::{Duration, MapActivation, Timestamp, Value};
-use cel_core::{Abbreviations, CelType, Env};
+use cel_core::{Abbreviations, CelType, Duration, Env, MapActivation, Timestamp, Value};
 use cel_core_proto::ProstProtoRegistry;
 
 fn main() {
@@ -38,7 +37,10 @@ fn main() {
     let program = env.program(&ast).unwrap();
 
     let mut activation = MapActivation::new();
-    activation.insert("event_time", Value::Timestamp(Timestamp::from_seconds(1704110400)));
+    activation.insert(
+        "event_time",
+        Value::Timestamp(Timestamp::from_seconds(1704110400)),
+    );
     activation.insert("timeout", Value::Duration(Duration::from_seconds(1800)));
 
     let result = program.eval(&activation);

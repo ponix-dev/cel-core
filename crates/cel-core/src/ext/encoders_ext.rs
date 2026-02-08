@@ -15,8 +15,7 @@ use crate::types::{CelType, FunctionDecl, OverloadDecl};
 
 /// Encode bytes as standard base64 (RFC 4648).
 fn base64_encode(data: &[u8]) -> String {
-    const ALPHABET: &[u8; 64] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
     let mut result = String::with_capacity((data.len() + 2) / 3 * 4);
     for chunk in data.chunks(3) {
@@ -124,17 +123,21 @@ pub fn encoders_extension() -> Vec<FunctionDecl> {
         ),
         // base64.decode(string) -> bytes
         FunctionDecl::new("base64.decode").with_overload(
-            OverloadDecl::function("base64_decode_string", vec![CelType::String], CelType::Bytes)
-                .with_impl(|args| match &args[0] {
-                    Value::String(s) => match base64_decode(s) {
-                        Ok(bytes) => Value::Bytes(Arc::from(bytes)),
-                        Err(e) => Value::error(EvalError::internal(e)),
-                    },
-                    _ => Value::error(EvalError::type_mismatch(
-                        "string",
-                        &args[0].cel_type().display_name(),
-                    )),
-                }),
+            OverloadDecl::function(
+                "base64_decode_string",
+                vec![CelType::String],
+                CelType::Bytes,
+            )
+            .with_impl(|args| match &args[0] {
+                Value::String(s) => match base64_decode(s) {
+                    Ok(bytes) => Value::Bytes(Arc::from(bytes)),
+                    Err(e) => Value::error(EvalError::internal(e)),
+                },
+                _ => Value::error(EvalError::type_mismatch(
+                    "string",
+                    &args[0].cel_type().display_name(),
+                )),
+            }),
         ),
     ]
 }

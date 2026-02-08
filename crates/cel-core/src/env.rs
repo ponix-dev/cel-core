@@ -225,7 +225,7 @@ impl std::error::Error for CompileError {}
 ///
 /// ```
 /// use cel_core::Env;
-/// use cel_core::types::CelType;
+/// use cel_core::CelType;
 ///
 /// let env = Env::with_standard_library()
 ///     .with_variable("x", CelType::Int);
@@ -305,7 +305,7 @@ impl Env {
     ///
     /// ```
     /// use cel_core::Env;
-    /// use cel_core::types::CelType;
+    /// use cel_core::CelType;
     ///
     /// let env = Env::with_standard_library()
     ///     .with_variable("x", CelType::Int)
@@ -508,9 +508,7 @@ impl Env {
         self.functions
             .values()
             .filter(|f| {
-                f.has_standalone_overloads()
-                    && !f.name.starts_with('_')
-                    && !f.name.contains('@')
+                f.has_standalone_overloads() && !f.name.starts_with('_') && !f.name.contains('@')
             })
             .map(|f| f.name.as_str())
             .collect()
@@ -568,7 +566,7 @@ impl Env {
     ///
     /// ```
     /// use cel_core::Env;
-    /// use cel_core::types::CelType;
+    /// use cel_core::CelType;
     ///
     /// let env = Env::with_standard_library()
     ///     .with_variable("x", CelType::Int);
@@ -630,7 +628,7 @@ impl Env {
     ///
     /// ```
     /// use cel_core::{Env, CelType};
-    /// use cel_core::eval::{Value, MapActivation, Activation};
+    /// use cel_core::{Value, MapActivation, Activation};
     ///
     /// let env = Env::with_standard_library()
     ///     .with_variable("x", CelType::Int);
@@ -1037,11 +1035,19 @@ mod tests {
 
         // cel.bind with string
         let result = env.compile("cel.bind(msg, \"hello\", msg + msg)");
-        assert!(result.is_ok(), "cel.bind with string should compile: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "cel.bind with string should compile: {:?}",
+            result
+        );
 
         // Nested cel.bind
         let result = env.compile("cel.bind(x, 1, cel.bind(y, 2, x + y))");
-        assert!(result.is_ok(), "nested cel.bind should compile: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "nested cel.bind should compile: {:?}",
+            result
+        );
     }
 
     #[test]
@@ -1081,9 +1087,7 @@ mod tests {
 
     #[test]
     fn test_abbreviations_add() {
-        let abbrevs = Abbreviations::new()
-            .add("my.package.Foo")
-            .unwrap();
+        let abbrevs = Abbreviations::new().add("my.package.Foo").unwrap();
 
         assert_eq!(abbrevs.resolve("Foo"), Some("my.package.Foo"));
         assert_eq!(abbrevs.len(), 1);
@@ -1169,11 +1173,8 @@ mod tests {
 
     #[test]
     fn test_abbreviations_from_qualified_names() {
-        let abbrevs = Abbreviations::from_qualified_names(&[
-            "my.package.Foo",
-            "other.package.Bar",
-        ])
-        .unwrap();
+        let abbrevs =
+            Abbreviations::from_qualified_names(&["my.package.Foo", "other.package.Bar"]).unwrap();
 
         assert_eq!(abbrevs.resolve("Foo"), Some("my.package.Foo"));
         assert_eq!(abbrevs.resolve("Bar"), Some("other.package.Bar"));
@@ -1181,9 +1182,7 @@ mod tests {
 
     #[test]
     fn test_abbreviations_resolve_nonexistent() {
-        let abbrevs = Abbreviations::new()
-            .add("my.package.Foo")
-            .unwrap();
+        let abbrevs = Abbreviations::new().add("my.package.Foo").unwrap();
 
         assert_eq!(abbrevs.resolve("Bar"), None);
     }
@@ -1227,17 +1226,12 @@ mod tests {
 
     #[test]
     fn test_env_with_abbreviations() {
-        let abbrevs = Abbreviations::new()
-            .add("my.package.Foo")
-            .unwrap();
+        let abbrevs = Abbreviations::new().add("my.package.Foo").unwrap();
 
         let env = Env::with_standard_library().with_abbreviations(abbrevs);
 
         assert!(!env.abbreviations().is_empty());
-        assert_eq!(
-            env.abbreviations().resolve("Foo"),
-            Some("my.package.Foo")
-        );
+        assert_eq!(env.abbreviations().resolve("Foo"), Some("my.package.Foo"));
     }
 
     #[test]

@@ -39,62 +39,46 @@ pub fn math_extension() -> Vec<FunctionDecl> {
     // Simple double functions
     funcs.push(
         FunctionDecl::new("math.ceil").with_overload(
-            OverloadDecl::function(
-                "math_ceil_double",
-                vec![CelType::Double],
-                CelType::Double,
-            )
-            .with_impl(|args| match &args[0] {
-                Value::Double(v) => Value::Double(v.ceil()),
-                _ => Value::error(EvalError::invalid_argument("expected double")),
-            }),
+            OverloadDecl::function("math_ceil_double", vec![CelType::Double], CelType::Double)
+                .with_impl(|args| match &args[0] {
+                    Value::Double(v) => Value::Double(v.ceil()),
+                    _ => Value::error(EvalError::invalid_argument("expected double")),
+                }),
         ),
     );
     funcs.push(
         FunctionDecl::new("math.floor").with_overload(
-            OverloadDecl::function(
-                "math_floor_double",
-                vec![CelType::Double],
-                CelType::Double,
-            )
-            .with_impl(|args| match &args[0] {
-                Value::Double(v) => Value::Double(v.floor()),
-                _ => Value::error(EvalError::invalid_argument("expected double")),
-            }),
+            OverloadDecl::function("math_floor_double", vec![CelType::Double], CelType::Double)
+                .with_impl(|args| match &args[0] {
+                    Value::Double(v) => Value::Double(v.floor()),
+                    _ => Value::error(EvalError::invalid_argument("expected double")),
+                }),
         ),
     );
     funcs.push(
         FunctionDecl::new("math.round").with_overload(
-            OverloadDecl::function(
-                "math_round_double",
-                vec![CelType::Double],
-                CelType::Double,
-            )
-            .with_impl(|args| match &args[0] {
-                Value::Double(v) => {
-                    // Round half away from zero (CEL spec behavior)
-                    let rounded = if *v >= 0.0 {
-                        (*v + 0.5).floor()
-                    } else {
-                        (*v - 0.5).ceil()
-                    };
-                    Value::Double(rounded)
-                }
-                _ => Value::error(EvalError::invalid_argument("expected double")),
-            }),
+            OverloadDecl::function("math_round_double", vec![CelType::Double], CelType::Double)
+                .with_impl(|args| match &args[0] {
+                    Value::Double(v) => {
+                        // Round half away from zero (CEL spec behavior)
+                        let rounded = if *v >= 0.0 {
+                            (*v + 0.5).floor()
+                        } else {
+                            (*v - 0.5).ceil()
+                        };
+                        Value::Double(rounded)
+                    }
+                    _ => Value::error(EvalError::invalid_argument("expected double")),
+                }),
         ),
     );
     funcs.push(
         FunctionDecl::new("math.trunc").with_overload(
-            OverloadDecl::function(
-                "math_trunc_double",
-                vec![CelType::Double],
-                CelType::Double,
-            )
-            .with_impl(|args| match &args[0] {
-                Value::Double(v) => Value::Double(v.trunc()),
-                _ => Value::error(EvalError::invalid_argument("expected double")),
-            }),
+            OverloadDecl::function("math_trunc_double", vec![CelType::Double], CelType::Double)
+                .with_impl(|args| match &args[0] {
+                    Value::Double(v) => Value::Double(v.trunc()),
+                    _ => Value::error(EvalError::invalid_argument("expected double")),
+                }),
         ),
     );
 
@@ -102,16 +86,15 @@ pub fn math_extension() -> Vec<FunctionDecl> {
     funcs.push(
         FunctionDecl::new("math.abs")
             .with_overload(
-                OverloadDecl::function("math_abs_int", vec![CelType::Int], CelType::Int)
-                    .with_impl(|args| match &args[0] {
+                OverloadDecl::function("math_abs_int", vec![CelType::Int], CelType::Int).with_impl(
+                    |args| match &args[0] {
                         Value::Int(v) => match v.checked_abs() {
                             Some(r) => Value::Int(r),
-                            None => Value::error(EvalError::overflow(
-                                "integer overflow in abs",
-                            )),
+                            None => Value::error(EvalError::overflow("integer overflow in abs")),
                         },
                         _ => Value::error(EvalError::invalid_argument("expected int")),
-                    }),
+                    },
+                ),
             )
             .with_overload(
                 OverloadDecl::function("math_abs_uint", vec![CelType::UInt], CelType::UInt)
@@ -121,15 +104,11 @@ pub fn math_extension() -> Vec<FunctionDecl> {
                     }),
             )
             .with_overload(
-                OverloadDecl::function(
-                    "math_abs_double",
-                    vec![CelType::Double],
-                    CelType::Double,
-                )
-                .with_impl(|args| match &args[0] {
-                    Value::Double(v) => Value::Double(v.abs()),
-                    _ => Value::error(EvalError::invalid_argument("expected double")),
-                }),
+                OverloadDecl::function("math_abs_double", vec![CelType::Double], CelType::Double)
+                    .with_impl(|args| match &args[0] {
+                        Value::Double(v) => Value::Double(v.abs()),
+                        _ => Value::error(EvalError::invalid_argument("expected double")),
+                    }),
             ),
     );
 
@@ -146,73 +125,55 @@ pub fn math_extension() -> Vec<FunctionDecl> {
             .with_overload(
                 OverloadDecl::function("math_sign_uint", vec![CelType::UInt], CelType::UInt)
                     .with_impl(|args| match &args[0] {
-                        Value::UInt(v) => {
-                            Value::UInt(if *v == 0 { 0 } else { 1 })
-                        }
+                        Value::UInt(v) => Value::UInt(if *v == 0 { 0 } else { 1 }),
                         _ => Value::error(EvalError::invalid_argument("expected uint")),
                     }),
             )
             .with_overload(
-                OverloadDecl::function(
-                    "math_sign_double",
-                    vec![CelType::Double],
-                    CelType::Double,
-                )
-                .with_impl(|args| match &args[0] {
-                    Value::Double(v) => {
-                        if v.is_nan() {
-                            Value::Double(f64::NAN)
-                        } else if *v > 0.0 {
-                            Value::Double(1.0)
-                        } else if *v < 0.0 {
-                            Value::Double(-1.0)
-                        } else {
-                            Value::Double(0.0)
+                OverloadDecl::function("math_sign_double", vec![CelType::Double], CelType::Double)
+                    .with_impl(|args| match &args[0] {
+                        Value::Double(v) => {
+                            if v.is_nan() {
+                                Value::Double(f64::NAN)
+                            } else if *v > 0.0 {
+                                Value::Double(1.0)
+                            } else if *v < 0.0 {
+                                Value::Double(-1.0)
+                            } else {
+                                Value::Double(0.0)
+                            }
                         }
-                    }
-                    _ => Value::error(EvalError::invalid_argument("expected double")),
-                }),
+                        _ => Value::error(EvalError::invalid_argument("expected double")),
+                    }),
             ),
     );
 
     // math.isNaN, isInf, isFinite
     funcs.push(
         FunctionDecl::new("math.isNaN").with_overload(
-            OverloadDecl::function(
-                "math_isnan_double",
-                vec![CelType::Double],
-                CelType::Bool,
-            )
-            .with_impl(|args| match &args[0] {
-                Value::Double(v) => Value::Bool(v.is_nan()),
-                _ => Value::error(EvalError::invalid_argument("expected double")),
-            }),
+            OverloadDecl::function("math_isnan_double", vec![CelType::Double], CelType::Bool)
+                .with_impl(|args| match &args[0] {
+                    Value::Double(v) => Value::Bool(v.is_nan()),
+                    _ => Value::error(EvalError::invalid_argument("expected double")),
+                }),
         ),
     );
     funcs.push(
         FunctionDecl::new("math.isInf").with_overload(
-            OverloadDecl::function(
-                "math_isinf_double",
-                vec![CelType::Double],
-                CelType::Bool,
-            )
-            .with_impl(|args| match &args[0] {
-                Value::Double(v) => Value::Bool(v.is_infinite()),
-                _ => Value::error(EvalError::invalid_argument("expected double")),
-            }),
+            OverloadDecl::function("math_isinf_double", vec![CelType::Double], CelType::Bool)
+                .with_impl(|args| match &args[0] {
+                    Value::Double(v) => Value::Bool(v.is_infinite()),
+                    _ => Value::error(EvalError::invalid_argument("expected double")),
+                }),
         ),
     );
     funcs.push(
         FunctionDecl::new("math.isFinite").with_overload(
-            OverloadDecl::function(
-                "math_isfinite_double",
-                vec![CelType::Double],
-                CelType::Bool,
-            )
-            .with_impl(|args| match &args[0] {
-                Value::Double(v) => Value::Bool(v.is_finite()),
-                _ => Value::error(EvalError::invalid_argument("expected double")),
-            }),
+            OverloadDecl::function("math_isfinite_double", vec![CelType::Double], CelType::Bool)
+                .with_impl(|args| match &args[0] {
+                    Value::Double(v) => Value::Bool(v.is_finite()),
+                    _ => Value::error(EvalError::invalid_argument("expected double")),
+                }),
         ),
     );
 
@@ -565,26 +526,18 @@ fn add_bit_operations(funcs: &mut Vec<FunctionDecl>) {
     funcs.push(
         FunctionDecl::new("math.bitNot")
             .with_overload(
-                OverloadDecl::function(
-                    "math_bitnot_int",
-                    vec![CelType::Int],
-                    CelType::Int,
-                )
-                .with_impl(|args| match &args[0] {
-                    Value::Int(a) => Value::Int(!a),
-                    _ => Value::error(EvalError::invalid_argument("expected int")),
-                }),
+                OverloadDecl::function("math_bitnot_int", vec![CelType::Int], CelType::Int)
+                    .with_impl(|args| match &args[0] {
+                        Value::Int(a) => Value::Int(!a),
+                        _ => Value::error(EvalError::invalid_argument("expected int")),
+                    }),
             )
             .with_overload(
-                OverloadDecl::function(
-                    "math_bitnot_uint",
-                    vec![CelType::UInt],
-                    CelType::UInt,
-                )
-                .with_impl(|args| match &args[0] {
-                    Value::UInt(a) => Value::UInt(!a),
-                    _ => Value::error(EvalError::invalid_argument("expected uint")),
-                }),
+                OverloadDecl::function("math_bitnot_uint", vec![CelType::UInt], CelType::UInt)
+                    .with_impl(|args| match &args[0] {
+                        Value::UInt(a) => Value::UInt(!a),
+                        _ => Value::error(EvalError::invalid_argument("expected uint")),
+                    }),
             ),
     );
 
@@ -849,27 +802,48 @@ mod tests {
 
     #[test]
     fn test_greatest_basic() {
-        assert_eq!(greatest_impl(&[Value::Int(1), Value::Int(3), Value::Int(2)]), Value::Int(3));
-        assert_eq!(greatest_impl(&[Value::Double(1.5), Value::Double(2.5)]), Value::Double(2.5));
+        assert_eq!(
+            greatest_impl(&[Value::Int(1), Value::Int(3), Value::Int(2)]),
+            Value::Int(3)
+        );
+        assert_eq!(
+            greatest_impl(&[Value::Double(1.5), Value::Double(2.5)]),
+            Value::Double(2.5)
+        );
     }
 
     #[test]
     fn test_least_basic() {
-        assert_eq!(least_impl(&[Value::Int(1), Value::Int(3), Value::Int(2)]), Value::Int(1));
-        assert_eq!(least_impl(&[Value::UInt(5), Value::UInt(2)]), Value::UInt(2));
+        assert_eq!(
+            least_impl(&[Value::Int(1), Value::Int(3), Value::Int(2)]),
+            Value::Int(1)
+        );
+        assert_eq!(
+            least_impl(&[Value::UInt(5), Value::UInt(2)]),
+            Value::UInt(2)
+        );
     }
 
     #[test]
     fn test_greatest_mixed_types() {
-        assert_eq!(greatest_impl(&[Value::Int(1), Value::UInt(5)]), Value::UInt(5));
-        assert_eq!(greatest_impl(&[Value::Int(-1), Value::UInt(0)]), Value::UInt(0));
+        assert_eq!(
+            greatest_impl(&[Value::Int(1), Value::UInt(5)]),
+            Value::UInt(5)
+        );
+        assert_eq!(
+            greatest_impl(&[Value::Int(-1), Value::UInt(0)]),
+            Value::UInt(0)
+        );
     }
 
     #[test]
     fn test_greatest_empty_list() {
         use std::sync::Arc;
         let empty: Arc<[Value]> = Arc::from(vec![]);
-        assert!(matches!(greatest_impl(&[Value::List(empty)]), Value::Error(_)));
+        assert!(matches!(
+            greatest_impl(&[Value::List(empty)]),
+            Value::Error(_)
+        ));
     }
 
     #[test]
@@ -886,6 +860,9 @@ mod tests {
             .clone()
             .unwrap();
 
-        assert!(matches!(shift_fn(&[Value::Int(1), Value::Int(-1)]), Value::Error(_)));
+        assert!(matches!(
+            shift_fn(&[Value::Int(1), Value::Int(-1)]),
+            Value::Error(_)
+        ));
     }
 }

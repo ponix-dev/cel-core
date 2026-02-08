@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use prost_reflect::{DynamicMessage, ReflectMessage};
 
-use cel_core::eval::message::MessageValue;
+use cel_core::MessageValue;
 
 /// A protobuf message value backed by prost-reflect.
 ///
@@ -78,10 +78,12 @@ impl MessageValue for ProstMessage {
     }
 
     fn is_default(&self) -> Option<bool> {
-        Some(self.message
-            .descriptor()
-            .fields()
-            .all(|field_desc| !self.message.has_field(&field_desc)))
+        Some(
+            self.message
+                .descriptor()
+                .fields()
+                .all(|field_desc| !self.message.has_field(&field_desc)),
+        )
     }
 }
 
@@ -104,10 +106,7 @@ impl PartialEq for ProstMessage {
 ///
 /// Unpacks both Any messages to their inner message type and compares
 /// the decoded messages. Falls back to bytewise comparison if decoding fails.
-fn any_semantic_eq(
-    a: &prost_reflect::DynamicMessage,
-    b: &prost_reflect::DynamicMessage,
-) -> bool {
+fn any_semantic_eq(a: &prost_reflect::DynamicMessage, b: &prost_reflect::DynamicMessage) -> bool {
     let descriptor = a.descriptor();
 
     // Extract type_url from both
@@ -159,10 +158,11 @@ fn any_semantic_eq(
     };
 
     // Decode both into DynamicMessage and compare semantically
-    let msg_a = match prost_reflect::DynamicMessage::decode(inner_descriptor.clone(), bytes_a.as_ref()) {
-        Ok(m) => m,
-        Err(_) => return bytes_a == bytes_b,
-    };
+    let msg_a =
+        match prost_reflect::DynamicMessage::decode(inner_descriptor.clone(), bytes_a.as_ref()) {
+            Ok(m) => m,
+            Err(_) => return bytes_a == bytes_b,
+        };
     let msg_b = match prost_reflect::DynamicMessage::decode(inner_descriptor, bytes_b.as_ref()) {
         Ok(m) => m,
         Err(_) => return bytes_a == bytes_b,

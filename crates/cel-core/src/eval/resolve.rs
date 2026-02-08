@@ -1,8 +1,6 @@
 //! Identifier resolution and scope/container logic.
 
-use super::{
-    EvalError, TypeValue, Value,
-};
+use super::{EvalError, TypeValue, Value};
 use crate::types::{Expr, SpannedExpr};
 
 use super::evaluator::Evaluator;
@@ -106,11 +104,19 @@ impl<'a> Evaluator<'a> {
     /// For `a.b.c`, builds the string "a.b.c".
     /// For `.a.b`, builds the string ".a.b" (leading dot preserved).
     /// Returns None if the chain contains non-identifier nodes.
-    pub(super) fn try_qualified_variable_name(&self, obj: &SpannedExpr, field: &str) -> Option<String> {
+    pub(super) fn try_qualified_variable_name(
+        &self,
+        obj: &SpannedExpr,
+        field: &str,
+    ) -> Option<String> {
         match &obj.node {
             Expr::Ident(name) => Some(format!("{}.{}", name, field)),
             Expr::RootIdent(name) => Some(format!(".{}.{}", name, field)),
-            Expr::Member { expr: inner, field: inner_field, optional: false } => {
+            Expr::Member {
+                expr: inner,
+                field: inner_field,
+                optional: false,
+            } => {
                 let prefix = self.try_qualified_variable_name(inner, inner_field)?;
                 Some(format!("{}.{}", prefix, field))
             }
@@ -141,7 +147,11 @@ impl<'a> Evaluator<'a> {
     ///
     /// When `root_only` is true (for leading-dot chains), resolves against the
     /// root activation without container prefixing.
-    pub(super) fn try_longest_prefix_match(&self, qualified_name: &str, root_only: bool) -> Option<Value> {
+    pub(super) fn try_longest_prefix_match(
+        &self,
+        qualified_name: &str,
+        root_only: bool,
+    ) -> Option<Value> {
         // Handle leading dot prefix
         let name = if let Some(stripped) = qualified_name.strip_prefix('.') {
             stripped
@@ -154,7 +164,11 @@ impl<'a> Evaluator<'a> {
 
         // Try full name first, then progressively shorter prefixes
         let candidates: Vec<(&str, &str)> = std::iter::once((name, ""))
-            .chain(dots.iter().rev().map(|&pos| (&name[..pos], &name[pos + 1..])))
+            .chain(
+                dots.iter()
+                    .rev()
+                    .map(|&pos| (&name[..pos], &name[pos + 1..])),
+            )
             .collect();
 
         for (prefix, remainder) in &candidates {
@@ -193,7 +207,10 @@ impl<'a> Evaluator<'a> {
         // proto message type — this allows expressions like `google.protobuf.Timestamp`
         // to resolve to their type value.
         if let Some(registry) = self.proto_registry {
-            if registry.resolve_message_name(name, &self.container).is_some() {
+            if registry
+                .resolve_message_name(name, &self.container)
+                .is_some()
+            {
                 return Some(Value::Type(TypeValue::new(name)));
             }
         }
@@ -214,7 +231,10 @@ impl<'a> Evaluator<'a> {
         // Check if it's an abbreviation
         if let Some(qualified) = abbrevs.get(first_segment) {
             // If the name has more segments, append them to the expanded name
-            if let Some(rest) = name.strip_prefix(first_segment).and_then(|s| s.strip_prefix('.')) {
+            if let Some(rest) = name
+                .strip_prefix(first_segment)
+                .and_then(|s| s.strip_prefix('.'))
+            {
                 Some(format!("{}.{}", qualified, rest))
             } else {
                 Some(qualified.clone())
@@ -264,9 +284,7 @@ impl<'a> Evaluator<'a> {
             Expr::Ident(name) => Some(name.clone()),
             Expr::RootIdent(name) => Some(name.clone()),
             Expr::Member {
-                expr: inner,
-                field,
-                ..
+                expr: inner, field, ..
             } => {
                 let prefix = self.get_type_name_from_expr(inner)?;
                 Some(format!("{}.{}", prefix, field))

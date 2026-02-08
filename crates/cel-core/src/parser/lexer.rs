@@ -823,14 +823,8 @@ line""""#
 
     #[test]
     fn lex_identifiers() {
-        assert_eq!(
-            lex_tokens("foo"),
-            vec![Token::Ident("foo".to_string())]
-        );
-        assert_eq!(
-            lex_tokens("_bar"),
-            vec![Token::Ident("_bar".to_string())]
-        );
+        assert_eq!(lex_tokens("foo"), vec![Token::Ident("foo".to_string())]);
+        assert_eq!(lex_tokens("_bar"), vec![Token::Ident("_bar".to_string())]);
         assert_eq!(
             lex_tokens("baz123"),
             vec![Token::Ident("baz123".to_string())]
@@ -952,18 +946,12 @@ line""""#
     #[test]
     fn lex_reserved_words() {
         // Reserved words should produce Token::Reserved, not Token::Ident
-        assert_eq!(
-            lex_tokens("if"),
-            vec![Token::Reserved("if".to_string())]
-        );
+        assert_eq!(lex_tokens("if"), vec![Token::Reserved("if".to_string())]);
         assert_eq!(
             lex_tokens("else"),
             vec![Token::Reserved("else".to_string())]
         );
-        assert_eq!(
-            lex_tokens("for"),
-            vec![Token::Reserved("for".to_string())]
-        );
+        assert_eq!(lex_tokens("for"), vec![Token::Reserved("for".to_string())]);
         assert_eq!(
             lex_tokens("while"),
             vec![Token::Reserved("while".to_string())]
@@ -972,18 +960,12 @@ line""""#
             lex_tokens("return"),
             vec![Token::Reserved("return".to_string())]
         );
-        assert_eq!(
-            lex_tokens("let"),
-            vec![Token::Reserved("let".to_string())]
-        );
+        assert_eq!(lex_tokens("let"), vec![Token::Reserved("let".to_string())]);
         assert_eq!(
             lex_tokens("const"),
             vec![Token::Reserved("const".to_string())]
         );
-        assert_eq!(
-            lex_tokens("var"),
-            vec![Token::Reserved("var".to_string())]
-        );
+        assert_eq!(lex_tokens("var"), vec![Token::Reserved("var".to_string())]);
         assert_eq!(
             lex_tokens("function"),
             vec![Token::Reserved("function".to_string())]

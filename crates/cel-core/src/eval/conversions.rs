@@ -2,10 +2,7 @@
 
 use std::sync::Arc;
 
-use super::{
-    time,
-    EvalError, Value,
-};
+use super::{time, EvalError, Value};
 
 use super::evaluator::Evaluator;
 
@@ -42,7 +39,11 @@ impl<'a> Evaluator<'a> {
                 }
             }
             Value::Double(d) => {
-                if d.is_nan() || d.is_infinite() || *d >= (i64::MAX as f64) || *d <= (i64::MIN as f64) {
+                if d.is_nan()
+                    || d.is_infinite()
+                    || *d >= (i64::MAX as f64)
+                    || *d <= (i64::MIN as f64)
+                {
                     Value::error(EvalError::overflow("double to int overflow"))
                 } else {
                     Value::Int(*d as i64)

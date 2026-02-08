@@ -12,7 +12,7 @@
 //!
 //! ```
 //! use cel_core::{Env, CelType};
-//! use cel_core::eval::{Value, MapActivation, Activation};
+//! use cel_core::{Value, MapActivation, Activation};
 //!
 //! let env = Env::with_standard_library()
 //!     .with_variable("x", CelType::Int);
@@ -33,21 +33,23 @@ mod conversions;
 mod error;
 mod evaluator;
 mod functions;
-pub mod message;
+pub(crate) mod message;
 mod operators;
 mod program;
+pub(crate) mod proto_registry;
 mod resolve;
 pub mod time;
-pub mod proto_registry;
 mod value;
 
 pub use activation::{
     Activation, EmptyActivation, HierarchicalActivation, MapActivation, SharedActivation,
 };
 pub use error::{EvalError, EvalErrorKind};
-pub use evaluator::Evaluator;
-pub use functions::{Function, FunctionImpl, FunctionRegistry, Overload};
+pub(crate) use evaluator::Evaluator;
+pub(crate) use functions::{Function, FunctionRegistry, Overload};
 pub use message::MessageValue;
 pub use program::Program;
-pub use proto_registry::{ProtoTypeResolver, ProtoRegistry, StructFieldValue};
-pub use value::{Duration, EnumValue, MapKey, OptionalValue, Timestamp, TypeValue, Value, ValueError, ValueMap};
+pub use proto_registry::{ProtoRegistry, ProtoTypeResolver, StructFieldValue};
+pub use value::{
+    Duration, EnumValue, MapKey, OptionalValue, Timestamp, TypeValue, Value, ValueError, ValueMap,
+};
