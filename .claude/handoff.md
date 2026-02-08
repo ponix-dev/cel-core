@@ -4,39 +4,29 @@
 2026-02-08
 
 ## Just Completed
-- GitHub Issue: #59 — Clean up public API surface and export patterns
-- [x] Made `checker`, `eval`, `unparser` modules private in cel-core
-- [x] Removed internal types from root re-exports (`check()`, `STANDARD_LIBRARY`, `Evaluator`, `FunctionRegistry`, etc.)
-- [x] Made lexer types (`lex()`, `Token`, `LexError`, `SpannedToken`) `pub(crate)` in parser
-- [x] Made `message` and `registry` modules private in cel-core-proto, kept root re-exports
-- [x] Made `AstConverter`, operator mappings, source_info helpers, and WKT helpers `pub(crate)` in cel-core-proto
-- [x] Made `types`, `protovalidate`, `settings` modules `pub(crate)` in cel-core-lsp
-- [x] Made `Backend` struct `pub(crate)`, only `create_service()` is public
-- [x] Adopted consistent pattern: private modules + selective root re-export
-- [x] Moved test code into `#[cfg(test)] mod tests` modules
-- [x] Bundled imports and fixed dead code warnings
-- [x] Added `cargo fmt` to CLAUDE.md development commands
+- GitHub Issue: #60 — Automate releases with GitHub Actions
+- [x] Created reusable composite action `.github/actions/setup/action.yml` using `jdx/mise-action@v3` + `Swatinem/rust-cache@v2`
+- [x] Created `.github/workflows/pr.yml` — runs fmt, clippy, test on pull requests to main
+- [x] Created `.github/workflows/main.yml` — runs CI checks then gates release pipeline (check-bump → bump → publish + build-binaries → release)
+- [x] All tool installation (rust, cocogitto, cargo-edit) handled via mise with caching
+- [x] Removed standalone `cocogitto/cocogitto-action@v4` and `cargo install cargo-edit` in favor of mise
+- [x] Release pipeline gated on CI passing (check-bump depends on fmt/clippy/test)
 
 ### Summary
-Major API cleanup across all three crates. Tightened public exports by making internal modules private and removing implementation details from the public API surface. Adopted a consistent "private modules + selective root re-export" pattern. The public API is now minimal and intentional: `cel-core` exposes `Env`, `Ast`, types, parsing, and extension traits; `cel-core-proto` exposes registry, message, and conversion functions; `cel-core-lsp` only exposes `create_service()`.
+Restructured GitHub Actions from `ci.yml` + `release.yml` into `pr.yml` (PR trigger) and `main.yml` (main push trigger). Extracted shared Rust toolchain setup into a reusable composite action that uses mise for dependency management with caching. The release pipeline on main is now gated behind CI checks passing.
 
-### Key files modified
-- `crates/cel-core/src/lib.rs` — tightened re-exports, made modules private
-- `crates/cel-core/src/checker/` — made `pub(crate)`, restructured exports
-- `crates/cel-core/src/eval/` — made `pub(crate)`, restructured exports
-- `crates/cel-core/src/parser/` — lexer types made `pub(crate)`
-- `crates/cel-core-proto/src/lib.rs` — tightened re-exports, made modules private
-- `crates/cel-core-lsp/src/lib.rs` — made internal modules `pub(crate)`
-- `crates/cel-core-lsp/src/types/builtins.rs` — removed redundant LSP builtins (now from checker)
-- All example files updated to use new public API paths
+### Key files added
+- `.github/actions/setup/action.yml` — composite action: mise + cargo cache
+- `.github/workflows/pr.yml` — PR CI: fmt, clippy, test (3 OS matrix)
+- `.github/workflows/main.yml` — main CI + release: fmt, clippy, test → check-bump → bump → publish + build-binaries → release
 
 ### Notable decisions
-- Kept `ext` module public in cel-core since extension libraries are user-facing
-- Kept `parser` module public but only exports `parse()`, `ParseResult`, and macro types
-- `types` module remains public for `CelType`, `CelValue`, `Expr`, etc.
-- Conformance crate needed direct access to checker/eval internals, handled via targeted `pub(crate)` within the workspace
+- Two-layer caching: `jdx/mise-action@v3` caches tool installations, `Swatinem/rust-cache@v2` caches cargo build artifacts
+- Kept build matrix (ubuntu, macos-13, macos-14) for both test and binary builds
+- Release jobs only run when a version bump is detected by cocogitto
 
 ## Previous Work
+- GitHub Issue: #59 — Clean up public API surface and export patterns
 - GitHub Issue: #35 — Replace custom LSP validation with cel-core's checker
 - GitHub Issue: #50 — Decoupled prost/prost-reflect from cel-core via trait abstraction
 

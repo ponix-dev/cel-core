@@ -55,8 +55,8 @@ impl std::error::Error for AbbrevError {}
 /// use cel_core::Abbreviations;
 ///
 /// let abbrevs = Abbreviations::new()
-///     .add("my.package.Foo").unwrap()     // "Foo" -> "my.package.Foo"
-///     .add("other.package.Bar").unwrap(); // "Bar" -> "other.package.Bar"
+///     .with_abbreviation("my.package.Foo").unwrap()     // "Foo" -> "my.package.Foo"
+///     .with_abbreviation("other.package.Bar").unwrap(); // "Bar" -> "other.package.Bar"
 ///
 /// assert_eq!(abbrevs.resolve("Foo"), Some("my.package.Foo"));
 /// assert_eq!(abbrevs.resolve("Bar"), Some("other.package.Bar"));
@@ -83,11 +83,11 @@ impl Abbreviations {
     /// use cel_core::Abbreviations;
     ///
     /// let abbrevs = Abbreviations::new()
-    ///     .add("my.package.Foo").unwrap();
+    ///     .with_abbreviation("my.package.Foo").unwrap();
     ///
     /// assert_eq!(abbrevs.resolve("Foo"), Some("my.package.Foo"));
     /// ```
-    pub fn add(mut self, qualified_name: &str) -> Result<Self, AbbrevError> {
+    pub fn with_abbreviation(mut self, qualified_name: &str) -> Result<Self, AbbrevError> {
         if qualified_name.is_empty() {
             return Err(AbbrevError::InvalidName(qualified_name.to_string()));
         }
@@ -133,7 +133,7 @@ impl Abbreviations {
     pub fn from_qualified_names(names: &[&str]) -> Result<Self, AbbrevError> {
         let mut abbrevs = Self::new();
         for name in names {
-            abbrevs = abbrevs.add(name)?;
+            abbrevs = abbrevs.with_abbreviation(name)?;
         }
         Ok(abbrevs)
     }
@@ -384,7 +384,7 @@ impl Env {
     /// use cel_core::{Env, Abbreviations};
     ///
     /// let abbrevs = Abbreviations::new()
-    ///     .add("google.protobuf.Duration").unwrap();
+    ///     .with_abbreviation("google.protobuf.Duration").unwrap();
     ///
     /// let env = Env::with_standard_library()
     ///     .with_abbreviations(abbrevs);
@@ -1087,7 +1087,9 @@ mod tests {
 
     #[test]
     fn test_abbreviations_add() {
-        let abbrevs = Abbreviations::new().add("my.package.Foo").unwrap();
+        let abbrevs = Abbreviations::new()
+            .with_abbreviation("my.package.Foo")
+            .unwrap();
 
         assert_eq!(abbrevs.resolve("Foo"), Some("my.package.Foo"));
         assert_eq!(abbrevs.len(), 1);
@@ -1096,9 +1098,9 @@ mod tests {
     #[test]
     fn test_abbreviations_multiple() {
         let abbrevs = Abbreviations::new()
-            .add("my.package.Foo")
+            .with_abbreviation("my.package.Foo")
             .unwrap()
-            .add("other.package.Bar")
+            .with_abbreviation("other.package.Bar")
             .unwrap();
 
         assert_eq!(abbrevs.resolve("Foo"), Some("my.package.Foo"));
@@ -1109,16 +1111,16 @@ mod tests {
     #[test]
     fn test_abbreviations_unqualified_name() {
         // Single-segment name is valid
-        let abbrevs = Abbreviations::new().add("Foo").unwrap();
+        let abbrevs = Abbreviations::new().with_abbreviation("Foo").unwrap();
         assert_eq!(abbrevs.resolve("Foo"), Some("Foo"));
     }
 
     #[test]
     fn test_abbreviations_conflict() {
         let result = Abbreviations::new()
-            .add("my.package.Foo")
+            .with_abbreviation("my.package.Foo")
             .unwrap()
-            .add("other.package.Foo"); // Same short name!
+            .with_abbreviation("other.package.Foo"); // Same short name!
 
         assert!(result.is_err());
         match result {
@@ -1139,9 +1141,9 @@ mod tests {
     fn test_abbreviations_idempotent() {
         // Adding the same mapping twice is OK (idempotent)
         let abbrevs = Abbreviations::new()
-            .add("my.package.Foo")
+            .with_abbreviation("my.package.Foo")
             .unwrap()
-            .add("my.package.Foo") // Same mapping again
+            .with_abbreviation("my.package.Foo") // Same mapping again
             .unwrap();
 
         assert_eq!(abbrevs.resolve("Foo"), Some("my.package.Foo"));
@@ -1150,7 +1152,7 @@ mod tests {
 
     #[test]
     fn test_abbreviations_empty_name() {
-        let result = Abbreviations::new().add("");
+        let result = Abbreviations::new().with_abbreviation("");
         assert!(result.is_err());
         match result {
             Err(AbbrevError::InvalidName(name)) => {
@@ -1163,7 +1165,7 @@ mod tests {
     #[test]
     fn test_abbreviations_trailing_dot() {
         // A name ending with a dot has an empty last segment
-        let result = Abbreviations::new().add("my.package.");
+        let result = Abbreviations::new().with_abbreviation("my.package.");
         assert!(result.is_err());
         match result {
             Err(AbbrevError::InvalidName(_)) => {}
@@ -1182,7 +1184,9 @@ mod tests {
 
     #[test]
     fn test_abbreviations_resolve_nonexistent() {
-        let abbrevs = Abbreviations::new().add("my.package.Foo").unwrap();
+        let abbrevs = Abbreviations::new()
+            .with_abbreviation("my.package.Foo")
+            .unwrap();
 
         assert_eq!(abbrevs.resolve("Bar"), None);
     }
@@ -1226,7 +1230,9 @@ mod tests {
 
     #[test]
     fn test_env_with_abbreviations() {
-        let abbrevs = Abbreviations::new().add("my.package.Foo").unwrap();
+        let abbrevs = Abbreviations::new()
+            .with_abbreviation("my.package.Foo")
+            .unwrap();
 
         let env = Env::with_standard_library().with_abbreviations(abbrevs);
 

@@ -345,7 +345,7 @@ fn format_scientific(d: f64, precision: usize) -> String {
     let exp_sign = if exp >= 0 { '+' } else { '-' };
     let exp_abs = exp.unsigned_abs();
     if precision == 0 {
-        format!("{}e{}{:02}", format!("{:.0}", mantissa), exp_sign, exp_abs)
+        format!("{:.0}e{}{:02}", mantissa, exp_sign, exp_abs)
     } else {
         format!(
             "{:.prec$}e{}{:02}",
@@ -525,7 +525,7 @@ pub fn string_extension() -> Vec<FunctionDecl> {
                     }
                     // Search only in s[0..end_byte] where end_byte is the byte offset of
                     // offset + len(substr) code points (so we can find matches starting at offset)
-                    let substr_cp_len = codepoint_len(&substr);
+                    let substr_cp_len = codepoint_len(substr);
                     let search_end_cp = (offset as usize) + substr_cp_len;
                     let search_end_byte = if search_end_cp >= codepoint_len(s) {
                         s.len()
@@ -1255,11 +1255,17 @@ mod tests {
     fn test_join_impl() {
         let funcs = string_extension();
         let list = Value::List(Arc::from(vec![s("x"), s("y")]));
-        assert_eq!(call_overload(&funcs, "join", 0, &[list.clone()]), s("xy"));
+        assert_eq!(
+            call_overload(&funcs, "join", 0, std::slice::from_ref(&list)),
+            s("xy")
+        );
         assert_eq!(call_overload(&funcs, "join", 1, &[list, s("-")]), s("x-y"));
         // Empty list
         let empty = Value::List(Arc::from(Vec::<Value>::new()));
-        assert_eq!(call_overload(&funcs, "join", 0, &[empty.clone()]), s(""));
+        assert_eq!(
+            call_overload(&funcs, "join", 0, std::slice::from_ref(&empty)),
+            s("")
+        );
         assert_eq!(call_overload(&funcs, "join", 1, &[empty, s("-")]), s(""));
     }
 
@@ -1304,6 +1310,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::approx_constant)]
     fn test_format_float() {
         let funcs = string_extension();
         let fmt = |f: &str, args: Vec<Value>| {
@@ -1318,6 +1325,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::approx_constant)]
     fn test_format_scientific() {
         let funcs = string_extension();
         let fmt = |f: &str, args: Vec<Value>| {

@@ -148,7 +148,7 @@ fn split_map_types(s: &str) -> Result<(&str, &str), String> {
     }
 
     match split_pos {
-        Some(pos) => Ok((&s[..pos].trim(), &s[pos + 1..].trim())),
+        Some(pos) => Ok((s[..pos].trim(), s[pos + 1..].trim())),
         None => Err(format!("map type must have 2 parameters: '{}'", s)),
     }
 }
@@ -263,7 +263,7 @@ fn build_env_from_settings_impl(settings: &Settings, workspace_root: Option<&Pat
         if let Some(ref abbreviations) = env_settings.abbreviations {
             let mut abbrevs = cel_core::Abbreviations::new();
             for name in abbreviations {
-                match abbrevs.clone().add(name) {
+                match abbrevs.clone().with_abbreviation(name) {
                     Ok(a) => abbrevs = a,
                     Err(e) => {
                         eprintln!("Warning: failed to add abbreviation '{}': {}", name, e);

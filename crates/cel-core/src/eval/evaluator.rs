@@ -19,7 +19,7 @@ use super::{
     ValueMap,
 };
 use crate::checker::ReferenceInfo;
-use crate::types::{Expr, SpannedExpr};
+use crate::types::{ComprehensionData, Expr, SpannedExpr};
 
 /// The CEL expression evaluator.
 ///
@@ -209,25 +209,7 @@ impl<'a> Evaluator<'a> {
             Expr::Struct { type_name, fields } => self.eval_struct(type_name, fields),
 
             // Comprehension
-            Expr::Comprehension {
-                iter_var,
-                iter_var2,
-                iter_range,
-                accu_var,
-                accu_init,
-                loop_condition,
-                loop_step,
-                result,
-            } => self.eval_comprehension(
-                iter_var,
-                iter_var2,
-                iter_range,
-                accu_var,
-                accu_init,
-                loop_condition,
-                loop_step,
-                result,
-            ),
+            Expr::Comprehension(comp) => self.eval_comprehension(comp),
 
             // Member test
             Expr::MemberTestOnly { expr, field } => self.eval_member_test(expr, field),
@@ -319,20 +301,16 @@ impl<'a> Evaluator<'a> {
                         }
                     }
                 }
-            } else {
-                if let Some(map_key) = MapKey::from_value(&key) {
-                    if map.contains_key_with_numeric_coercion(&map_key) {
-                        return Value::error(EvalError::invalid_argument(
-                            "Failed with repeated key",
-                        ));
-                    }
-                    map.insert(map_key, value);
-                } else {
-                    return Value::error(EvalError::type_mismatch(
-                        "valid map key",
-                        &key.cel_type().display_name(),
-                    ));
+            } else if let Some(map_key) = MapKey::from_value(&key) {
+                if map.contains_key_with_numeric_coercion(&map_key) {
+                    return Value::error(EvalError::invalid_argument("Failed with repeated key"));
                 }
+                map.insert(map_key, value);
+            } else {
+                return Value::error(EvalError::type_mismatch(
+                    "valid map key",
+                    &key.cel_type().display_name(),
+                ));
             }
         }
 
@@ -918,26 +896,15 @@ impl<'a> Evaluator<'a> {
         overloads[0].call(args)
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn eval_comprehension(
-        &self,
-        iter_var: &str,
-        iter_var2: &str,
-        iter_range: &SpannedExpr,
-        accu_var: &str,
-        accu_init: &SpannedExpr,
-        loop_condition: &SpannedExpr,
-        loop_step: &SpannedExpr,
-        result: &SpannedExpr,
-    ) -> Value {
+    fn eval_comprehension(&self, comp: &ComprehensionData) -> Value {
         // Evaluate the iteration range
-        let range_val = self.eval_expr(iter_range);
+        let range_val = self.eval_expr(&comp.iter_range);
         if range_val.is_error() {
             return range_val;
         }
 
         // Initialize accumulator
-        let mut accu = self.eval_expr(accu_init);
+        let mut accu = self.eval_expr(&comp.accu_init);
         if accu.is_error() {
             return accu;
         }
@@ -948,25 +915,25 @@ impl<'a> Evaluator<'a> {
                 for (i, elem) in list.iter().enumerate() {
                     // Create nested activation with iteration variables
                     let mut iter_activation = HierarchicalActivation::new(self.activation)
-                        .with_binding(accu_var, accu.clone());
+                        .with_binding(&comp.accu_var, accu.clone());
 
-                    if !iter_var.is_empty() {
-                        if !iter_var2.is_empty() {
+                    if !comp.iter_var.is_empty() {
+                        if !comp.iter_var2.is_empty() {
                             // Two-variable form: iter_var = index, iter_var2 = element
-                            iter_activation.insert(iter_var, Value::Int(i as i64));
+                            iter_activation.insert(&comp.iter_var, Value::Int(i as i64));
                         } else {
                             // Single-variable form: iter_var = element
-                            iter_activation.insert(iter_var, elem.clone());
+                            iter_activation.insert(&comp.iter_var, elem.clone());
                         }
                     }
-                    if !iter_var2.is_empty() {
-                        iter_activation.insert(iter_var2, elem.clone());
+                    if !comp.iter_var2.is_empty() {
+                        iter_activation.insert(&comp.iter_var2, elem.clone());
                     }
 
                     let iter_eval = self.child_evaluator(&iter_activation);
 
                     // Check loop condition
-                    let cond = iter_eval.eval_expr(loop_condition);
+                    let cond = iter_eval.eval_expr(&comp.loop_condition);
                     match &cond {
                         Value::Bool(false) => break,
                         Value::Bool(true) => {}
@@ -980,25 +947,25 @@ impl<'a> Evaluator<'a> {
                     }
 
                     // Compute next accumulator value
-                    accu = iter_eval.eval_expr(loop_step);
+                    accu = iter_eval.eval_expr(&comp.loop_step);
                 }
             }
             Value::Map(map) => {
                 for (key, val) in map.iter() {
                     let mut iter_activation = HierarchicalActivation::new(self.activation)
-                        .with_binding(accu_var, accu.clone());
+                        .with_binding(&comp.accu_var, accu.clone());
 
-                    if !iter_var.is_empty() {
-                        iter_activation.insert(iter_var, key.to_value());
+                    if !comp.iter_var.is_empty() {
+                        iter_activation.insert(&comp.iter_var, key.to_value());
                     }
-                    if !iter_var2.is_empty() {
-                        iter_activation.insert(iter_var2, val.clone());
+                    if !comp.iter_var2.is_empty() {
+                        iter_activation.insert(&comp.iter_var2, val.clone());
                     }
 
                     let iter_eval = self.child_evaluator(&iter_activation);
 
                     // Check loop condition
-                    let cond = iter_eval.eval_expr(loop_condition);
+                    let cond = iter_eval.eval_expr(&comp.loop_condition);
                     match &cond {
                         Value::Bool(false) => break,
                         Value::Bool(true) => {}
@@ -1012,7 +979,7 @@ impl<'a> Evaluator<'a> {
                     }
 
                     // Compute next accumulator value
-                    accu = iter_eval.eval_expr(loop_step);
+                    accu = iter_eval.eval_expr(&comp.loop_step);
                 }
             }
             _ => {
@@ -1025,9 +992,9 @@ impl<'a> Evaluator<'a> {
 
         // Compute final result
         let result_activation =
-            HierarchicalActivation::new(self.activation).with_binding(accu_var, accu);
+            HierarchicalActivation::new(self.activation).with_binding(&comp.accu_var, accu);
         let result_eval = self.child_evaluator(&result_activation);
-        result_eval.eval_expr(result)
+        result_eval.eval_expr(&comp.result)
     }
 
     fn eval_member_test(&self, expr: &SpannedExpr, field: &str) -> Value {
@@ -1176,6 +1143,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::approx_constant)]
     fn test_literals() {
         assert_eq!(eval_expr("null"), Value::Null);
         assert_eq!(eval_expr("true"), Value::Bool(true));

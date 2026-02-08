@@ -15,8 +15,8 @@ use super::overload::{finalize_type, resolve_overload, substitute_type};
 use super::scope::ScopeStack;
 use crate::eval::proto_registry::ProtoTypeResolver;
 use crate::types::{
-    BinaryOp, CelType, CelValue, Expr, FunctionDecl, ListElement, MapEntry, ResolvedProtoType,
-    SpannedExpr, StructField, UnaryOp, VariableDecl,
+    BinaryOp, CelType, CelValue, ComprehensionData, Expr, FunctionDecl, ListElement, MapEntry,
+    ResolvedProtoType, SpannedExpr, StructField, UnaryOp, VariableDecl,
 };
 
 /// Reference information for a resolved identifier or function.
@@ -225,26 +225,7 @@ impl<'a> Checker<'a> {
             Expr::Call { expr: callee, args } => self.check_call(callee, args, expr),
             Expr::Struct { type_name, fields } => self.check_struct(type_name, fields, expr),
 
-            Expr::Comprehension {
-                iter_var,
-                iter_var2,
-                iter_range,
-                accu_var,
-                accu_init,
-                loop_condition,
-                loop_step,
-                result,
-            } => self.check_comprehension(
-                iter_var,
-                iter_var2,
-                iter_range,
-                accu_var,
-                accu_init,
-                loop_condition,
-                loop_step,
-                result,
-                expr,
-            ),
+            Expr::Comprehension(comp) => self.check_comprehension(comp, expr),
 
             Expr::MemberTestOnly { expr: obj, field } => self.check_member_test(obj, field, expr),
 
@@ -931,23 +912,12 @@ impl<'a> Checker<'a> {
     }
 
     /// Check a comprehension expression.
-    fn check_comprehension(
-        &mut self,
-        iter_var: &str,
-        iter_var2: &str,
-        iter_range: &SpannedExpr,
-        accu_var: &str,
-        accu_init: &SpannedExpr,
-        loop_condition: &SpannedExpr,
-        loop_step: &SpannedExpr,
-        result: &SpannedExpr,
-        _expr: &SpannedExpr,
-    ) -> CelType {
+    fn check_comprehension(&mut self, comp: &ComprehensionData, _expr: &SpannedExpr) -> CelType {
         // Check iter_range in outer scope
-        let range_type = self.check_expr(iter_range);
+        let range_type = self.check_expr(&comp.iter_range);
 
         // Determine iteration variable type(s) from range
-        let (iter_type, iter_type2) = if !iter_var2.is_empty() {
+        let (iter_type, iter_type2) = if !comp.iter_var2.is_empty() {
             // Two-variable form: first var is index/key, second is value/element
             match &range_type {
                 CelType::List(elem) => (CelType::Int, (**elem).clone()),
@@ -968,42 +938,42 @@ impl<'a> Checker<'a> {
         };
 
         // Check accu_init in outer scope
-        let accu_type = self.check_expr(accu_init);
+        let accu_type = self.check_expr(&comp.accu_init);
 
         // Enter new scope for comprehension body
         self.scopes.enter_scope();
 
         // Bind iteration variable(s)
-        self.scopes.add_variable(iter_var, iter_type.clone());
-        if !iter_var2.is_empty() {
-            self.scopes.add_variable(iter_var2, iter_type2);
+        self.scopes.add_variable(&comp.iter_var, iter_type.clone());
+        if !comp.iter_var2.is_empty() {
+            self.scopes.add_variable(&comp.iter_var2, iter_type2);
         }
 
         // Bind accumulator variable
-        self.scopes.add_variable(accu_var, accu_type.clone());
+        self.scopes.add_variable(&comp.accu_var, accu_type.clone());
 
         // Check loop_condition (must be bool)
-        let cond_type = self.check_expr(loop_condition);
+        let cond_type = self.check_expr(&comp.loop_condition);
         if !matches!(cond_type, CelType::Bool | CelType::Dyn | CelType::Error) {
             self.report_error(CheckError::type_mismatch(
                 CelType::Bool,
                 cond_type,
-                loop_condition.span.clone(),
-                loop_condition.id,
+                comp.loop_condition.span.clone(),
+                comp.loop_condition.id,
             ));
         }
 
         // Check loop_step (should match accu type)
-        let step_type = self.check_expr(loop_step);
+        let step_type = self.check_expr(&comp.loop_step);
 
         // If the accumulator was an unresolved type (e.g., empty list from map macro),
         // refine it using the loop step type which has concrete element info.
         if contains_type_var_checker(&accu_type) && !contains_type_var_checker(&step_type) {
-            self.scopes.add_variable(accu_var, step_type);
+            self.scopes.add_variable(&comp.accu_var, step_type);
         }
 
         // Check result
-        let result_type = self.check_expr(result);
+        let result_type = self.check_expr(&comp.result);
 
         // Exit comprehension scope
         self.scopes.exit_scope();

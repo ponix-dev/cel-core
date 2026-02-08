@@ -11,12 +11,10 @@ use crate::types::{CelType, FunctionDecl, OverloadDecl};
 pub static STANDARD_LIBRARY: LazyLock<Vec<FunctionDecl>> = LazyLock::new(build_standard_library);
 
 fn build_standard_library() -> Vec<FunctionDecl> {
-    let mut funcs = Vec::new();
+    let mut funcs = vec![
+        // ==================== Operators ====================
 
-    // ==================== Operators ====================
-
-    // Arithmetic: _+_
-    funcs.push(
+        // Arithmetic: _+_
         FunctionDecl::new("_+_")
             .with_overload(OverloadDecl::function(
                 "add_int64_int64",
@@ -80,10 +78,7 @@ fn build_standard_library() -> Vec<FunctionDecl> {
                 )
                 .with_type_params(vec!["K".to_string(), "V".to_string()]),
             ),
-    );
-
-    // Arithmetic: _-_
-    funcs.push(
+        // Arithmetic: _-_
         FunctionDecl::new("_-_")
             .with_overload(OverloadDecl::function(
                 "subtract_int64_int64",
@@ -115,10 +110,7 @@ fn build_standard_library() -> Vec<FunctionDecl> {
                 vec![CelType::Duration, CelType::Duration],
                 CelType::Duration,
             )),
-    );
-
-    // Arithmetic: _*_
-    funcs.push(
+        // Arithmetic: _*_
         FunctionDecl::new("_*_")
             .with_overload(OverloadDecl::function(
                 "multiply_int64_int64",
@@ -135,10 +127,7 @@ fn build_standard_library() -> Vec<FunctionDecl> {
                 vec![CelType::Double, CelType::Double],
                 CelType::Double,
             )),
-    );
-
-    // Arithmetic: _/_
-    funcs.push(
+        // Arithmetic: _/_
         FunctionDecl::new("_/_")
             .with_overload(OverloadDecl::function(
                 "divide_int64_int64",
@@ -155,10 +144,7 @@ fn build_standard_library() -> Vec<FunctionDecl> {
                 vec![CelType::Double, CelType::Double],
                 CelType::Double,
             )),
-    );
-
-    // Arithmetic: _%_
-    funcs.push(
+        // Arithmetic: _%_
         FunctionDecl::new("_%_")
             .with_overload(OverloadDecl::function(
                 "modulo_int64_int64",
@@ -170,10 +156,7 @@ fn build_standard_library() -> Vec<FunctionDecl> {
                 vec![CelType::UInt, CelType::UInt],
                 CelType::UInt,
             )),
-    );
-
-    // Unary: -_
-    funcs.push(
+        // Unary: -_
         FunctionDecl::new("-_")
             .with_overload(OverloadDecl::function(
                 "negate_int64",
@@ -185,10 +168,7 @@ fn build_standard_library() -> Vec<FunctionDecl> {
                 vec![CelType::Double],
                 CelType::Double,
             )),
-    );
-
-    // Comparison: _==_
-    funcs.push(
+        // Comparison: _==_
         FunctionDecl::new("_==_").with_overload(
             OverloadDecl::function(
                 "equals",
@@ -197,10 +177,7 @@ fn build_standard_library() -> Vec<FunctionDecl> {
             )
             .with_type_params(vec!["T".to_string()]),
         ),
-    );
-
-    // Comparison: _!=_
-    funcs.push(
+        // Comparison: _!=_
         FunctionDecl::new("_!=_").with_overload(
             OverloadDecl::function(
                 "not_equals",
@@ -209,10 +186,7 @@ fn build_standard_library() -> Vec<FunctionDecl> {
             )
             .with_type_params(vec!["T".to_string()]),
         ),
-    );
-
-    // Comparison: _<_
-    funcs.push(
+        // Comparison: _<_
         FunctionDecl::new("_<_")
             .with_overload(OverloadDecl::function(
                 "less_bool",
@@ -254,10 +228,7 @@ fn build_standard_library() -> Vec<FunctionDecl> {
                 vec![CelType::Duration, CelType::Duration],
                 CelType::Bool,
             )),
-    );
-
-    // Comparison: _<=_
-    funcs.push(
+        // Comparison: _<=_
         FunctionDecl::new("_<=_")
             .with_overload(OverloadDecl::function(
                 "less_equals_bool",
@@ -299,10 +270,7 @@ fn build_standard_library() -> Vec<FunctionDecl> {
                 vec![CelType::Duration, CelType::Duration],
                 CelType::Bool,
             )),
-    );
-
-    // Comparison: _>_
-    funcs.push(
+        // Comparison: _>_
         FunctionDecl::new("_>_")
             .with_overload(OverloadDecl::function(
                 "greater_bool",
@@ -344,10 +312,7 @@ fn build_standard_library() -> Vec<FunctionDecl> {
                 vec![CelType::Duration, CelType::Duration],
                 CelType::Bool,
             )),
-    );
-
-    // Comparison: _>=_
-    funcs.push(
+        // Comparison: _>=_
         FunctionDecl::new("_>=_")
             .with_overload(OverloadDecl::function(
                 "greater_equals_bool",
@@ -389,37 +354,25 @@ fn build_standard_library() -> Vec<FunctionDecl> {
                 vec![CelType::Duration, CelType::Duration],
                 CelType::Bool,
             )),
-    );
-
-    // Logical: _&&_
-    funcs.push(
+        // Logical: _&&_
         FunctionDecl::new("_&&_").with_overload(OverloadDecl::function(
             "logical_and",
             vec![CelType::Bool, CelType::Bool],
             CelType::Bool,
         )),
-    );
-
-    // Logical: _||_
-    funcs.push(
+        // Logical: _||_
         FunctionDecl::new("_||_").with_overload(OverloadDecl::function(
             "logical_or",
             vec![CelType::Bool, CelType::Bool],
             CelType::Bool,
         )),
-    );
-
-    // Logical: !_
-    funcs.push(
+        // Logical: !_
         FunctionDecl::new("!_").with_overload(OverloadDecl::function(
             "logical_not",
             vec![CelType::Bool],
             CelType::Bool,
         )),
-    );
-
-    // Ternary: _?_:_
-    funcs.push(
+        // Ternary: _?_:_
         FunctionDecl::new("_?_:_").with_overload(
             OverloadDecl::function(
                 "conditional",
@@ -432,10 +385,7 @@ fn build_standard_library() -> Vec<FunctionDecl> {
             )
             .with_type_params(vec!["T".to_string()]),
         ),
-    );
-
-    // Membership: _in_
-    funcs.push(
+        // Membership: _in_
         FunctionDecl::new("@in")
             .with_overload(
                 OverloadDecl::function(
@@ -459,10 +409,7 @@ fn build_standard_library() -> Vec<FunctionDecl> {
                 )
                 .with_type_params(vec!["K".to_string(), "V".to_string()]),
             ),
-    );
-
-    // Index: _[_]
-    funcs.push(
+        // Index: _[_]
         FunctionDecl::new("_[_]")
             .with_overload(
                 OverloadDecl::function(
@@ -483,11 +430,7 @@ fn build_standard_library() -> Vec<FunctionDecl> {
                 )
                 .with_type_params(vec!["K".to_string(), "V".to_string()]),
             ),
-    );
-
-    // ==================== Type Conversions ====================
-
-    funcs.push(
+        // ==================== Type Conversions ====================
         FunctionDecl::new("bool")
             .with_overload(OverloadDecl::function(
                 "bool_to_bool",
@@ -499,9 +442,6 @@ fn build_standard_library() -> Vec<FunctionDecl> {
                 vec![CelType::String],
                 CelType::Bool,
             )),
-    );
-
-    funcs.push(
         FunctionDecl::new("bytes")
             .with_overload(OverloadDecl::function(
                 "bytes_to_bytes",
@@ -513,9 +453,6 @@ fn build_standard_library() -> Vec<FunctionDecl> {
                 vec![CelType::String],
                 CelType::Bytes,
             )),
-    );
-
-    funcs.push(
         FunctionDecl::new("double")
             .with_overload(OverloadDecl::function(
                 "double_to_double",
@@ -537,9 +474,6 @@ fn build_standard_library() -> Vec<FunctionDecl> {
                 vec![CelType::String],
                 CelType::Double,
             )),
-    );
-
-    funcs.push(
         FunctionDecl::new("duration")
             .with_overload(OverloadDecl::function(
                 "duration_to_duration",
@@ -551,16 +485,10 @@ fn build_standard_library() -> Vec<FunctionDecl> {
                 vec![CelType::String],
                 CelType::Duration,
             )),
-    );
-
-    funcs.push(
         FunctionDecl::new("dyn").with_overload(
             OverloadDecl::function("to_dyn", vec![CelType::type_param("T")], CelType::Dyn)
                 .with_type_params(vec!["T".to_string()]),
         ),
-    );
-
-    funcs.push(
         FunctionDecl::new("int")
             .with_overload(OverloadDecl::function(
                 "int_to_int",
@@ -587,9 +515,6 @@ fn build_standard_library() -> Vec<FunctionDecl> {
                 vec![CelType::Timestamp],
                 CelType::Int,
             )),
-    );
-
-    funcs.push(
         FunctionDecl::new("string")
             .with_overload(OverloadDecl::function(
                 "string_to_string",
@@ -631,9 +556,6 @@ fn build_standard_library() -> Vec<FunctionDecl> {
                 vec![CelType::Duration],
                 CelType::String,
             )),
-    );
-
-    funcs.push(
         FunctionDecl::new("timestamp")
             .with_overload(OverloadDecl::function(
                 "timestamp_to_timestamp",
@@ -650,9 +572,6 @@ fn build_standard_library() -> Vec<FunctionDecl> {
                 vec![CelType::Int],
                 CelType::Timestamp,
             )),
-    );
-
-    funcs.push(
         FunctionDecl::new("type").with_overload(
             OverloadDecl::function(
                 "type",
@@ -661,9 +580,6 @@ fn build_standard_library() -> Vec<FunctionDecl> {
             )
             .with_type_params(vec!["T".to_string()]),
         ),
-    );
-
-    funcs.push(
         FunctionDecl::new("uint")
             .with_overload(OverloadDecl::function(
                 "uint_to_uint",
@@ -685,11 +601,7 @@ fn build_standard_library() -> Vec<FunctionDecl> {
                 vec![CelType::String],
                 CelType::UInt,
             )),
-    );
-
-    // ==================== Size ====================
-
-    funcs.push(
+        // ==================== Size ====================
         FunctionDecl::new("size")
             .with_overload(OverloadDecl::function(
                 "size_string",
@@ -750,35 +662,22 @@ fn build_standard_library() -> Vec<FunctionDecl> {
                 )
                 .with_type_params(vec!["K".to_string(), "V".to_string()]),
             ),
-    );
-
-    // ==================== String Functions ====================
-
-    funcs.push(
+        // ==================== String Functions ====================
         FunctionDecl::new("contains").with_overload(OverloadDecl::method(
             "string_contains_string",
             vec![CelType::String, CelType::String],
             CelType::Bool,
         )),
-    );
-
-    funcs.push(
         FunctionDecl::new("endsWith").with_overload(OverloadDecl::method(
             "string_ends_with_string",
             vec![CelType::String, CelType::String],
             CelType::Bool,
         )),
-    );
-
-    funcs.push(
         FunctionDecl::new("startsWith").with_overload(OverloadDecl::method(
             "string_starts_with_string",
             vec![CelType::String, CelType::String],
             CelType::Bool,
         )),
-    );
-
-    funcs.push(
         FunctionDecl::new("matches")
             .with_overload(OverloadDecl::function(
                 "matches_string_re",
@@ -790,7 +689,7 @@ fn build_standard_library() -> Vec<FunctionDecl> {
                 vec![CelType::String, CelType::String],
                 CelType::Bool,
             )),
-    );
+    ];
 
     // ==================== Timestamp/Duration Accessors ====================
 

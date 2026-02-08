@@ -7,16 +7,16 @@
 //! container) rather than a type environment struct. This makes it reusable as a building
 //! block for higher-level APIs like `cel-core::Env`.
 
-mod checker;
+mod check;
 mod errors;
 mod overload;
 mod scope;
 mod standard_library;
 
-pub(crate) use checker::{
+pub(crate) use check::{
     check, check_with_abbreviations, check_with_type_resolver,
     check_with_type_resolver_and_abbreviations,
 };
-pub use checker::{CheckResult, ReferenceInfo};
+pub use check::{CheckResult, ReferenceInfo};
 pub use errors::{CheckError, CheckErrorKind};
 pub(crate) use standard_library::STANDARD_LIBRARY;

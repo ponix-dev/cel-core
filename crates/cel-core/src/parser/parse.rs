@@ -108,7 +108,7 @@ impl<'a> Parser<'a> {
 
     /// Check if the current token matches the given token.
     fn check(&self, token: &Token) -> bool {
-        self.peek().map_or(false, |t| t == token)
+        self.peek() == Some(token)
     }
 
     /// Consume the current token if it matches, returning true if consumed.
@@ -1222,14 +1222,9 @@ mod tests {
     #[test]
     fn expand_exists_3arg() {
         let ast = parse_expr("[1,2].exists(i, v, i < v)");
-        if let Expr::Comprehension {
-            iter_var,
-            iter_var2,
-            ..
-        } = &ast.node
-        {
-            assert_eq!(iter_var, "i");
-            assert_eq!(iter_var2, "v");
+        if let Expr::Comprehension(comp) = &ast.node {
+            assert_eq!(comp.iter_var, "i");
+            assert_eq!(comp.iter_var2, "v");
         } else {
             panic!("expected comprehension, got {:?}", ast.node);
         }
@@ -1238,14 +1233,9 @@ mod tests {
     #[test]
     fn expand_all_3arg() {
         let ast = parse_expr("[1,2,3].all(i, v, v > 0)");
-        if let Expr::Comprehension {
-            iter_var,
-            iter_var2,
-            ..
-        } = &ast.node
-        {
-            assert_eq!(iter_var, "i");
-            assert_eq!(iter_var2, "v");
+        if let Expr::Comprehension(comp) = &ast.node {
+            assert_eq!(comp.iter_var, "i");
+            assert_eq!(comp.iter_var2, "v");
         } else {
             panic!("expected comprehension, got {:?}", ast.node);
         }
@@ -1254,14 +1244,9 @@ mod tests {
     #[test]
     fn expand_exists_one_3arg() {
         let ast = parse_expr("[7].exists_one(i, v, i == 0 && v == 7)");
-        if let Expr::Comprehension {
-            iter_var,
-            iter_var2,
-            ..
-        } = &ast.node
-        {
-            assert_eq!(iter_var, "i");
-            assert_eq!(iter_var2, "v");
+        if let Expr::Comprehension(comp) = &ast.node {
+            assert_eq!(comp.iter_var, "i");
+            assert_eq!(comp.iter_var2, "v");
         } else {
             panic!("expected comprehension, got {:?}", ast.node);
         }
@@ -1270,14 +1255,9 @@ mod tests {
     #[test]
     fn expand_transform_list_3arg() {
         let ast = parse_expr("[2,4,6].transformList(i, v, v / 2)");
-        if let Expr::Comprehension {
-            iter_var,
-            iter_var2,
-            ..
-        } = &ast.node
-        {
-            assert_eq!(iter_var, "i");
-            assert_eq!(iter_var2, "v");
+        if let Expr::Comprehension(comp) = &ast.node {
+            assert_eq!(comp.iter_var, "i");
+            assert_eq!(comp.iter_var2, "v");
         } else {
             panic!("expected comprehension, got {:?}", ast.node);
         }
@@ -1286,14 +1266,9 @@ mod tests {
     #[test]
     fn expand_transform_list_4arg() {
         let ast = parse_expr("[2,4,6].transformList(i, v, i != 1, v / 2)");
-        if let Expr::Comprehension {
-            iter_var,
-            iter_var2,
-            ..
-        } = &ast.node
-        {
-            assert_eq!(iter_var, "i");
-            assert_eq!(iter_var2, "v");
+        if let Expr::Comprehension(comp) = &ast.node {
+            assert_eq!(comp.iter_var, "i");
+            assert_eq!(comp.iter_var2, "v");
         } else {
             panic!("expected comprehension, got {:?}", ast.node);
         }
@@ -1302,14 +1277,9 @@ mod tests {
     #[test]
     fn expand_transform_map_3arg() {
         let ast = parse_expr(r#"{"foo": "bar"}.transformMap(k, v, k + v)"#);
-        if let Expr::Comprehension {
-            iter_var,
-            iter_var2,
-            ..
-        } = &ast.node
-        {
-            assert_eq!(iter_var, "k");
-            assert_eq!(iter_var2, "v");
+        if let Expr::Comprehension(comp) = &ast.node {
+            assert_eq!(comp.iter_var, "k");
+            assert_eq!(comp.iter_var2, "v");
         } else {
             panic!("expected comprehension, got {:?}", ast.node);
         }
@@ -1318,14 +1288,9 @@ mod tests {
     #[test]
     fn expand_transform_map_4arg() {
         let ast = parse_expr(r#"{"foo": "bar"}.transformMap(k, v, k == "foo", k + v)"#);
-        if let Expr::Comprehension {
-            iter_var,
-            iter_var2,
-            ..
-        } = &ast.node
-        {
-            assert_eq!(iter_var, "k");
-            assert_eq!(iter_var2, "v");
+        if let Expr::Comprehension(comp) = &ast.node {
+            assert_eq!(comp.iter_var, "k");
+            assert_eq!(comp.iter_var2, "v");
         } else {
             panic!("expected comprehension, got {:?}", ast.node);
         }
@@ -1335,15 +1300,10 @@ mod tests {
     fn exists_2arg_still_works() {
         // Ensure 2-arg form still works
         let ast = parse_expr("[1,2].exists(x, x > 0)");
-        if let Expr::Comprehension {
-            iter_var,
-            iter_var2,
-            ..
-        } = &ast.node
-        {
-            assert_eq!(iter_var, "x");
+        if let Expr::Comprehension(comp) = &ast.node {
+            assert_eq!(comp.iter_var, "x");
             assert!(
-                iter_var2.is_empty(),
+                comp.iter_var2.is_empty(),
                 "2-arg form should have empty iter_var2"
             );
         } else {

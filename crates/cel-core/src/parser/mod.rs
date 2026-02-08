@@ -2,14 +2,14 @@
 
 mod lexer;
 pub mod macros;
-mod parser;
+mod parse;
 
 use crate::types::{Span, SpannedExpr};
 
 pub use macros::{
     ArgCount, Macro, MacroContext, MacroExpander, MacroExpansion, MacroRegistry, MacroStyle,
 };
-pub use parser::MacroCalls;
+pub use parse::MacroCalls;
 
 /// A parse error with source location.
 #[derive(Debug, Clone)]
@@ -142,7 +142,7 @@ pub fn parse_with_options(input: &str, options: ParseOptions) -> ParseResult {
     let macros = options.macros.unwrap_or_else(MacroRegistry::standard);
 
     // Parse the tokens (with inline macro expansion)
-    let (ast, parse_errors, macro_calls) = parser::parse_tokens_with_macros(&tokens, macros);
+    let (ast, parse_errors, macro_calls) = parse::parse_tokens_with_macros(&tokens, macros);
 
     let errors: Vec<ParseError> = parse_errors
         .into_iter()

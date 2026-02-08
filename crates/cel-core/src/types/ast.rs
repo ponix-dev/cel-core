@@ -48,6 +48,39 @@ pub struct StructField {
     pub optional: bool,
 }
 
+/// Data for a comprehension expression (result of macro expansion).
+///
+/// Represents the expansion of macros like `all`, `exists`, `exists_one`, `map`, `filter`.
+///
+/// Semantics:
+/// ```text
+/// let accu_var = accu_init
+/// for (let iter_var, iter_var2 in iter_range) {
+///    if (!loop_condition) { break }
+///    accu_var = loop_step
+/// }
+/// return result
+/// ```
+#[derive(Debug, Clone, PartialEq)]
+pub struct ComprehensionData {
+    /// The name of the first iteration variable.
+    pub iter_var: String,
+    /// The name of the second iteration variable (for V2 macros), empty if not set.
+    pub iter_var2: String,
+    /// The range over which the comprehension iterates.
+    pub iter_range: Box<SpannedExpr>,
+    /// The name of the accumulator variable.
+    pub accu_var: String,
+    /// The initial value of the accumulator.
+    pub accu_init: Box<SpannedExpr>,
+    /// Returns false when the result has been computed (short-circuit condition).
+    pub loop_condition: Box<SpannedExpr>,
+    /// Computes the next value of the accumulator.
+    pub loop_step: Box<SpannedExpr>,
+    /// Computes the final result from the accumulator.
+    pub result: Box<SpannedExpr>,
+}
+
 /// CEL expression.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
@@ -110,37 +143,7 @@ pub enum Expr {
     },
 
     /// Comprehension expression (result of macro expansion).
-    ///
-    /// Represents the expansion of macros like `all`, `exists`, `exists_one`, `map`, `filter`.
-    /// These are created during macro expansion, not directly from parsing.
-    ///
-    /// Semantics:
-    /// ```text
-    /// let accu_var = accu_init
-    /// for (let iter_var, iter_var2 in iter_range) {
-    ///    if (!loop_condition) { break }
-    ///    accu_var = loop_step
-    /// }
-    /// return result
-    /// ```
-    Comprehension {
-        /// The name of the first iteration variable.
-        iter_var: String,
-        /// The name of the second iteration variable (for V2 macros), empty if not set.
-        iter_var2: String,
-        /// The range over which the comprehension iterates.
-        iter_range: Box<SpannedExpr>,
-        /// The name of the accumulator variable.
-        accu_var: String,
-        /// The initial value of the accumulator.
-        accu_init: Box<SpannedExpr>,
-        /// Returns false when the result has been computed (short-circuit condition).
-        loop_condition: Box<SpannedExpr>,
-        /// Computes the next value of the accumulator.
-        loop_step: Box<SpannedExpr>,
-        /// Computes the final result from the accumulator.
-        result: Box<SpannedExpr>,
-    },
+    Comprehension(ComprehensionData),
 
     /// Member test expression (result of `has(m.x)` macro expansion).
     ///

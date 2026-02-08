@@ -1,0 +1,10 @@
+name: Setup
+description: Install dependencies via mise and configure cargo cache
+
+runs:
+  using: composite
+  steps:
+    - uses: jdx/mise-action@v3
+      with:
+        cache: true
+    - uses: Swatinem/rust-cache@v2

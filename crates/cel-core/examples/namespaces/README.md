@@ -66,8 +66,8 @@ env.compile("Timestamp{seconds: 123}")
 
 ```rust
 let abbrevs = Abbreviations::new()
-    .add("google.protobuf.Timestamp")?
-    .add("google.protobuf.Duration")?;
+    .with_abbreviation("google.protobuf.Timestamp")?
+    .with_abbreviation("google.protobuf.Duration")?;
 
 let env = Env::with_standard_library()
     .with_proto_registry(Arc::new(registry))

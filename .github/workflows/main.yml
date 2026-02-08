@@ -1,0 +1,161 @@
+name: Main
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fmt:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - run: cargo fmt --all --check
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - run: cargo clippy --workspace --exclude cel-core-conformance --all-targets -- -D warnings
+
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - run: cargo test --workspace --exclude cel-core-conformance
+
+  check-bump:
+    name: Check version bump
+    needs: [fmt, clippy, test]
+    runs-on: ubuntu-latest
+    outputs:
+      bump_needed: ${{ steps.check.outputs.bump_needed }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/setup
+      - id: check
+        run: |
+          if cog bump --auto --dry-run 2>/dev/null; then
+            echo "bump_needed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "bump_needed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  bump:
+    name: Bump version
+    needs: check-bump
+    if: needs.check-bump.outputs.bump_needed == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.bump.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/setup
+      - id: bump
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          VERSION=$(cog bump --auto)
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+      - run: git push origin main --follow-tags
+
+  publish:
+    name: Publish to crates.io
+    needs: bump
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v${{ needs.bump.outputs.version }}
+      - uses: ./.github/actions/setup
+      - run: cargo publish -p cel-core
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+      - name: Wait for crates.io indexing
+        run: sleep 30
+      - run: cargo publish -p cel-core-proto
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  build-binaries:
+    name: Build (${{ matrix.target }})
+    needs: bump
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: x86_64-apple-darwin
+            os: macos-latest
+          - target: aarch64-apple-darwin
+            os: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v${{ needs.bump.outputs.version }}
+      - uses: ./.github/actions/setup
+      - run: rustup target add ${{ matrix.target }}
+      - run: cargo build --release -p cel-core-lsp --target ${{ matrix.target }}
+      - name: Package binary
+        run: |
+          cd target/${{ matrix.target }}/release
+          tar czf cel-core-lsp-${{ matrix.target }}.tar.gz cel-core-lsp
+          shasum -a 256 cel-core-lsp-${{ matrix.target }}.tar.gz > cel-core-lsp-${{ matrix.target }}.tar.gz.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cel-core-lsp-${{ matrix.target }}
+          path: |
+            target/${{ matrix.target }}/release/cel-core-lsp-${{ matrix.target }}.tar.gz
+            target/${{ matrix.target }}/release/cel-core-lsp-${{ matrix.target }}.tar.gz.sha256
+
+  release:
+    name: GitHub Release
+    needs: [bump, build-binaries, publish]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v${{ needs.bump.outputs.version }}
+          fetch-depth: 0
+      - uses: ./.github/actions/setup
+      - name: Generate changelog
+        id: changelog
+        run: |
+          {
+            echo 'body<<EOF'
+            cog changelog --at v${{ needs.bump.outputs.version }}
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Collect release assets
+        run: |
+          mkdir release
+          cp artifacts/cel-core-lsp-*/cel-core-lsp-*.tar.gz release/
+          cd release
+          cat ../artifacts/cel-core-lsp-*/cel-core-lsp-*.sha256 > checksums.txt
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.bump.outputs.version }}
+          body: ${{ steps.changelog.outputs.body }}
+          files: release/*

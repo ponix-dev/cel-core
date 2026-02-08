@@ -81,15 +81,13 @@ impl ProtoRegistry for ProstProtoRegistry {
                         }
                     }
                 }
-            } else {
-                if let Err(e) = self.set_proto_field_or_null(
-                    &mut message,
-                    &field.name,
-                    field.value.clone(),
-                    strong_enums,
-                ) {
-                    return e;
-                }
+            } else if let Err(e) = self.set_proto_field_or_null(
+                &mut message,
+                &field.name,
+                field.value.clone(),
+                strong_enums,
+            ) {
+                return e;
             }
         }
 

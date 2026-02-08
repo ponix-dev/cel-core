@@ -24,9 +24,7 @@ pub fn parse_timestamp(s: &str) -> Result<Timestamp, String> {
     };
 
     if !ts.is_valid() {
-        return Err(format!(
-            "timestamp out of range: must be between year 0001 and 9999"
-        ));
+        return Err("timestamp out of range: must be between year 0001 and 9999".to_string());
     }
 
     Ok(ts)
@@ -129,9 +127,7 @@ pub fn parse_duration(s: &str) -> Result<Duration, String> {
     let duration = Duration::new(seconds, nanos);
 
     if !duration.is_valid() {
-        return Err(format!(
-            "duration out of range: must be within approximately 10000 years"
-        ));
+        return Err("duration out of range: must be within approximately 10000 years".to_string());
     }
 
     Ok(duration)

@@ -18,7 +18,9 @@
 
 use std::collections::HashMap;
 
-use crate::types::{BinaryOp, Expr, ListElement, MapEntry, Span, Spanned, SpannedExpr, UnaryOp};
+use crate::types::{
+    BinaryOp, ComprehensionData, Expr, ListElement, MapEntry, Span, Spanned, SpannedExpr, UnaryOp,
+};
 
 /// Indicates whether a macro is called as a global function or as a method on a receiver.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -81,16 +83,16 @@ pub struct MacroContext<'a> {
     /// Accumulated errors during expansion.
     errors: Vec<(String, Span)>,
     /// Function to store macro call for IDE features.
-    store_macro_call_fn: Option<&'a mut dyn FnMut(i64, &Span, &SpannedExpr, &str, &[SpannedExpr])>,
+    store_macro_call_fn: Option<MacroCallStoreFn<'a>>,
 }
+
+type MacroCallStoreFn<'a> = &'a mut dyn FnMut(i64, &Span, &SpannedExpr, &str, &[SpannedExpr]);
 
 impl<'a> MacroContext<'a> {
     /// Create a new macro context.
     pub fn new(
         next_id_fn: &'a mut dyn FnMut() -> i64,
-        store_macro_call_fn: Option<
-            &'a mut dyn FnMut(i64, &Span, &SpannedExpr, &str, &[SpannedExpr]),
-        >,
+        store_macro_call_fn: Option<MacroCallStoreFn<'a>>,
     ) -> Self {
         Self {
             next_id_fn,
@@ -648,7 +650,7 @@ fn expand_all_impl(
 
     MacroExpansion::Expanded(Spanned::new(
         call_id,
-        Expr::Comprehension {
+        Expr::Comprehension(ComprehensionData {
             iter_var,
             iter_var2,
             iter_range: Box::new(receiver),
@@ -657,7 +659,7 @@ fn expand_all_impl(
             loop_condition: Box::new(loop_condition),
             loop_step: Box::new(loop_step),
             result: Box::new(result),
-        },
+        }),
         span,
     ))
 }
@@ -748,7 +750,7 @@ fn expand_exists_impl(
 
     MacroExpansion::Expanded(Spanned::new(
         call_id,
-        Expr::Comprehension {
+        Expr::Comprehension(ComprehensionData {
             iter_var,
             iter_var2,
             iter_range: Box::new(receiver),
@@ -757,7 +759,7 @@ fn expand_exists_impl(
             loop_condition: Box::new(loop_condition),
             loop_step: Box::new(loop_step),
             result: Box::new(result),
-        },
+        }),
         span,
     ))
 }
@@ -861,7 +863,7 @@ fn expand_exists_one_impl(
 
     MacroExpansion::Expanded(Spanned::new(
         call_id,
-        Expr::Comprehension {
+        Expr::Comprehension(ComprehensionData {
             iter_var,
             iter_var2,
             iter_range: Box::new(receiver),
@@ -870,7 +872,7 @@ fn expand_exists_one_impl(
             loop_condition: Box::new(loop_condition),
             loop_step: Box::new(loop_step),
             result: Box::new(result),
-        },
+        }),
         span,
     ))
 }
@@ -980,7 +982,7 @@ fn expand_map_impl(
 
     MacroExpansion::Expanded(Spanned::new(
         call_id,
-        Expr::Comprehension {
+        Expr::Comprehension(ComprehensionData {
             iter_var,
             iter_var2: String::new(),
             iter_range: Box::new(receiver),
@@ -989,7 +991,7 @@ fn expand_map_impl(
             loop_condition: Box::new(loop_condition),
             loop_step: Box::new(loop_step),
             result: Box::new(result),
-        },
+        }),
         span,
     ))
 }
@@ -1056,7 +1058,7 @@ fn expand_filter(
 
     MacroExpansion::Expanded(Spanned::new(
         call_id,
-        Expr::Comprehension {
+        Expr::Comprehension(ComprehensionData {
             iter_var,
             iter_var2: String::new(),
             iter_range: Box::new(receiver),
@@ -1065,9 +1067,16 @@ fn expand_filter(
             loop_condition: Box::new(loop_condition),
             loop_step: Box::new(loop_step),
             result: Box::new(result),
-        },
+        }),
         span,
     ))
+}
+
+struct TransformParams {
+    iter_var: String,
+    iter_var2: String,
+    filter_cond: Option<SpannedExpr>,
+    transform: SpannedExpr,
 }
 
 // === transformList() Macro ===
@@ -1094,7 +1103,16 @@ fn expand_transform_list_3arg(
     let transform = args[2].clone();
 
     expand_transform_list_impl(
-        ctx, span, receiver, iter_var, iter_var2, None, transform, &args,
+        ctx,
+        span,
+        receiver,
+        TransformParams {
+            iter_var,
+            iter_var2,
+            filter_cond: None,
+            transform,
+        },
+        &args,
     )
 }
 
@@ -1124,10 +1142,12 @@ fn expand_transform_list_4arg(
         ctx,
         span,
         receiver,
-        iter_var,
-        iter_var2,
-        Some(filter),
-        transform,
+        TransformParams {
+            iter_var,
+            iter_var2,
+            filter_cond: Some(filter),
+            transform,
+        },
         &args,
     )
 }
@@ -1136,10 +1156,7 @@ fn expand_transform_list_impl(
     ctx: &mut MacroContext,
     span: Span,
     receiver: SpannedExpr,
-    iter_var: String,
-    iter_var2: String,
-    filter_cond: Option<SpannedExpr>,
-    transform: SpannedExpr,
+    params: TransformParams,
     args: &[SpannedExpr],
 ) -> MacroExpansion {
     let call_id = ctx.next_id();
@@ -1152,7 +1169,7 @@ fn expand_transform_list_impl(
     let transformed_list = synthetic(
         ctx,
         Expr::List(vec![ListElement {
-            expr: transform,
+            expr: params.transform,
             optional: false,
         }]),
         span.clone(),
@@ -1168,7 +1185,7 @@ fn expand_transform_list_impl(
         span.clone(),
     );
 
-    let loop_step = if let Some(filter) = filter_cond {
+    let loop_step = if let Some(filter) = params.filter_cond {
         let accu_ref_else = synthetic(ctx, Expr::Ident(accu_var.clone()), span.clone());
         synthetic(
             ctx,
@@ -1187,16 +1204,16 @@ fn expand_transform_list_impl(
 
     MacroExpansion::Expanded(Spanned::new(
         call_id,
-        Expr::Comprehension {
-            iter_var,
-            iter_var2,
+        Expr::Comprehension(ComprehensionData {
+            iter_var: params.iter_var,
+            iter_var2: params.iter_var2,
             iter_range: Box::new(receiver),
             accu_var,
             accu_init: Box::new(accu_init),
             loop_condition: Box::new(loop_condition),
             loop_step: Box::new(loop_step),
             result: Box::new(result),
-        },
+        }),
         span,
     ))
 }
@@ -1225,7 +1242,16 @@ fn expand_transform_map_3arg(
     let transform = args[2].clone();
 
     expand_transform_map_impl(
-        ctx, span, receiver, iter_var, iter_var2, None, transform, &args,
+        ctx,
+        span,
+        receiver,
+        TransformParams {
+            iter_var,
+            iter_var2,
+            filter_cond: None,
+            transform,
+        },
+        &args,
     )
 }
 
@@ -1255,10 +1281,12 @@ fn expand_transform_map_4arg(
         ctx,
         span,
         receiver,
-        iter_var,
-        iter_var2,
-        Some(filter),
-        transform,
+        TransformParams {
+            iter_var,
+            iter_var2,
+            filter_cond: Some(filter),
+            transform,
+        },
         &args,
     )
 }
@@ -1267,10 +1295,7 @@ fn expand_transform_map_impl(
     ctx: &mut MacroContext,
     span: Span,
     receiver: SpannedExpr,
-    iter_var: String,
-    iter_var2: String,
-    filter_cond: Option<SpannedExpr>,
-    transform: SpannedExpr,
+    params: TransformParams,
     args: &[SpannedExpr],
 ) -> MacroExpansion {
     let call_id = ctx.next_id();
@@ -1280,12 +1305,12 @@ fn expand_transform_map_impl(
     let accu_init = synthetic(ctx, Expr::Map(vec![]), span.clone());
     let loop_condition = synthetic(ctx, Expr::Bool(true), span.clone());
 
-    let key_ref = synthetic(ctx, Expr::Ident(iter_var.clone()), span.clone());
+    let key_ref = synthetic(ctx, Expr::Ident(params.iter_var.clone()), span.clone());
     let transformed_map = synthetic(
         ctx,
         Expr::Map(vec![MapEntry {
             key: key_ref,
-            value: transform,
+            value: params.transform,
             optional: false,
         }]),
         span.clone(),
@@ -1301,7 +1326,7 @@ fn expand_transform_map_impl(
         span.clone(),
     );
 
-    let loop_step = if let Some(filter) = filter_cond {
+    let loop_step = if let Some(filter) = params.filter_cond {
         let accu_ref_else = synthetic(ctx, Expr::Ident(accu_var.clone()), span.clone());
         synthetic(
             ctx,
@@ -1320,16 +1345,16 @@ fn expand_transform_map_impl(
 
     MacroExpansion::Expanded(Spanned::new(
         call_id,
-        Expr::Comprehension {
-            iter_var,
-            iter_var2,
+        Expr::Comprehension(ComprehensionData {
+            iter_var: params.iter_var,
+            iter_var2: params.iter_var2,
             iter_range: Box::new(receiver),
             accu_var,
             accu_init: Box::new(accu_init),
             loop_condition: Box::new(loop_condition),
             loop_step: Box::new(loop_step),
             result: Box::new(result),
-        },
+        }),
         span,
     ))
 }

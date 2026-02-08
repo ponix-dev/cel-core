@@ -244,25 +244,18 @@ impl AstConverter {
                     entries: converted,
                 }))
             }
-            Expr::Comprehension {
-                iter_var,
-                iter_var2,
-                iter_range,
-                accu_var,
-                accu_init,
-                loop_condition,
-                loop_step,
-                result,
-            } => Some(ExprKind::ComprehensionExpr(Box::new(Comprehension {
-                iter_var: iter_var.clone(),
-                iter_var2: iter_var2.clone(),
-                iter_range: Some(Box::new(self.ast_to_expr(iter_range))),
-                accu_var: accu_var.clone(),
-                accu_init: Some(Box::new(self.ast_to_expr(accu_init))),
-                loop_condition: Some(Box::new(self.ast_to_expr(loop_condition))),
-                loop_step: Some(Box::new(self.ast_to_expr(loop_step))),
-                result: Some(Box::new(self.ast_to_expr(result))),
-            }))),
+            Expr::Comprehension(comp) => {
+                Some(ExprKind::ComprehensionExpr(Box::new(Comprehension {
+                    iter_var: comp.iter_var.clone(),
+                    iter_var2: comp.iter_var2.clone(),
+                    iter_range: Some(Box::new(self.ast_to_expr(&comp.iter_range))),
+                    accu_var: comp.accu_var.clone(),
+                    accu_init: Some(Box::new(self.ast_to_expr(&comp.accu_init))),
+                    loop_condition: Some(Box::new(self.ast_to_expr(&comp.loop_condition))),
+                    loop_step: Some(Box::new(self.ast_to_expr(&comp.loop_step))),
+                    result: Some(Box::new(self.ast_to_expr(&comp.result))),
+                })))
+            }
             Expr::MemberTestOnly { expr, field } => Some(ExprKind::SelectExpr(Box::new(Select {
                 operand: Some(Box::new(self.ast_to_expr(expr))),
                 field: field.clone(),
@@ -655,7 +648,7 @@ impl AstConverter {
             field: "result",
         })?;
 
-        Ok(Expr::Comprehension {
+        Ok(Expr::Comprehension(cel_core::ComprehensionData {
             iter_var: comp.iter_var.clone(),
             iter_var2: comp.iter_var2.clone(),
             iter_range: Box::new(self.expr_to_ast(iter_range, source_info)?),
@@ -664,7 +657,7 @@ impl AstConverter {
             loop_condition: Box::new(self.expr_to_ast(loop_condition, source_info)?),
             loop_step: Box::new(self.expr_to_ast(loop_step, source_info)?),
             result: Box::new(self.expr_to_ast(result, source_info)?),
-        })
+        }))
     }
 }
 
@@ -943,6 +936,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::approx_constant)]
     fn test_roundtrip_float() {
         let ast = make_ast(Expr::Float(3.14));
         let result = roundtrip(&ast);

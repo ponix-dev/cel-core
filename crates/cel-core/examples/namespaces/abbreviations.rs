@@ -11,9 +11,9 @@ fn main() {
     let registry = ProstProtoRegistry::new();
 
     let abbrevs = Abbreviations::new()
-        .add("google.protobuf.Timestamp")
+        .with_abbreviation("google.protobuf.Timestamp")
         .unwrap()
-        .add("google.protobuf.Duration")
+        .with_abbreviation("google.protobuf.Duration")
         .unwrap();
 
     let env = Env::with_standard_library()

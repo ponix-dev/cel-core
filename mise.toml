@@ -1,5 +1,5 @@
 [tools]
-rust = "latest"
+rust = { version = "latest", components = "rustfmt,clippy" }
 gh = "latest"
 buf = "latest"
 cocogitto = "latest"
