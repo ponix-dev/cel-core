@@ -76,7 +76,10 @@ jobs:
           cog bump --auto
           VERSION=$(cog get-version)
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-      - run: git push origin main --follow-tags
+      - run: |
+          VERSION=$(cog get-version)
+          git push origin main
+          git push origin "v${VERSION}"
 
   publish:
     name: Publish to crates.io
