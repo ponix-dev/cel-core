@@ -5,10 +5,13 @@
 //! and host document coordinates.
 
 use std::ops::Range;
+use std::sync::Arc;
 
-use cel_core::{parse, ParseError, SpannedExpr};
+use cel_core::{parse, CelType, CheckError, CheckResult, Env, ParseError, SpannedExpr};
+use cel_core_proto::ProstProtoRegistry;
 
-use crate::types::ValidationError;
+use crate::protovalidate::ProtovalidateContext;
+use crate::settings::protovalidate_extension;
 
 /// Represents a single CEL expression region within a host document.
 #[derive(Debug, Clone)]
@@ -110,40 +113,52 @@ pub struct CelRegionState {
     /// Parse errors for this region (spans are relative to region).
     pub parse_errors: Vec<ParseError>,
 
-    /// Validation errors for this region (spans are relative to region).
-    pub validation_errors: Vec<ValidationError>,
+    /// Check result from type checking (spans are relative to region).
+    pub check_result: Option<CheckResult>,
+
+    /// The environment used for type checking (needed for completion).
+    pub env: Arc<Env>,
 }
 
 impl CelRegionState {
-    /// Create a new CEL region state by parsing and validating the source.
-    pub fn new(region: CelRegion, mapper: OffsetMapper) -> Self {
+    /// Create a new CEL region state with a specific protovalidate context.
+    pub fn with_context(
+        region: CelRegion,
+        mapper: OffsetMapper,
+        context: ProtovalidateContext,
+        proto_registry: Option<&Arc<ProstProtoRegistry>>,
+    ) -> Self {
         let result = parse(&region.source);
+        let env = Arc::new(build_protovalidate_env_typed(&context, proto_registry));
 
-        // Run validation if we have an AST
-        let validation_errors = result
-            .ast
-            .as_ref()
-            .map(|ast| {
-                use crate::protovalidate::ProtovalidateResolver;
-                use crate::types::validate;
-                validate(ast, &ProtovalidateResolver)
-            })
-            .unwrap_or_default();
+        // Run type checking if we have an AST
+        let check_result = result.ast.as_ref().map(|ast| env.check(ast));
 
         Self {
             region,
             mapper,
             ast: result.ast,
             parse_errors: result.errors,
-            validation_errors,
+            check_result,
+            env,
         }
     }
 
+    /// Get the check errors if any.
+    pub fn check_errors(&self) -> &[CheckError] {
+        self.check_result
+            .as_ref()
+            .map(|r| r.errors.as_slice())
+            .unwrap_or(&[])
+    }
+
     /// Check if this region contains the given host document offset.
+    /// Uses `<=` for the end bound so that the cursor at the very end of the
+    /// expression (e.g., right before the closing quote) is still considered inside.
     pub fn contains_host_offset(&self, host_offset: usize) -> bool {
         let start = self.mapper.host_offset();
         let end = start + self.mapper.host_length(self.region.source.len());
-        host_offset >= start && host_offset < end
+        host_offset >= start && host_offset <= end
     }
 
     /// Convert a host offset to a CEL-local offset, if within this region.
@@ -185,6 +200,74 @@ impl CelRegionState {
 
         Some(cel_offset)
     }
+}
+
+/// Resolve a short message name (e.g. "User") to its fully qualified name
+/// (e.g. "test.User") using the proto registry's descriptor pool.
+///
+/// Returns the name as-is if it already contains a dot (already qualified).
+/// Returns `None` if the name is ambiguous (multiple matches) or not found.
+fn resolve_short_message_name(short_name: &str, registry: &ProstProtoRegistry) -> Option<String> {
+    if short_name.contains('.') {
+        return Some(short_name.to_string());
+    }
+
+    let mut matches = registry
+        .pool()
+        .all_messages()
+        .filter(|msg| msg.name() == short_name);
+
+    let first = matches.next()?;
+    // Ambiguous if more than one match
+    if matches.next().is_some() {
+        return None;
+    }
+    Some(first.full_name().to_string())
+}
+
+/// Resolve `this` type, upgrading short message names to FQ names when a registry is available.
+fn resolve_this_type(
+    context: &ProtovalidateContext,
+    registry: Option<&Arc<ProstProtoRegistry>>,
+) -> CelType {
+    let this_type = context.this_type();
+
+    // If we have a registry, try to resolve short message names to FQ names
+    let Some(registry) = registry else {
+        return this_type;
+    };
+
+    match &this_type {
+        CelType::Message(name) => {
+            if let Some(fq_name) = resolve_short_message_name(name.as_ref(), registry) {
+                CelType::message(&fq_name)
+            } else {
+                this_type
+            }
+        }
+        _ => this_type,
+    }
+}
+
+/// Build a protovalidate environment with typed `this` based on context.
+fn build_protovalidate_env_typed(
+    context: &ProtovalidateContext,
+    proto_registry: Option<&Arc<ProstProtoRegistry>>,
+) -> Env {
+    let this_type = resolve_this_type(context, proto_registry);
+
+    let mut env = Env::with_standard_library()
+        .with_all_extensions()
+        .with_extension(protovalidate_extension())
+        .with_variable("this", this_type)
+        .with_variable("rules", CelType::Dyn)
+        .with_variable("now", CelType::Timestamp);
+
+    if let Some(registry) = proto_registry {
+        env = env.with_proto_registry(Arc::clone(registry) as Arc<dyn cel_core::eval::ProtoRegistry>);
+    }
+
+    env
 }
 
 #[cfg(test)]
@@ -238,13 +321,15 @@ mod tests {
             mapper,
             ast: None,
             parse_errors: vec![],
-            validation_errors: vec![],
+            check_result: None,
+            env: Arc::new(Env::new()),
         };
 
         assert!(state.contains_host_offset(100));
         assert!(state.contains_host_offset(105));
         assert!(state.contains_host_offset(113)); // last char
-        assert!(!state.contains_host_offset(114)); // one past end
+        assert!(state.contains_host_offset(114)); // cursor at end (before closing quote)
+        assert!(!state.contains_host_offset(115)); // one past end
         assert!(!state.contains_host_offset(99)); // before start
     }
 }

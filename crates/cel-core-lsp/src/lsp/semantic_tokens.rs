@@ -356,9 +356,38 @@ impl<'a> TokenCollector<'a> {
                 self.visit_expr(loop_step);
                 self.visit_expr(result);
             }
-            Expr::MemberTestOnly { expr: inner, .. } => {
-                // MemberTestOnly is synthetic from has() - visit inner expression
+            Expr::MemberTestOnly { expr: inner, field } => {
+                // MemberTestOnly is the expansion of has(expr.field)
+                // The outer span covers the full `has(expr.field)` source text
+
+                // "has" keyword
+                let has_end = expr.span.start + 3;
+                self.push(
+                    expr.span.start,
+                    has_end,
+                    token_types::FUNCTION,
+                    token_modifiers::DEFAULT_LIBRARY,
+                );
+
+                // Opening parenthesis
+                if let Some(pos) = self.find_char(has_end, inner.span.start, '(') {
+                    self.push_punctuation(pos, 1);
+                }
+
+                // Inner expression (e.g., `this` or `msg`)
                 self.visit_expr(inner);
+
+                // Dot between inner expression and field
+                if let Some(pos) = self.find_char(inner.span.end, expr.span.end, '.') {
+                    self.push_punctuation(pos, 1);
+                }
+
+                // Field name
+                let field_start = expr.span.end - 1 - field.len();
+                self.push(field_start, field_start + field.len(), token_types::VARIABLE, 0);
+
+                // Closing parenthesis
+                self.push_punctuation(expr.span.end - 1, 1);
             }
             Expr::Bind { init, body, .. } => {
                 // Bind is synthetic from cel.bind() - visit sub-expressions
@@ -568,5 +597,24 @@ mod tests {
         assert_eq!(tokens.len(), 5);
         assert_eq!(tokens[1].token_type, token_types::PUNCTUATION); // ?
         assert_eq!(tokens[3].token_type, token_types::PUNCTUATION); // :
+    }
+
+    #[test]
+    fn tokens_for_has_macro() {
+        let source = "has(msg.field)";
+        let result = parse(source);
+        let ast = result.ast.unwrap();
+        let line_index = LineIndex::new(source.to_string());
+
+        let tokens = tokens_for_ast(&line_index, &ast);
+        // Should have: function(has), (, variable(msg), ., variable(field), )
+        assert_eq!(tokens.len(), 6);
+        assert_eq!(tokens[0].token_type, token_types::FUNCTION); // has
+        assert_eq!(tokens[0].token_modifiers_bitset, token_modifiers::DEFAULT_LIBRARY);
+        assert_eq!(tokens[1].token_type, token_types::PUNCTUATION); // (
+        assert_eq!(tokens[2].token_type, token_types::VARIABLE); // msg
+        assert_eq!(tokens[3].token_type, token_types::PUNCTUATION); // .
+        assert_eq!(tokens[4].token_type, token_types::VARIABLE); // field
+        assert_eq!(tokens[5].token_type, token_types::PUNCTUATION); // )
     }
 }

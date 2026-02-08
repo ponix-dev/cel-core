@@ -43,6 +43,12 @@ pub trait ProtoTypeResolver: fmt::Debug + Send + Sync {
     /// Get the CEL type of a message field.
     fn get_field_type(&self, message: &str, field: &str) -> Option<CelType>;
 
+    /// Check whether a message type is known to this registry.
+    fn has_message(&self, message: &str) -> bool;
+
+    /// Check whether `ext_name` is a known extension field on `message`.
+    fn is_extension(&self, message: &str, ext_name: &str) -> bool;
+
     /// Get the numeric value of an enum constant by name.
     fn get_enum_value(&self, enum_name: &str, value_name: &str) -> Option<i32>;
 
@@ -55,6 +61,14 @@ pub trait ProtoTypeResolver: fmt::Debug + Send + Sync {
     ///
     /// Returns the fully qualified message name if found.
     fn resolve_message_name(&self, name: &str, container: &str) -> Option<String>;
+
+    /// List all field names of a message type.
+    ///
+    /// Returns `None` if the message type is unknown to this registry.
+    /// Default implementation returns `None`.
+    fn message_field_names(&self, _message: &str) -> Option<Vec<String>> {
+        None
+    }
 
     /// Downcast to a concrete type via `Any`.
     fn as_any(&self) -> &dyn Any;

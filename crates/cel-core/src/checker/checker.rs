@@ -469,8 +469,19 @@ impl<'a> Checker<'a> {
                     if let Some(field_type) = registry.get_field_type(name, field) {
                         return self.wrap_optional_if_needed(field_type, optional, was_optional);
                     }
+                    // If the message is known but the field doesn't exist, report an error.
+                    // Skip extension fields — those are valid but not in the field list.
+                    if registry.has_message(name) && !registry.is_extension(name, field) {
+                        self.report_error(CheckError::undefined_field(
+                            name,
+                            field,
+                            expr.span.clone(),
+                            expr.id,
+                        ));
+                        return CelType::Error;
+                    }
                 }
-                // Fall back to Dyn if no registry or field not found
+                // Fall back to Dyn if no registry available
                 CelType::Dyn
             }
             CelType::Dyn | CelType::TypeVar(_) => {
@@ -928,9 +939,47 @@ impl<'a> Checker<'a> {
     }
 
     /// Check a member test (has() macro result).
-    fn check_member_test(&mut self, obj: &SpannedExpr, _field: &str, _expr: &SpannedExpr) -> CelType {
+    fn check_member_test(&mut self, obj: &SpannedExpr, field: &str, expr: &SpannedExpr) -> CelType {
         // Check the object
-        let _ = self.check_expr(obj);
+        let obj_type = self.check_expr(obj);
+
+        // Unwrap optional types
+        let inner_type = match &obj_type {
+            CelType::Optional(inner) => (**inner).clone(),
+            other => other.clone(),
+        };
+
+        // Validate field existence on the receiver type
+        match &inner_type {
+            CelType::Message(name) => {
+                if let Some(registry) = self.type_resolver {
+                    if registry.get_field_type(name, field).is_some() {
+                        // Field exists — valid
+                    } else if registry.has_message(name) && !registry.is_extension(name, field) {
+                        self.report_error(CheckError::undefined_field(
+                            name,
+                            field,
+                            expr.span.clone(),
+                            expr.id,
+                        ));
+                    }
+                }
+            }
+            CelType::Map(_, _) | CelType::Dyn | CelType::TypeVar(_) => {
+                // Maps, Dyn, and type variables allow any key — no validation
+            }
+            CelType::Error => {
+                // Already an error, don't cascade
+            }
+            _ => {
+                self.report_error(CheckError::undefined_field(
+                    &inner_type.display_name(),
+                    field,
+                    expr.span.clone(),
+                    expr.id,
+                ));
+            }
+        }
 
         // has() always returns bool
         CelType::Bool
@@ -1091,10 +1140,14 @@ fn binary_op_to_function(op: BinaryOp) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    use std::any::Any;
+
     use super::*;
     use super::super::errors::CheckErrorKind;
     use super::super::standard_library::STANDARD_LIBRARY;
+    use crate::eval::proto_registry::ProtoTypeResolver;
     use crate::parser::parse;
+    use crate::types::ResolvedProtoType;
 
     /// Build the standard library functions map.
     fn standard_functions() -> HashMap<String, FunctionDecl> {
@@ -1136,6 +1189,78 @@ mod tests {
         variables.insert(var.to_string(), cel_type);
         let functions = standard_functions();
         check(&ast, &variables, &functions, "")
+    }
+
+    /// A minimal ProtoTypeResolver for testing field validation.
+    #[derive(Debug)]
+    struct MockProtoResolver {
+        /// Maps (message_name, field_name) → field type.
+        fields: HashMap<(String, String), CelType>,
+        /// Known message names.
+        messages: Vec<String>,
+    }
+
+    impl MockProtoResolver {
+        fn new() -> Self {
+            Self {
+                fields: HashMap::new(),
+                messages: Vec::new(),
+            }
+        }
+
+        fn with_message(mut self, name: &str) -> Self {
+            self.messages.push(name.to_string());
+            self
+        }
+
+        fn with_field(mut self, message: &str, field: &str, cel_type: CelType) -> Self {
+            self.fields.insert((message.to_string(), field.to_string()), cel_type);
+            self
+        }
+    }
+
+    impl ProtoTypeResolver for MockProtoResolver {
+        fn get_field_type(&self, message: &str, field: &str) -> Option<CelType> {
+            self.fields.get(&(message.to_string(), field.to_string())).cloned()
+        }
+
+        fn has_message(&self, message: &str) -> bool {
+            self.messages.contains(&message.to_string())
+        }
+
+        fn is_extension(&self, _message: &str, _ext_name: &str) -> bool {
+            false
+        }
+
+        fn get_enum_value(&self, _enum_name: &str, _value_name: &str) -> Option<i32> {
+            None
+        }
+
+        fn resolve_qualified(&self, _parts: &[&str], _container: &str) -> Option<ResolvedProtoType> {
+            None
+        }
+
+        fn resolve_message_name(&self, _name: &str, _container: &str) -> Option<String> {
+            None
+        }
+
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+    }
+
+    fn check_expr_with_var_and_resolver(
+        source: &str,
+        var: &str,
+        cel_type: CelType,
+        resolver: &dyn ProtoTypeResolver,
+    ) -> CheckResult {
+        let result = parse(source);
+        let ast = result.ast.expect("parse should succeed");
+        let mut variables = standard_variables();
+        variables.insert(var.to_string(), cel_type);
+        let functions = standard_functions();
+        check_with_type_resolver(&ast, &variables, &functions, "", resolver)
     }
 
     #[test]
@@ -1269,5 +1394,62 @@ mod tests {
 
         // Should have a reference for the operator
         assert!(refs.iter().any(|r| r.name == "_+_"));
+    }
+
+    #[test]
+    fn test_has_undefined_field() {
+        let resolver = MockProtoResolver::new()
+            .with_message("Msg")
+            .with_field("Msg", "name", CelType::String);
+        let result = check_expr_with_var_and_resolver(
+            "has(x.nonexistent)",
+            "x",
+            CelType::Message("Msg".into()),
+            &resolver,
+        );
+        assert!(!result.is_ok());
+        assert!(result.errors.iter().any(|e| matches!(
+            &e.kind,
+            CheckErrorKind::UndefinedField { field, .. } if field == "nonexistent"
+        )));
+    }
+
+    #[test]
+    fn test_has_valid_field() {
+        let resolver = MockProtoResolver::new()
+            .with_message("Msg")
+            .with_field("Msg", "name", CelType::String);
+        let result = check_expr_with_var_and_resolver(
+            "has(x.name)",
+            "x",
+            CelType::Message("Msg".into()),
+            &resolver,
+        );
+        assert!(result.is_ok());
+        // has() always returns Bool
+        let bool_types: Vec<_> = result.type_map.values()
+            .filter(|t| matches!(t, CelType::Bool))
+            .collect();
+        assert!(!bool_types.is_empty());
+    }
+
+    #[test]
+    fn test_has_map_field() {
+        let result = check_expr_with_var(
+            "has(m.anything)",
+            "m",
+            CelType::map(CelType::String, CelType::Int),
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_has_dyn_field() {
+        let result = check_expr_with_var(
+            "has(d.anything)",
+            "d",
+            CelType::Dyn,
+        );
+        assert!(result.is_ok());
     }
 }
