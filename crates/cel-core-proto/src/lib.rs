@@ -60,6 +60,7 @@ mod operators;
 mod registry;
 mod source_info;
 mod type_conversion;
+mod value_conversion;
 pub(crate) mod wkt;
 
 pub use message::ProstMessage;
@@ -68,6 +69,9 @@ pub use wkt::maybe_unwrap_well_known;
 
 pub use error::ConversionError;
 pub use type_conversion::{cel_type_from_proto, cel_type_to_proto};
+pub use value_conversion::{
+    function_decl_from_proto, proto_value_to_value, value_to_expr_value, value_to_proto_value,
+};
 
 // Re-export proto types for convenience
 pub use gen::cel::expr::{CheckedExpr, Constant, Expr, ParsedExpr, SourceInfo, Type, Value};
