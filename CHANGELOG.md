@@ -2,6 +2,12 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## v0.4.0 - 2026-02-14
+#### Features
+- show variable types on hover - (0b2b296) - Simon Rall
+
+- - -
+
 ## v0.3.3 - 2026-02-14
 #### Refactoring
 - move proto value conversion from conformance to cel-core-proto - (5bc7bbf) - Simon Rall
