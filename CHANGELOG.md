@@ -2,6 +2,13 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## v0.3.2 - 2026-02-14
+#### Bug Fixes
+- distinguish arity from type mismatches in function call errors - (1410e27) - Simon Rall
+- report proper errors for macro calls with wrong argument count - (ff894a9) - Simon Rall
+
+- - -
+
 ## v0.3.1 - 2026-02-08
 #### Bug Fixes
 - proto examples - (60b1af2) - Simon Rall
