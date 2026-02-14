@@ -319,6 +319,54 @@ impl MacroRegistry {
     pub fn is_empty(&self) -> bool {
         self.macros.is_empty()
     }
+
+    /// Return a human-readable description of expected argument counts for a macro.
+    ///
+    /// Given a macro name and whether it's called as a receiver, collects all registered
+    /// argument counts and formats them (e.g., "exactly 1 argument", "2 or 3 arguments").
+    /// Returns `None` if no macros match the name + style.
+    pub fn expected_args_description(&self, name: &str, is_receiver: bool) -> Option<String> {
+        let mut counts: Vec<usize> = Vec::new();
+        let mut has_vararg = false;
+        let mut vararg_min = 0;
+
+        for m in self.macros.values() {
+            if m.name == name && (m.style == MacroStyle::Receiver) == is_receiver {
+                match m.arg_count {
+                    ArgCount::Exact(n) => {
+                        if !counts.contains(&n) {
+                            counts.push(n);
+                        }
+                    }
+                    ArgCount::VarArg(min) => {
+                        has_vararg = true;
+                        vararg_min = min;
+                    }
+                }
+            }
+        }
+
+        if counts.is_empty() && !has_vararg {
+            return None;
+        }
+
+        if has_vararg {
+            return Some(format!(
+                "at least {} argument{}",
+                vararg_min,
+                if vararg_min == 1 { "" } else { "s" }
+            ));
+        }
+
+        counts.sort();
+        Some(match counts.as_slice() {
+            [n] => format!("exactly {} argument{}", n, if *n == 1 { "" } else { "s" }),
+            _ => {
+                let parts: Vec<String> = counts.iter().map(|n| n.to_string()).collect();
+                format!("{} arguments", parts.join(" or "))
+            }
+        })
+    }
 }
 
 // ============================================================================

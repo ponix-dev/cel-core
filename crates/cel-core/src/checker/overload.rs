@@ -21,6 +21,20 @@ pub struct OverloadResult {
     pub overload_ids: Vec<String>,
 }
 
+/// Describes why overload resolution failed.
+#[derive(Debug)]
+pub enum OverloadMismatch {
+    /// No overloads match the call style (all are methods but called standalone, or vice versa).
+    NoMatchingCallStyle,
+    /// Call style matched but no overloads accept this argument count.
+    ArityMismatch {
+        /// Sorted, deduplicated arg counts from matching-style overloads.
+        expected: Vec<usize>,
+    },
+    /// At least one overload matched arity but types didn't match.
+    TypeMismatch,
+}
+
 /// Resolve the best matching overload(s) for a function call.
 ///
 /// # Arguments
@@ -32,21 +46,25 @@ pub struct OverloadResult {
 ///
 /// # Returns
 ///
-/// The overload resolution result, or None if no overloads match.
+/// The overload resolution result, or an `OverloadMismatch` describing why resolution failed.
 pub fn resolve_overload(
     func: &FunctionDecl,
     target: Option<&CelType>,
     args: &[CelType],
     substitutions: &mut HashMap<Arc<str>, CelType>,
-) -> Option<OverloadResult> {
+) -> Result<OverloadResult, OverloadMismatch> {
     let mut matching_overloads = Vec::new();
     let mut result_type = None;
+    let mut any_call_style_match = false;
+    let mut any_arity_match = false;
 
     for overload in &func.overloads {
         // Skip if call style doesn't match
         if target.is_some() != overload.is_member {
             continue;
         }
+
+        any_call_style_match = true;
 
         // Build full argument list (receiver + args for methods)
         let full_args: Vec<&CelType> = if let Some(recv) = target {
@@ -59,6 +77,8 @@ pub fn resolve_overload(
         if full_args.len() != overload.params.len() {
             continue;
         }
+
+        any_arity_match = true;
 
         // Try to match this overload with scoped type params
         let mut local_subs = substitutions.clone();
@@ -78,16 +98,49 @@ pub fn resolve_overload(
     }
 
     if matching_overloads.is_empty() {
-        return None;
+        if !any_call_style_match {
+            return Err(OverloadMismatch::NoMatchingCallStyle);
+        }
+        if !any_arity_match {
+            // Collect expected arg counts from overloads matching the call style
+            let is_method = target.is_some();
+            let mut expected: Vec<usize> = func
+                .overloads
+                .iter()
+                .filter(|o| o.is_member == is_method)
+                .map(|o| {
+                    if is_method {
+                        o.params.len() - 1
+                    } else {
+                        o.params.len()
+                    }
+                })
+                .collect();
+            expected.sort_unstable();
+            expected.dedup();
+            return Err(OverloadMismatch::ArityMismatch { expected });
+        }
+        return Err(OverloadMismatch::TypeMismatch);
     }
 
     // Collect overload IDs
     let overload_ids: Vec<String> = matching_overloads.iter().map(|o| o.id.clone()).collect();
 
-    Some(OverloadResult {
+    Ok(OverloadResult {
         result_type: result_type.unwrap_or(CelType::Dyn),
         overload_ids,
     })
+}
+
+/// Format expected argument counts for error messages.
+pub fn format_expected_args(expected: &[usize]) -> String {
+    match expected {
+        [n] => format!("exactly {} argument{}", n, if *n == 1 { "" } else { "s" }),
+        _ => {
+            let parts: Vec<String> = expected.iter().map(|n| n.to_string()).collect();
+            format!("{} arguments", parts.join(" or "))
+        }
+    }
 }
 
 /// Rename type params in a type to scoped names using the given rename map.
@@ -422,7 +475,7 @@ mod tests {
         let mut subs = HashMap::new();
         let result = resolve_overload(&func, None, &[CelType::Int, CelType::Int], &mut subs);
 
-        assert!(result.is_some());
+        assert!(result.is_ok());
         let result = result.unwrap();
         assert_eq!(result.result_type, CelType::Int);
         assert!(result.overload_ids.contains(&"add_int64_int64".to_string()));
@@ -439,7 +492,7 @@ mod tests {
         let mut subs = HashMap::new();
         let result = resolve_overload(&func, Some(&CelType::String), &[CelType::String], &mut subs);
 
-        assert!(result.is_some());
+        assert!(result.is_ok());
         let result = result.unwrap();
         assert_eq!(result.result_type, CelType::Bool);
     }
@@ -458,13 +511,13 @@ mod tests {
         let mut subs = HashMap::new();
         let result = resolve_overload(&func, None, &[CelType::Int, CelType::Int], &mut subs);
 
-        assert!(result.is_some());
+        assert!(result.is_ok());
         let result = result.unwrap();
         assert_eq!(result.result_type, CelType::Bool);
     }
 
     #[test]
-    fn test_resolve_no_match() {
+    fn test_resolve_no_match_type_mismatch() {
         let func = FunctionDecl::new("_+_").with_overload(OverloadDecl::function(
             "add_int64_int64",
             vec![CelType::Int, CelType::Int],
@@ -474,7 +527,41 @@ mod tests {
         let mut subs = HashMap::new();
         let result = resolve_overload(&func, None, &[CelType::String, CelType::Int], &mut subs);
 
-        assert!(result.is_none());
+        assert!(matches!(result, Err(OverloadMismatch::TypeMismatch)));
+    }
+
+    #[test]
+    fn test_resolve_no_match_arity() {
+        let func = FunctionDecl::new("_+_").with_overload(OverloadDecl::function(
+            "add_int64_int64",
+            vec![CelType::Int, CelType::Int],
+            CelType::Int,
+        ));
+
+        let mut subs = HashMap::new();
+        let result = resolve_overload(&func, None, &[CelType::Int], &mut subs);
+
+        match result {
+            Err(OverloadMismatch::ArityMismatch { expected }) => {
+                assert_eq!(expected, vec![2]);
+            }
+            other => panic!("expected ArityMismatch, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_resolve_no_match_call_style() {
+        let func = FunctionDecl::new("contains").with_overload(OverloadDecl::method(
+            "string_contains_string",
+            vec![CelType::String, CelType::String],
+            CelType::Bool,
+        ));
+
+        let mut subs = HashMap::new();
+        // Call as standalone when only method overloads exist
+        let result = resolve_overload(&func, None, &[CelType::String, CelType::String], &mut subs);
+
+        assert!(matches!(result, Err(OverloadMismatch::NoMatchingCallStyle)));
     }
 
     #[test]

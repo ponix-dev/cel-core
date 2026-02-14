@@ -11,7 +11,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use super::errors::CheckError;
-use super::overload::{finalize_type, resolve_overload, substitute_type};
+use super::overload::{
+    finalize_type, format_expected_args, resolve_overload, substitute_type, OverloadMismatch,
+};
 use super::scope::ScopeStack;
 use crate::eval::proto_registry::ProtoTypeResolver;
 use crate::types::{
@@ -832,27 +834,39 @@ impl<'a> Checker<'a> {
         args: &[CelType],
         expr: &SpannedExpr,
     ) -> CelType {
-        if let Some(result) =
-            resolve_overload(func, receiver.as_ref(), args, &mut self.substitutions)
-        {
-            self.set_reference(
-                expr.id,
-                ReferenceInfo::function(&func.name, result.overload_ids),
-            );
-            result.result_type
-        } else {
-            let all_args: Vec<_> = receiver
-                .iter()
-                .cloned()
-                .chain(args.iter().cloned())
-                .collect();
-            self.report_error(CheckError::no_matching_overload(
-                &func.name,
-                all_args,
-                expr.span.clone(),
-                expr.id,
-            ));
-            CelType::Error
+        match resolve_overload(func, receiver.as_ref(), args, &mut self.substitutions) {
+            Ok(result) => {
+                self.set_reference(
+                    expr.id,
+                    ReferenceInfo::function(&func.name, result.overload_ids),
+                );
+                result.result_type
+            }
+            Err(OverloadMismatch::ArityMismatch { expected }) => {
+                let got = args.len();
+                let msg = format!(
+                    "'{}' expects {}, got {}",
+                    func.name,
+                    format_expected_args(&expected),
+                    got
+                );
+                self.report_error(CheckError::other(msg, expr.span.clone(), expr.id));
+                CelType::Error
+            }
+            Err(_) => {
+                let all_args: Vec<_> = receiver
+                    .iter()
+                    .cloned()
+                    .chain(args.iter().cloned())
+                    .collect();
+                self.report_error(CheckError::no_matching_overload(
+                    &func.name,
+                    all_args,
+                    expr.span.clone(),
+                    expr.id,
+                ));
+                CelType::Error
+            }
         }
     }
 
@@ -1524,5 +1538,60 @@ mod tests {
     fn test_has_dyn_field() {
         let result = check_expr_with_var("has(d.anything)", "d", CelType::Dyn);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_arity_error_size_standalone_no_args() {
+        // size() with no args should report arity error, not type mismatch
+        let result = check_expr("size()");
+        assert!(!result.is_ok());
+        assert!(result.errors.iter().any(|e| matches!(
+            &e.kind,
+            CheckErrorKind::Other(msg) if msg.contains("'size' expects exactly 1 argument, got 0")
+        )));
+    }
+
+    #[test]
+    fn test_arity_error_method_extra_args() {
+        // "hello".size(1) — method expects 0 args, got 1
+        let result = check_expr("\"hello\".size(1)");
+        assert!(!result.is_ok());
+        assert!(result.errors.iter().any(|e| matches!(
+            &e.kind,
+            CheckErrorKind::Other(msg) if msg.contains("'size' expects exactly 0 arguments, got 1")
+        )));
+    }
+
+    #[test]
+    fn test_arity_error_contains_no_args() {
+        // "hello".contains() — method expects 1 arg, got 0
+        let result = check_expr("\"hello\".contains()");
+        assert!(!result.is_ok());
+        assert!(result.errors.iter().any(|e| matches!(
+            &e.kind,
+            CheckErrorKind::Other(msg) if msg.contains("'contains' expects exactly 1 argument, got 0")
+        )));
+    }
+
+    #[test]
+    fn test_type_mismatch_still_reported_for_correct_arity() {
+        // size(123) — 1 arg is correct arity but int isn't string/bytes/list/map
+        let result = check_expr("size(123)");
+        assert!(!result.is_ok());
+        assert!(result.errors.iter().any(|e| matches!(
+            &e.kind,
+            CheckErrorKind::NoMatchingOverload { function, .. } if function == "size"
+        )));
+    }
+
+    #[test]
+    fn test_operator_type_mismatch_unchanged() {
+        // 1 + "a" — arity is always 2 for operators, so this stays a type mismatch
+        let result = check_expr_with_var("x + \"a\"", "x", CelType::Int);
+        assert!(!result.is_ok());
+        assert!(result.errors.iter().any(|e| matches!(
+            &e.kind,
+            CheckErrorKind::NoMatchingOverload { function, .. } if function == "_+_"
+        )));
     }
 }

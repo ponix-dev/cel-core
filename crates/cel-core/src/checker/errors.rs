@@ -88,6 +88,11 @@ impl CheckError {
         )
     }
 
+    /// Create an error with a custom message.
+    pub fn other(msg: impl Into<String>, span: Span, expr_id: i64) -> Self {
+        Self::new(CheckErrorKind::Other(msg.into()), span, expr_id)
+    }
+
     /// Get the error message.
     pub fn message(&self) -> String {
         self.kind.to_string()
