@@ -2,6 +2,12 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## v0.4.1 - 2026-02-14
+#### Bug Fixes
+- sign macos binary for lsp - (6e5b25f) - Simon Rall
+
+- - -
+
 ## v0.4.0 - 2026-02-14
 #### Features
 - show variable types on hover - (0b2b296) - Simon Rall
