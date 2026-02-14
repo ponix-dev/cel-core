@@ -436,6 +436,8 @@ impl<'a> Parser<'a> {
 
     /// Try to expand a call as a macro using the registry.
     /// Returns None if no matching macro is found or if the macro doesn't apply.
+    /// Returns Some(Expr::Error) if the macro name matches but expansion fails
+    /// (wrong arity or expansion error), preventing misleading checker errors.
     fn try_macro_expansion(
         &mut self,
         callee: &SpannedExpr,
@@ -445,8 +447,24 @@ impl<'a> Parser<'a> {
         // Extract call info: (name, receiver, is_receiver)
         let (name, receiver, is_receiver) = self.extract_call_info(callee)?;
 
-        // Look up macro in registry
-        let macro_def = self.macros.lookup(&name, args.len(), is_receiver)?;
+        // Look up macro in registry with actual arg count
+        let macro_def = match self.macros.lookup(&name, args.len(), is_receiver) {
+            Some(m) => m,
+            None => {
+                // Name matched a macro but arg count didn't — generate arity error
+                let desc = self
+                    .macros
+                    .expected_args_description(&name, is_receiver)
+                    .unwrap_or_else(|| "a different number of arguments".to_string());
+                self.add_macro_error(
+                    format!("{}() requires {}, got {}", name, desc, args.len()),
+                    span.clone(),
+                );
+                let id = self.next_id;
+                self.next_id += 1;
+                return Some(Spanned::new(id, Expr::Error, span));
+            }
+        };
 
         // Create macro context
         let mut next_id_fn = || {
@@ -498,8 +516,10 @@ impl<'a> Parser<'a> {
         match result {
             MacroExpansion::Expanded(expr) => Some(expr),
             MacroExpansion::Error(msg) => {
-                self.add_macro_error(msg, span);
-                None
+                self.add_macro_error(msg, span.clone());
+                let id = self.next_id;
+                self.next_id += 1;
+                Some(Spanned::new(id, Expr::Error, span))
             }
         }
     }
@@ -839,8 +859,8 @@ impl<'a> Parser<'a> {
 
 /// Parse tokens into an AST with inline macro expansion using standard macros.
 /// Returns the AST, any parse errors encountered, and a map of macro call IDs to original expressions.
-/// Note: Macro expansion errors are non-fatal and result in unexpanded Call nodes.
-/// Macro errors are NOT included in the errors list (matching cel-go behavior).
+/// Macro expansion errors (wrong arity, invalid arguments) are included in the errors list
+/// and produce `Expr::Error` nodes in the AST to prevent misleading checker errors.
 #[allow(dead_code)]
 pub fn parse_tokens(tokens: &[SpannedToken]) -> (Option<SpannedExpr>, Vec<ParseError>, MacroCalls) {
     if tokens.is_empty() {
@@ -858,31 +878,29 @@ pub fn parse_tokens(tokens: &[SpannedToken]) -> (Option<SpannedExpr>, Vec<ParseE
     match parser.parse_expr() {
         Ok(ast) => {
             let macro_calls = parser.take_macro_calls();
-            let _ = parser.take_macro_errors();
+            let mut errors = parser.take_macro_errors();
             if parser.at_end() {
-                (Some(ast), vec![], macro_calls)
+                (Some(ast), errors, macro_calls)
             } else {
-                (
-                    Some(ast),
-                    vec![ParseError {
-                        message: "unexpected tokens after expression".to_string(),
-                        span: parser.peek_span(),
-                    }],
-                    macro_calls,
-                )
+                errors.push(ParseError {
+                    message: "unexpected tokens after expression".to_string(),
+                    span: parser.peek_span(),
+                });
+                (Some(ast), errors, macro_calls)
             }
         }
         Err(e) => {
-            let _ = parser.take_macro_errors();
-            (None, vec![e], MacroCalls::new())
+            let mut errors = parser.take_macro_errors();
+            errors.push(e);
+            (None, errors, MacroCalls::new())
         }
     }
 }
 
 /// Parse tokens into an AST with inline macro expansion using a custom macro registry.
 /// Returns the AST, any parse errors encountered, and a map of macro call IDs to original expressions.
-/// Note: Macro expansion errors are non-fatal and result in unexpanded Call nodes.
-/// Macro errors are NOT included in the errors list (matching cel-go behavior).
+/// Macro expansion errors (wrong arity, invalid arguments) are included in the errors list
+/// and produce `Expr::Error` nodes in the AST to prevent misleading checker errors.
 pub fn parse_tokens_with_macros(
     tokens: &[SpannedToken],
     macros: MacroRegistry,
@@ -902,24 +920,21 @@ pub fn parse_tokens_with_macros(
     match parser.parse_expr() {
         Ok(ast) => {
             let macro_calls = parser.take_macro_calls();
-            // Note: macro errors are intentionally not included - they result in unexpanded calls
-            let _ = parser.take_macro_errors();
+            let mut errors = parser.take_macro_errors();
             if parser.at_end() {
-                (Some(ast), vec![], macro_calls)
+                (Some(ast), errors, macro_calls)
             } else {
-                (
-                    Some(ast),
-                    vec![ParseError {
-                        message: "unexpected tokens after expression".to_string(),
-                        span: parser.peek_span(),
-                    }],
-                    macro_calls,
-                )
+                errors.push(ParseError {
+                    message: "unexpected tokens after expression".to_string(),
+                    span: parser.peek_span(),
+                });
+                (Some(ast), errors, macro_calls)
             }
         }
         Err(e) => {
-            let _ = parser.take_macro_errors();
-            (None, vec![e], MacroCalls::new())
+            let mut errors = parser.take_macro_errors();
+            errors.push(e);
+            (None, errors, MacroCalls::new())
         }
     }
 }
@@ -1312,14 +1327,18 @@ mod tests {
     }
 
     #[test]
-    fn wrong_arg_count_returns_call() {
-        // exists with 1 arg should return unexpanded call (not a macro we handle)
-        let ast = parse_expr("[1,2].exists(x)");
-        if let Expr::Call { .. } = &ast.node {
-            // Expected - wrong arg count returns unexpanded call
-        } else {
-            panic!("expected Call for wrong arg count, got {:?}", ast.node);
-        }
+    fn wrong_arg_count_returns_error() {
+        // exists with 1 arg should return Expr::Error with a helpful arity error
+        let tokens = lex("[1,2].exists(x)").unwrap();
+        let (ast, errors, _) = parse_tokens(&tokens);
+        assert!(ast.is_some());
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.message.contains("exists()") && e.message.contains("requires")),
+            "expected arity error for exists(), got: {:?}",
+            errors
+        );
     }
 
     // === Macro Registry Tests ===
@@ -1382,5 +1401,89 @@ mod tests {
         assert!(errors.is_empty());
         let ast = ast.unwrap();
         assert!(matches!(ast.node, Expr::Call { .. }));
+    }
+
+    #[test]
+    fn macro_has_zero_args_gives_arity_error() {
+        let tokens = lex("has()").unwrap();
+        let (ast, errors, _) = parse_tokens(&tokens);
+        assert!(ast.is_some());
+        assert!(
+            errors.iter().any(|e| e.message.contains("requires")),
+            "expected arity error, got: {:?}",
+            errors
+        );
+        // Should produce Expr::Error, not an undeclared reference
+        assert!(matches!(ast.unwrap().node, Expr::Error));
+    }
+
+    #[test]
+    fn macro_has_too_many_args_gives_arity_error() {
+        let tokens = lex("has(a.b, c.d)").unwrap();
+        let (ast, errors, _) = parse_tokens(&tokens);
+        assert!(ast.is_some());
+        assert!(
+            errors.iter().any(|e| e.message.contains("requires")),
+            "expected arity error, got: {:?}",
+            errors
+        );
+        assert!(matches!(ast.unwrap().node, Expr::Error));
+    }
+
+    #[test]
+    fn macro_has_non_field_arg_gives_expansion_error() {
+        let tokens = lex("has(1 + 2)").unwrap();
+        let (ast, errors, _) = parse_tokens(&tokens);
+        assert!(ast.is_some());
+        assert!(
+            errors.iter().any(|e| e.message.contains("field selection")),
+            "expected field selection error, got: {:?}",
+            errors
+        );
+        assert!(matches!(ast.unwrap().node, Expr::Error));
+    }
+
+    #[test]
+    fn macro_all_zero_args_gives_arity_error() {
+        let tokens = lex("[1].all()").unwrap();
+        let (ast, errors, _) = parse_tokens(&tokens);
+        assert!(ast.is_some());
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.message.contains("all()") && e.message.contains("requires")),
+            "expected arity error for all(), got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn macro_filter_too_many_args_gives_arity_error() {
+        let tokens = lex("[1].filter(x, y, z)").unwrap();
+        let (ast, errors, _) = parse_tokens(&tokens);
+        assert!(ast.is_some());
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.message.contains("filter()") && e.message.contains("requires")),
+            "expected arity error for filter(), got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn macro_errors_do_not_produce_undeclared_reference() {
+        // All these should produce macro-level errors, not "undeclared reference" errors
+        let cases = vec!["has()", "has(a.b, c.d)", "has(1 + 2)"];
+        for input in cases {
+            let tokens = lex(input).unwrap();
+            let (_ast, errors, _) = parse_tokens(&tokens);
+            assert!(
+                !errors.iter().any(|e| e.message.contains("undeclared")),
+                "input '{}' should not produce 'undeclared reference' error, got: {:?}",
+                input,
+                errors
+            );
+        }
     }
 }
