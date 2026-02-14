@@ -119,6 +119,9 @@ jobs:
       - uses: ./.github/actions/setup
       - run: rustup target add ${{ matrix.target }}
       - run: cargo build --release -p cel-core-lsp --target ${{ matrix.target }}
+      - name: Codesign binary (macOS)
+        if: runner.os == 'macOS'
+        run: codesign --sign - --force --options runtime target/${{ matrix.target }}/release/cel-core-lsp
       - name: Package binary
         run: |
           cd target/${{ matrix.target }}/release
