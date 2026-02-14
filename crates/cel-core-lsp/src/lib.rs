@@ -176,7 +176,7 @@ impl LanguageServer for Backend {
                 Ok(lsp::hover_at_position(
                     &state.line_index,
                     ast,
-                    state.check_errors(),
+                    state.check_result.as_ref(),
                     position,
                 ))
             }

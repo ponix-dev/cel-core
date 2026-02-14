@@ -1,6 +1,6 @@
 //! Hover information for CEL expressions.
 
-use cel_core::{types::Expr, CheckError, CheckErrorKind, SpannedExpr};
+use cel_core::{types::Expr, CheckError, CheckErrorKind, CheckResult, SpannedExpr};
 use tower_lsp::lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position};
 
 use crate::document::{LineIndex, ProtoDocumentState};
@@ -158,12 +158,14 @@ fn find_check_error_at<'a>(node: &SpannedExpr, errors: &'a [CheckError]) -> Opti
 }
 
 /// Generate hover information for a node.
-/// Checks check errors first, then falls back to builtin docs.
+/// Checks check errors first, then variable types, then falls back to builtin docs.
 fn hover_for_node(
     line_index: &LineIndex,
     node: &SpannedExpr,
-    check_errors: &[CheckError],
+    check_result: Option<&CheckResult>,
 ) -> Option<Hover> {
+    let check_errors = check_result.map(|r| r.errors.as_slice()).unwrap_or(&[]);
+
     // Check if this node has a check error
     if let Some(error) = find_check_error_at(node, check_errors) {
         return Some(Hover {
@@ -173,6 +175,26 @@ fn hover_for_node(
             }),
             range: Some(line_index.span_to_range(&error.span)),
         });
+    }
+
+    // Show variable type for identifiers
+    if let Some(check_result) = check_result {
+        let var_name = match &node.node {
+            Expr::Ident(name) => Some(name.as_str()),
+            Expr::RootIdent(name) => Some(name.as_str()),
+            _ => None,
+        };
+        if let Some(name) = var_name {
+            if let Some(cel_type) = check_result.type_map.get(&node.id) {
+                return Some(Hover {
+                    contents: HoverContents::Markup(MarkupContent {
+                        kind: MarkupKind::Markdown,
+                        value: format!("(variable) `{}`: `{}`", name, cel_type.display_name()),
+                    }),
+                    range: Some(line_index.span_to_range(&node.span)),
+                });
+            }
+        }
     }
 
     // Fall back to builtin documentation
@@ -201,11 +223,11 @@ fn hover_for_node(
 pub fn hover_at_position(
     line_index: &LineIndex,
     ast: &SpannedExpr,
-    check_errors: &[CheckError],
+    check_result: Option<&CheckResult>,
     position: Position,
 ) -> Option<Hover> {
     let node = find_node_at_position(line_index, ast, position)?;
-    hover_for_node(line_index, node, check_errors)
+    hover_for_node(line_index, node, check_result)
 }
 
 /// Get hover information for a position in a proto document.
@@ -226,8 +248,11 @@ pub fn hover_at_position_proto(state: &ProtoDocumentState, position: Position) -
     let ast = region_state.ast.as_ref()?;
     let node = find_node_containing_offset(ast, cel_offset)?;
 
+    let check_result = region_state.check_result.as_ref();
+    let check_errors = check_result.map(|r| r.errors.as_slice()).unwrap_or(&[]);
+
     // Check if this node has a check error
-    if let Some(error) = find_check_error_at(node, region_state.check_errors()) {
+    if let Some(error) = find_check_error_at(node, check_errors) {
         let host_span = region_state.mapper.span_to_host(&error.span);
         return Some(Hover {
             contents: HoverContents::Markup(MarkupContent {
@@ -236,6 +261,27 @@ pub fn hover_at_position_proto(state: &ProtoDocumentState, position: Position) -
             }),
             range: Some(state.line_index.span_to_range(&host_span)),
         });
+    }
+
+    // Show variable type for identifiers
+    if let Some(check_result) = check_result {
+        let var_name = match &node.node {
+            Expr::Ident(name) => Some(name.as_str()),
+            Expr::RootIdent(name) => Some(name.as_str()),
+            _ => None,
+        };
+        if let Some(name) = var_name {
+            if let Some(cel_type) = check_result.type_map.get(&node.id) {
+                let host_span = region_state.mapper.span_to_host(&node.span);
+                return Some(Hover {
+                    contents: HoverContents::Markup(MarkupContent {
+                        kind: MarkupKind::Markdown,
+                        value: format!("(variable) `{}`: `{}`", name, cel_type.display_name()),
+                    }),
+                    range: Some(state.line_index.span_to_range(&host_span)),
+                });
+            }
+        }
     }
 
     // Fall back to builtin documentation (including protovalidate functions for proto files)
@@ -270,7 +316,7 @@ pub fn hover_at_position_proto(state: &ProtoDocumentState, position: Position) -
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cel_core::parse;
+    use cel_core::{parse, CelType, Env};
 
     #[test]
     fn no_hover_for_number() {
@@ -279,7 +325,7 @@ mod tests {
         let ast = result.ast.unwrap();
         let line_index = LineIndex::new(source.to_string());
 
-        let hover = hover_at_position(&line_index, &ast, &[], Position::new(0, 0));
+        let hover = hover_at_position(&line_index, &ast, None, Position::new(0, 0));
         assert!(hover.is_none());
     }
 
@@ -290,7 +336,7 @@ mod tests {
         let ast = result.ast.unwrap();
         let line_index = LineIndex::new(source.to_string());
 
-        let hover = hover_at_position(&line_index, &ast, &[], Position::new(0, 0));
+        let hover = hover_at_position(&line_index, &ast, None, Position::new(0, 0));
         assert!(hover.is_some());
         let hover = hover.unwrap();
         match hover.contents {
@@ -307,9 +353,13 @@ mod tests {
         let result = parse(source);
         let ast = result.ast.unwrap();
         let line_index = LineIndex::new(source.to_string());
-        let check_errors = vec![CheckError::undeclared_reference("x", 0..1, 1)];
+        let check_result = CheckResult {
+            type_map: Default::default(),
+            reference_map: Default::default(),
+            errors: vec![CheckError::undeclared_reference("x", 0..1, 1)],
+        };
 
-        let hover = hover_at_position(&line_index, &ast, &check_errors, Position::new(0, 0));
+        let hover = hover_at_position(&line_index, &ast, Some(&check_result), Position::new(0, 0));
         assert!(hover.is_some());
         let hover = hover.unwrap();
         match hover.contents {
@@ -329,12 +379,71 @@ mod tests {
         let line_index = LineIndex::new(source.to_string());
 
         // Hover on "has" (position 0) should return has() builtin docs
-        let hover = hover_at_position(&line_index, &ast, &[], Position::new(0, 0));
+        let hover = hover_at_position(&line_index, &ast, None, Position::new(0, 0));
         assert!(hover.is_some());
         let hover = hover.unwrap();
         match hover.contents {
             HoverContents::Markup(m) => {
                 assert!(m.value.contains("has"));
+            }
+            _ => panic!("Expected markup content"),
+        }
+    }
+
+    #[test]
+    fn hover_for_variable_type() {
+        let source = "x > 10";
+        let env = Env::with_standard_library().with_variable("x", CelType::Int);
+        let ast = env.compile(source).unwrap();
+        let line_index = LineIndex::new(source.to_string());
+        let check_result = ast.type_info().unwrap();
+
+        // Hover on "x" (position 0) should show variable type
+        let hover = hover_at_position(
+            &line_index,
+            ast.expr(),
+            Some(check_result),
+            Position::new(0, 0),
+        );
+        assert!(hover.is_some());
+        let hover = hover.unwrap();
+        match hover.contents {
+            HoverContents::Markup(m) => {
+                assert!(
+                    m.value.contains("(variable) `x`: `int`"),
+                    "Expected variable type hover, got: {}",
+                    m.value
+                );
+            }
+            _ => panic!("Expected markup content"),
+        }
+    }
+
+    #[test]
+    fn hover_for_message_variable() {
+        let source = "this";
+        let env = Env::with_standard_library()
+            .with_variable("this", CelType::Message("my.package.MyMessage".into()));
+        let ast = env.compile(source).unwrap();
+        let line_index = LineIndex::new(source.to_string());
+        let check_result = ast.type_info().unwrap();
+
+        let hover = hover_at_position(
+            &line_index,
+            ast.expr(),
+            Some(check_result),
+            Position::new(0, 0),
+        );
+        assert!(hover.is_some());
+        let hover = hover.unwrap();
+        match hover.contents {
+            HoverContents::Markup(m) => {
+                assert!(
+                    m.value
+                        .contains("(variable) `this`: `my.package.MyMessage`"),
+                    "Expected message type hover, got: {}",
+                    m.value
+                );
             }
             _ => panic!("Expected markup content"),
         }
