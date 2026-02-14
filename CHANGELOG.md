@@ -2,6 +2,12 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## v0.3.3 - 2026-02-14
+#### Refactoring
+- move proto value conversion from conformance to cel-core-proto - (5bc7bbf) - Simon Rall
+
+- - -
+
 ## v0.3.2 - 2026-02-14
 #### Bug Fixes
 - distinguish arity from type mismatches in function call errors - (1410e27) - Simon Rall
