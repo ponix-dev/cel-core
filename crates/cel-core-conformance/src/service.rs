@@ -5,27 +5,25 @@
 
 use std::sync::Arc;
 
-use prost::Message;
-use prost_reflect::{prost_types, DynamicMessage};
-
 use crate::{
     Binding, CheckResponse, ConformanceService, EvalResponse, FunctionTypeDecl, Issue,
     ParseResponse, TypeDecl,
 };
-use cel_core::{Env, MapActivation, MapKey, Value, ValueMap};
-use cel_core_proto::gen::cel::expr::value::Kind as ProtoValueKind;
-use cel_core_proto::gen::cel::expr::{
-    expr_value, ErrorSet, ExprValue, ListValue, MapValue, ParsedExpr, Value as ProtoValue,
-};
+use cel_core::{Env, MapActivation};
+use cel_core_proto::gen::cel::expr::ParsedExpr;
 use cel_core_proto::{
-    cel_type_from_proto, from_parsed_expr, maybe_unwrap_well_known, to_checked_expr, ProstMessage,
-    ProstProtoRegistry,
+    cel_type_from_proto, from_parsed_expr, function_decl_from_proto, proto_value_to_value,
+    to_checked_expr, value_to_expr_value, ProstProtoRegistry,
 };
 
 #[cfg(test)]
 use cel_core::CelType;
 #[cfg(test)]
 use cel_core_proto::cel_type_to_proto;
+#[cfg(test)]
+use cel_core_proto::gen::cel::expr::expr_value;
+#[cfg(test)]
+use cel_core_proto::gen::cel::expr::value::Kind as ProtoValueKind;
 
 /// CEL conformance service implementation using cel-core Env.
 ///
@@ -157,7 +155,10 @@ impl ConformanceService for CelConformanceService {
 
         // Add custom function declarations
         for func_decl in func_decls {
-            env.add_function(convert_function_decl(func_decl));
+            env.add_function(function_decl_from_proto(
+                &func_decl.name,
+                &func_decl.overloads,
+            ));
         }
 
         // Run the type checker using env
@@ -249,7 +250,10 @@ impl ConformanceService for CelConformanceService {
             env.add_variable(&decl.name, cel_type);
         }
         for func_decl in func_decls {
-            env.add_function(convert_function_decl(func_decl));
+            env.add_function(function_decl_from_proto(
+                &func_decl.name,
+                &func_decl.overloads,
+            ));
         }
 
         // Run the checker to get type info (needed for proto message construction)
@@ -261,7 +265,7 @@ impl ConformanceService for CelConformanceService {
         match env.program(&checked_ast) {
             Ok(program) => {
                 let result = program.eval_with_container(&activation, container);
-                let expr_value = value_to_proto(&result);
+                let expr_value = value_to_expr_value(&result);
                 EvalResponse {
                     result: Some(expr_value),
                     issues: vec![],
@@ -275,29 +279,6 @@ impl ConformanceService for CelConformanceService {
     }
 }
 
-/// Convert a proto FunctionTypeDecl to a cel_core FunctionDecl.
-fn convert_function_decl(proto: &FunctionTypeDecl) -> cel_core::FunctionDecl {
-    let mut func = cel_core::FunctionDecl::new(&proto.name);
-    for overload in &proto.overloads {
-        let params: Vec<_> = overload.params.iter().map(cel_type_from_proto).collect();
-        let result = overload
-            .result_type
-            .as_ref()
-            .map(cel_type_from_proto)
-            .unwrap_or(cel_core::CelType::Dyn);
-        let mut ovl = if overload.is_instance_function {
-            cel_core::OverloadDecl::method(&overload.overload_id, params, result)
-        } else {
-            cel_core::OverloadDecl::function(&overload.overload_id, params, result)
-        };
-        if !overload.type_params.is_empty() {
-            ovl = ovl.with_type_params(overload.type_params.clone());
-        }
-        func = func.with_overload(ovl);
-    }
-    func
-}
-
 /// Convert bindings to a MapActivation.
 fn bindings_to_activation(
     bindings: &[Binding],
@@ -309,201 +290,6 @@ fn bindings_to_activation(
         activation.insert(&binding.name, value);
     }
     Ok(activation)
-}
-
-/// Convert a proto Value to a cel_core::eval::Value.
-fn proto_value_to_value(
-    proto: &ProtoValue,
-    registry: &ProstProtoRegistry,
-) -> Result<Value, String> {
-    match &proto.kind {
-        Some(ProtoValueKind::NullValue(_)) => Ok(Value::Null),
-        Some(ProtoValueKind::BoolValue(b)) => Ok(Value::Bool(*b)),
-        Some(ProtoValueKind::Int64Value(i)) => Ok(Value::Int(*i)),
-        Some(ProtoValueKind::Uint64Value(u)) => Ok(Value::UInt(*u)),
-        Some(ProtoValueKind::DoubleValue(d)) => Ok(Value::Double(*d)),
-        Some(ProtoValueKind::StringValue(s)) => Ok(Value::String(Arc::from(s.as_str()))),
-        Some(ProtoValueKind::BytesValue(b)) => Ok(Value::Bytes(Arc::from(b.as_ref()))),
-        Some(ProtoValueKind::ListValue(list)) => {
-            let values: Result<Vec<_>, _> = list
-                .values
-                .iter()
-                .map(|v| proto_value_to_value(v, registry))
-                .collect();
-            Ok(Value::List(Arc::from(values?)))
-        }
-        Some(ProtoValueKind::MapValue(map)) => {
-            let mut value_map = ValueMap::new();
-            for entry in &map.entries {
-                let key = entry.key.as_ref().ok_or("missing map key")?;
-                let value = entry.value.as_ref().ok_or("missing map value")?;
-                let key_value = proto_value_to_value(key, registry)?;
-                let map_key = MapKey::from_value(&key_value)
-                    .ok_or_else(|| format!("invalid map key type: {:?}", key_value))?;
-                value_map.insert(map_key, proto_value_to_value(value, registry)?);
-            }
-            Ok(Value::Map(Arc::new(value_map)))
-        }
-        Some(ProtoValueKind::TypeValue(name)) => Ok(Value::new_type(name.as_str())),
-        Some(ProtoValueKind::EnumValue(ev)) => {
-            // Enum values are represented as ints in CEL
-            Ok(Value::Int(ev.value as i64))
-        }
-        Some(ProtoValueKind::ObjectValue(any)) => {
-            // Decode the Any message using the proto registry
-            // Extract the type name from the type_url
-            let type_name = any
-                .type_url
-                .strip_prefix("type.googleapis.com/")
-                .unwrap_or(&any.type_url);
-
-            // Get the message descriptor
-            let descriptor = registry
-                .get_message(type_name)
-                .ok_or_else(|| format!("unknown message type: {}", type_name))?;
-
-            // Decode the message
-            let message = DynamicMessage::decode(descriptor, any.value.as_ref())
-                .map_err(|e| format!("failed to decode message: {}", e))?;
-
-            // Convert to CEL Value using well-known type unwrapping
-            Ok(maybe_unwrap_well_known(message))
-        }
-        None => Err("missing value kind".to_string()),
-    }
-}
-
-/// Convert a cel_core::eval::Value to a proto ExprValue.
-fn value_to_proto(value: &Value) -> ExprValue {
-    match value {
-        Value::Error(e) => {
-            // For debugging, include the error message
-            use cel_core_proto::gen::cel::expr::Status;
-            ExprValue {
-                kind: Some(expr_value::Kind::Error(ErrorSet {
-                    errors: vec![Status {
-                        code: 0,
-                        message: e.to_string(),
-                        details: vec![],
-                    }],
-                })),
-            }
-        }
-        _ => ExprValue {
-            kind: Some(expr_value::Kind::Value(value_to_proto_value(value))),
-        },
-    }
-}
-
-/// Convert a cel_core::eval::Value to a proto Value.
-fn value_to_proto_value(value: &Value) -> ProtoValue {
-    let kind = match value {
-        Value::Null => ProtoValueKind::NullValue(0),
-        Value::Bool(b) => ProtoValueKind::BoolValue(*b),
-        Value::Int(i) => ProtoValueKind::Int64Value(*i),
-        Value::UInt(u) => ProtoValueKind::Uint64Value(*u),
-        Value::Double(d) => ProtoValueKind::DoubleValue(*d),
-        Value::String(s) => ProtoValueKind::StringValue(s.to_string()),
-        Value::Bytes(b) => ProtoValueKind::BytesValue(b.to_vec().into()),
-        Value::List(list) => ProtoValueKind::ListValue(ListValue {
-            values: list.iter().map(value_to_proto_value).collect(),
-        }),
-        Value::Map(map) => ProtoValueKind::MapValue(MapValue {
-            entries: map
-                .iter()
-                .map(|(k, v)| cel_core_proto::gen::cel::expr::map_value::Entry {
-                    key: Some(value_to_proto_value(&k.to_value())),
-                    value: Some(value_to_proto_value(v)),
-                })
-                .collect(),
-        }),
-        Value::Type(t) => ProtoValueKind::TypeValue(t.name.to_string()),
-        Value::Timestamp(t) => {
-            // Serialize as Any-wrapped google.protobuf.Timestamp
-            let ts = prost_types::Timestamp {
-                seconds: t.seconds,
-                nanos: t.nanos,
-            };
-            let mut buf = Vec::new();
-            ts.encode(&mut buf).unwrap();
-            ProtoValueKind::ObjectValue(prost_types::Any {
-                type_url: "type.googleapis.com/google.protobuf.Timestamp".to_string(),
-                value: buf.into(),
-            })
-        }
-        Value::Duration(d) => {
-            // Serialize as Any-wrapped google.protobuf.Duration
-            let dur = prost_types::Duration {
-                seconds: d.seconds,
-                nanos: d.nanos,
-            };
-            let mut buf = Vec::new();
-            dur.encode(&mut buf).unwrap();
-            ProtoValueKind::ObjectValue(prost_types::Any {
-                type_url: "type.googleapis.com/google.protobuf.Duration".to_string(),
-                value: buf.into(),
-            })
-        }
-        Value::Optional(opt) => match opt {
-            cel_core::OptionalValue::None => ProtoValueKind::NullValue(0),
-            cel_core::OptionalValue::Some(v) => {
-                return value_to_proto_value(v);
-            }
-        },
-        Value::Message(msg_val) => {
-            let proto = msg_val
-                .as_any()
-                .downcast_ref::<ProstMessage>()
-                .expect("Message must be ProstMessage");
-            // If the proto message IS an Any, preserve its inner type_url and value
-            if proto.type_name() == "google.protobuf.Any" {
-                let msg = proto.message();
-                let desc = proto.descriptor();
-                let type_url = desc
-                    .get_field_by_name("type_url")
-                    .map(|f| {
-                        if let prost_reflect::Value::String(s) = msg.get_field(&f).into_owned() {
-                            s
-                        } else {
-                            String::new()
-                        }
-                    })
-                    .unwrap_or_default();
-                let value_bytes = desc
-                    .get_field_by_name("value")
-                    .map(|f| {
-                        if let prost_reflect::Value::Bytes(b) = msg.get_field(&f).into_owned() {
-                            b.to_vec()
-                        } else {
-                            Vec::new()
-                        }
-                    })
-                    .unwrap_or_default();
-                ProtoValueKind::ObjectValue(prost_types::Any {
-                    type_url,
-                    value: value_bytes.into(),
-                })
-            } else {
-                // Serialize proto message to Any format
-                let type_url = format!("type.googleapis.com/{}", proto.type_name());
-                let value_bytes = proto.message().encode_to_vec();
-                ProtoValueKind::ObjectValue(prost_types::Any {
-                    type_url,
-                    value: value_bytes.into(),
-                })
-            }
-        }
-        Value::Enum(e) => ProtoValueKind::EnumValue(cel_core_proto::gen::cel::expr::EnumValue {
-            r#type: e.type_name.to_string(),
-            value: e.value,
-        }),
-        Value::Error(_) => {
-            // Errors are handled at the ExprValue level
-            ProtoValueKind::NullValue(0)
-        }
-    };
-
-    ProtoValue { kind: Some(kind) }
 }
 
 #[cfg(test)]
