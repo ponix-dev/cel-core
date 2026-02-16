@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use cel_core::Env;
-use cel_core_lsp::{build_env_with_protos, load_proto_registry, load_settings};
+use cel_core_lsp::{build_env_with_protos, discover_settings, load_proto_registry, load_settings};
 use cel_core_lsp::{
     completion_at_position_proto, proto_to_diagnostics, to_diagnostics, DocumentState, LineIndex,
     ProtoDocumentState,
@@ -448,4 +448,36 @@ fn proto_completion_int_field_no_string_methods() {
         "should NOT suggest contains for int field: {:?}",
         labels
     );
+}
+
+// ---------------------------------------------------------------------------
+// Tests — settings discovery
+// ---------------------------------------------------------------------------
+
+/// Use discover_settings from a subdirectory to find settings in the fixtures
+/// parent, then verify .cel files get the configured variables.
+#[test]
+fn discover_settings_applies_to_cel_files() {
+    let fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/basic");
+
+    // Simulate discovering settings from a child directory
+    let child = fixture_path.join("subdir");
+    std::fs::create_dir_all(&child).ok();
+
+    let (settings, settings_dir) = discover_settings(&child);
+    assert_eq!(settings_dir, fixture_path);
+
+    let env = Arc::new(build_env_with_protos(&settings, &settings_dir));
+
+    // CEL expression using variables declared in basic/settings.toml should work
+    let state = DocumentState::with_env("x > 10 && name.startsWith('test')".to_string(), 0, env);
+    let line_index = LineIndex::new(state.source.clone());
+    let diagnostics = to_diagnostics(&state.errors, state.check_errors(), &line_index);
+    let actual = format_diagnostics(&diagnostics);
+
+    let expected = expect![[r#"OK (no diagnostics)"#]];
+    expected.assert_eq(&actual);
+
+    // Clean up temp dir
+    let _ = std::fs::remove_dir(&child);
 }

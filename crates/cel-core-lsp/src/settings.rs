@@ -169,11 +169,39 @@ pub fn load_settings(path: &Path) -> Settings {
     }
 }
 
-/// Load settings from a workspace root directory.
+/// Discover settings.toml by searching up the directory tree, then direct children.
 ///
-/// Looks for settings.toml in the given directory.
-pub fn load_settings_from_workspace(workspace_root: &Path) -> Settings {
-    load_settings(&workspace_root.join("settings.toml"))
+/// Search order:
+/// 1. Walk up from `start_dir` to filesystem root
+/// 2. If not found, check immediate child directories of `start_dir`
+///
+/// Returns `(settings, settings_dir)` where `settings_dir` is the directory
+/// containing the found settings.toml (used for resolving relative paths).
+/// If not found, returns `(Settings::default(), start_dir)`.
+pub fn discover_settings(start_dir: &Path) -> (Settings, PathBuf) {
+    // Phase 1: Walk up from start_dir
+    let mut current = Some(start_dir);
+    while let Some(dir) = current {
+        let candidate = dir.join("settings.toml");
+        if candidate.is_file() {
+            return (load_settings(&candidate), dir.to_path_buf());
+        }
+        current = dir.parent();
+    }
+
+    // Phase 2: Check immediate child directories
+    if let Ok(entries) = std::fs::read_dir(start_dir) {
+        for entry in entries.flatten() {
+            if entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
+                let candidate = entry.path().join("settings.toml");
+                if candidate.is_file() {
+                    return (load_settings(&candidate), entry.path());
+                }
+            }
+        }
+    }
+
+    (Settings::default(), start_dir.to_path_buf())
 }
 
 /// Load proto registry from file descriptor set files specified in settings.
@@ -648,5 +676,118 @@ mod tests {
         let env = build_env_with_protos(&settings, std::path::Path::new("."));
         // Env should have standard library functions
         assert!(env.functions().contains_key("size"));
+    }
+
+    /// Create a unique temp directory for test isolation.
+    fn make_test_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir()
+            .join("cel-core-lsp-test")
+            .join(name)
+            .join(format!("{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// Clean up a test directory.
+    fn cleanup_test_dir(dir: &Path) {
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn discover_settings_in_current_dir() {
+        let dir = make_test_dir("discover-current");
+        let settings_content = r#"
+[env]
+variables = { x = "int" }
+"#;
+        std::fs::write(dir.join("settings.toml"), settings_content).unwrap();
+
+        let (settings, settings_dir) = discover_settings(&dir);
+        assert_eq!(settings_dir, dir);
+        assert!(settings.env.is_some());
+        let vars = settings.env.unwrap().variables.unwrap();
+        assert_eq!(vars.get("x").unwrap(), "int");
+
+        cleanup_test_dir(&dir);
+    }
+
+    #[test]
+    fn discover_settings_in_parent_dir() {
+        let parent = make_test_dir("discover-parent");
+        let child = parent.join("subdir");
+        std::fs::create_dir_all(&child).unwrap();
+
+        let settings_content = r#"
+[env]
+variables = { name = "string" }
+"#;
+        std::fs::write(parent.join("settings.toml"), settings_content).unwrap();
+
+        let (settings, settings_dir) = discover_settings(&child);
+        assert_eq!(settings_dir, parent);
+        assert!(settings.env.is_some());
+        let vars = settings.env.unwrap().variables.unwrap();
+        assert_eq!(vars.get("name").unwrap(), "string");
+
+        cleanup_test_dir(&parent);
+    }
+
+    #[test]
+    fn discover_settings_in_child_dir() {
+        let parent = make_test_dir("discover-child");
+        let child = parent.join("config");
+        std::fs::create_dir_all(&child).unwrap();
+
+        let settings_content = r#"
+[env]
+extensions = ["strings"]
+"#;
+        std::fs::write(child.join("settings.toml"), settings_content).unwrap();
+
+        let (settings, settings_dir) = discover_settings(&parent);
+        assert_eq!(settings_dir, child);
+        assert!(settings.env.is_some());
+        let exts = settings.env.unwrap().extensions.unwrap();
+        assert_eq!(exts, vec!["strings"]);
+
+        cleanup_test_dir(&parent);
+    }
+
+    #[test]
+    fn discover_settings_not_found() {
+        let dir = make_test_dir("discover-none");
+
+        let (settings, settings_dir) = discover_settings(&dir);
+        assert_eq!(settings_dir, dir);
+        assert!(settings.env.is_none());
+
+        cleanup_test_dir(&dir);
+    }
+
+    #[test]
+    fn discover_settings_parent_preferred_over_child() {
+        let parent = make_test_dir("discover-priority");
+        let child = parent.join("nested");
+        std::fs::create_dir_all(&child).unwrap();
+
+        // Put settings in both parent and child
+        std::fs::write(
+            parent.join("settings.toml"),
+            "[env]\nvariables = { from = \"string\" }\n",
+        )
+        .unwrap();
+        std::fs::write(
+            child.join("settings.toml"),
+            "[env]\nvariables = { from = \"int\" }\n",
+        )
+        .unwrap();
+
+        // When starting from parent, should find parent's settings (phase 1) before checking children
+        let (settings, settings_dir) = discover_settings(&parent);
+        assert_eq!(settings_dir, parent);
+        let vars = settings.env.unwrap().variables.unwrap();
+        assert_eq!(vars.get("from").unwrap(), "string");
+
+        cleanup_test_dir(&parent);
     }
 }
