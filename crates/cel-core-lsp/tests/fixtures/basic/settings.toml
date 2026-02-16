@@ -1,2 +1,0 @@
-[env]
-variables = { x = "int", name = "string", flag = "bool" }

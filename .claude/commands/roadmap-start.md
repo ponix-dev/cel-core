@@ -42,7 +42,7 @@ Before beginning any implementation work, you MUST create a feature branch:
 1. **Branch Naming Convention**: `{short-description}`
    - Use kebab-case describing the feature being implemented
    - Do NOT include prefixes like `feat/`
-   - Examples: `decouple-prost`, `lsp-completion`, `cel-block-extension`
+   - Examples: `decouple-prost`, `cel-block-extension`, `recursion-limits`
 
 2. **Create the branch immediately** after identifying the next work item:
    ```bash
@@ -79,8 +79,6 @@ Your plan should include:
 
 - Changes should build incrementally — don't skip ahead
 - Always run conformance tests to verify zero regressions
-- Consider how changes affect the LSP functionality
-
 ## When Plan Is Accepted
 
 After the user approves the plan:

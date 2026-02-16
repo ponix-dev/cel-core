@@ -2,7 +2,7 @@
 
 A spec-complete [Common Expression Language](https://github.com/google/cel-spec) (CEL) implementation written in rust.
 
-CEL-Core provides the full CEL pipeline — parsing, type checking, and evaluation — with wire compatibility to [cel-go](https://github.com/google/cel-go) and [cel-cpp](https://github.com/google/cel-cpp) through protobuf AST conversion. Built on top of the core library is a Language Server Protocol (LSP) server for IDE support.
+CEL-Core provides the full CEL pipeline — parsing, type checking, and evaluation — with wire compatibility to [cel-go](https://github.com/google/cel-go) and [cel-cpp](https://github.com/google/cel-cpp) through protobuf AST conversion.
 
 ## Installation
 
@@ -171,20 +171,6 @@ use cel_core_proto::CheckedExpr;
 let decoded = CheckedExpr::decode(bytes.as_slice())?;
 ```
 
-## Language Server
-
-The `cel-core-lsp` crate provides a Language Server Protocol implementation for CEL, built with `tower-lsp`. It works with any LSP-compatible editor.
-
-- **Diagnostics** — Real-time parse and type checking errors as you type
-- **Hover** — Type information and function documentation
-- **Semantic tokens** — Accurate syntax highlighting
-- **Protovalidate** — CEL validation support in `.proto` files
-
-### Install
-
-```bash
-cargo install --path crates/cel-core-lsp
-```
 
 ## Conformance
 
@@ -198,7 +184,6 @@ For details on what is tested and how to run the conformance suite, see the [con
 |-------|-------------|
 | [**cel-core**](crates/cel-core) | CEL environment, parser, type checker, evaluator, and standard library |
 | [**cel-core-proto**](crates/cel-core-proto) | Protobuf support: proto registry (`ProstProtoRegistry`), message values, AST conversion for wire compatibility with cel-go/cel-cpp |
-| [**cel-core-lsp**](crates/cel-core-lsp) | Language Server Protocol implementation for IDE support |
 | [**cel-core-conformance**](crates/cel-core-conformance) | Conformance testing against the official cel-spec test suite |
 
 ## Development

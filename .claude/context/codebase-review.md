@@ -182,10 +182,9 @@ The extension pattern (`ext/`) is clean and easy to follow. Each extension retur
 
 ## 10. Workspace & Crate Boundaries
 
-The four-crate structure is appropriate:
+The three-crate structure is appropriate:
 - `cel-core` - library (the right default)
 - `cel-core-proto` - optional proto interop
-- `cel-core-lsp` - binary, depends on both
 - `cel-core-conformance` - test harness
 
 **Note:** `cel-core` no longer has a dependency on `prost-reflect`. Proto support is provided via trait abstractions (`ProtoTypeResolver`, `ProtoRegistry`, `MessageValue`) defined in `cel-core::eval`, with the prost-backed implementation (`ProstProtoRegistry`, `ProstMessage`) living in `cel-core-proto`. This keeps the core crate lightweight and allows alternative proto implementations.
