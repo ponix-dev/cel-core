@@ -2,6 +2,12 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## v0.5.1 - 2026-02-16
+#### Refactoring
+- remove cel-core-lsp from workspace - (55d9aa4) - Simon Rall
+
+- - -
+
 ## v0.5.0 - 2026-02-16
 #### Features
 - walk file tree to discover settings.toml - (2c9560e) - Simon Rall
