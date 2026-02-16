@@ -2,6 +2,12 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## v0.5.0 - 2026-02-16
+#### Features
+- walk file tree to discover settings.toml - (2c9560e) - Simon Rall
+
+- - -
+
 ## v0.4.1 - 2026-02-14
 #### Bug Fixes
 - sign macos binary for lsp - (6e5b25f) - Simon Rall
