@@ -4,28 +4,36 @@
 2026-02-15
 
 ## Just Completed
-- GitHub Issue: #65 — Walk file tree to discover settings.toml
-- [x] Added `discover_settings()` that walks up the directory tree, then checks child directories
-- [x] Updated `DocumentStore::open()` to accept an optional `Env` for `.cel` files
-- [x] Added `env: OnceLock<Arc<Env>>` to `Backend` so settings-configured env is used for all documents
-- [x] Updated `initialize()` to use `discover_settings` instead of `load_settings_from_workspace`
-- [x] Added 5 unit tests for discovery and 1 integration test for end-to-end `.cel` file settings
+- GitHub Issue: #71 — Split cel-core-lsp into separate celsp repository
+- [x] Created `ponix-dev/celsp` GitHub repository
+- [x] Copied all LSP source code and tests to new repo as standalone crate
+- [x] Renamed package from `cel-core-lsp` to `celsp` with crates.io dependencies on cel-core 0.4.x
+- [x] Set up CI (pr.yml, main.yml with binary builds + releases for 3 targets)
+- [x] Added mise.toml, cog.toml, README.md, licenses, .gitignore
+- [x] Removed `crates/cel-core-lsp/` from cel-core workspace
+- [x] Updated cel-core CI to remove build-binaries and release jobs
+- [x] Updated mise.toml, README.md, and CLAUDE.md to remove LSP references
 
 ### Summary
-Previously, settings.toml was only looked for in the workspace root, and even when found, its configuration was only applied to `.proto` files — `.cel` files always got a hardcoded default env. Now the LSP walks up the directory tree from the workspace root to find settings.toml (with a fallback to check immediate child directories), and the discovered settings are applied to both `.cel` and `.proto` files.
+The LSP (`cel-core-lsp`) was extracted into its own repository at `ponix-dev/celsp` so it can be versioned and released independently from the core library. The celsp repo uses crates.io dependencies on `cel-core 0.4` and `cel-core-proto 0.4`. All 124 LSP tests pass in the new repo. The cel-core repo's CI was simplified to only handle library publishing (no more binary builds or GitHub releases with binary artifacts).
 
-### Key files
-- **Modified:** `crates/cel-core-lsp/src/settings.rs` — added `discover_settings()`, removed unused `load_settings_from_workspace()`, added 5 unit tests
-- **Modified:** `crates/cel-core-lsp/src/document/state.rs` — `DocumentStore::open()` now accepts `env: Option<&Arc<Env>>`
-- **Modified:** `crates/cel-core-lsp/src/lib.rs` — added `env` field to `Backend`, updated `initialize()` and `on_document_change()`
-- **Modified:** `crates/cel-core-lsp/tests/integration.rs` — added `discover_settings_applies_to_cel_files` test
+### Key changes in cel-core
+- **Deleted:** `crates/cel-core-lsp/` — entire directory
+- **Modified:** `.github/workflows/main.yml` — removed `build-binaries` and `release` jobs
+- **Modified:** `mise.toml` — removed `install-lsp` task
+- **Modified:** `README.md` — replaced LSP section with link to celsp, updated crate table
+- **Modified:** `CLAUDE.md` — updated project description, removed LSP architecture section
 
-### Notable decisions
-- Two-phase search: walk up first (prioritizes parent directories), then check immediate children as fallback
-- Returns `(Settings, PathBuf)` where the PathBuf is the settings directory, used for resolving relative descriptor paths
-- Removed `load_settings_from_workspace` as dead code — fully replaced by `discover_settings`
+### Key files in celsp repo
+- `Cargo.toml` — standalone package with crates.io deps
+- `src/` — all source from cel-core-lsp (references updated to `celsp`)
+- `tests/` — all tests and fixtures
+- `.github/workflows/main.yml` — CI with binary builds + release
+- `.github/workflows/pr.yml` — PR checks
+- `mise.toml`, `cog.toml`, `README.md`, licenses
 
 ## Previous Work
+- GitHub Issue: #65 — Walk file tree to discover settings.toml
 - GitHub Issue: #66 — Show variable types on hover
 - GitHub Issue: #48 — Move proto value conversion logic from conformance layer to cel-core-proto
 - GitHub Issue: #58 — Macro calls with wrong argument count produce misleading 'undeclared reference' error
@@ -36,10 +44,11 @@ Previously, settings.toml was only looked for in the workspace root, and even wh
 
 ## Next Up
 - GitHub Issue: #56 — Auto-discover buf dependencies for LSP proto registry
-  - Natural follow-up: now that settings discovery walks the tree, auto-discovering buf.yaml dependencies would reduce manual descriptor configuration
+  - Now lives in celsp repo — natural follow-up to settings discovery
 - GitHub Issue: #44 — LSP workspace/configuration support
-  - Could build on discover_settings to support dynamic workspace configuration changes
+  - Also lives in celsp repo now
 
 ## Open Questions
-- The overload resolution sometimes selects the wrong overload for `(UInt, Int)` args in bit shift functions — it picks `int_int` instead of `uint_int`. Worked around by handling both type combos in the first overload, but root cause may need investigation.
-- Completion for map types could be improved — currently only shows methods, not key access patterns
+- celsp repo needs its initial push to GitHub (commits are ready locally at `/Users/srall/development/celsp`)
+- celsp will need secrets configured for any future crates.io publishing
+- The overload resolution sometimes selects the wrong overload for `(UInt, Int)` args in bit shift functions — tracked separately

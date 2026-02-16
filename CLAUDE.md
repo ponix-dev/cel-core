@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-CEL-Core is a Language Server Protocol implementation for the Common Expression Language (CEL). It provides IDE support including syntax highlighting, error diagnostics, hover information, and semantic tokens for CEL expressions.
+CEL-Core is a spec-complete Common Expression Language (CEL) implementation in Rust. It provides the full CEL pipeline — parsing, type checking, and evaluation — with wire compatibility to cel-go and cel-cpp through protobuf AST conversion.
 
 ## Development Commands
 
@@ -50,12 +50,6 @@ mise run conformance:test
 mise run proto:generate
 ```
 
-### Installing
-```bash
-# Install cel-core-lsp binary to PATH
-mise run install
-```
-
 ### First-time Setup
 
 After cloning the repository, initialize the git submodule for CEL conformance tests:
@@ -91,25 +85,6 @@ This is a multi-crate Cargo workspace:
   - Generated protobuf types from cel-spec
   - Bidirectional conversion between AST and proto format
   - Wire compatibility with other CEL implementations (cel-go, cel-cpp)
-
-- **`cel-core-lsp`**: Language Server Protocol implementation (binary)
-  - Uses `tower-lsp` for LSP protocol
-  - Internal module structure:
-    - `document/` - Document state management and text utilities
-      - `text.rs` - `LineIndex` for byte offset ↔ LSP position conversion
-      - `region.rs` - `CelRegion`, `OffsetMapper` for embedded CEL in proto files
-      - `state.rs` - `DocumentState`, `DocumentStore` for document lifecycle
-    - `lsp/` - LSP protocol feature implementations
-      - `diagnostics.rs` - Error to LSP diagnostic conversion
-      - `hover.rs` - Hover information for CEL expressions
-      - `semantic_tokens.rs` - Syntax highlighting tokens
-    - `types/` - CEL type system and validation
-      - `builtins.rs` - Built-in function definitions
-      - `validation.rs` - Semantic validation (undefined vars, arity, types)
-    - `protovalidate/` - Protovalidate CEL extension support
-      - `builtins.rs` - Protovalidate-specific functions (isEmail, isUri, etc.)
-      - `proto_parser.rs` - Extract CEL from .proto files
-      - `resolver.rs` - Variable resolver for protovalidate context
 
 - **`cel-core-conformance`**: CEL conformance testing (not published)
   - In-process `ConformanceService` trait (not gRPC)
