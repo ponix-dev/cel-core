@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 
+use cel_core::Env;
 use cel_core_proto::ProstProtoRegistry;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
@@ -16,7 +17,7 @@ pub(crate) mod types;
 
 pub use document::{DocumentState, LineIndex, ProtoDocumentState};
 pub use lsp::{completion_at_position_proto, proto_to_diagnostics, to_diagnostics};
-pub use settings::{build_env_with_protos, load_proto_registry, load_settings};
+pub use settings::{build_env_with_protos, discover_settings, load_proto_registry, load_settings};
 
 use document::{DocumentKind, DocumentStore};
 
@@ -25,6 +26,7 @@ pub struct Backend {
     documents: DocumentStore,
     workspace_root: OnceLock<PathBuf>,
     proto_registry: OnceLock<Option<Arc<ProstProtoRegistry>>>,
+    env: OnceLock<Arc<Env>>,
 }
 
 impl Backend {
@@ -34,15 +36,17 @@ impl Backend {
             documents: DocumentStore::new(),
             workspace_root: OnceLock::new(),
             proto_registry: OnceLock::new(),
+            env: OnceLock::new(),
         }
     }
 
     /// Parse document and publish diagnostics.
     async fn on_document_change(&self, uri: Url, text: String, version: i32) {
         let registry = self.proto_registry.get().and_then(|r| r.clone());
+        let env = self.env.get();
         let state = self
             .documents
-            .open(uri.clone(), text, version, registry.as_ref());
+            .open(uri.clone(), text, version, registry.as_ref(), env);
         self.publish_diagnostics_for(&uri, &state).await;
     }
 
@@ -86,10 +90,12 @@ impl LanguageServer for Backend {
         if let Some(root) = workspace_root {
             let _ = self.workspace_root.set(root.clone());
 
-            // Load settings and proto registry
-            let settings = settings::load_settings_from_workspace(&root);
-            let registry = settings::load_proto_registry(&settings, &root);
+            // Discover settings by walking up the directory tree
+            let (settings, settings_dir) = settings::discover_settings(&root);
+            let registry = settings::load_proto_registry(&settings, &settings_dir);
+            let env = Arc::new(settings::build_env_with_protos(&settings, &settings_dir));
             let _ = self.proto_registry.set(registry);
+            let _ = self.env.set(env);
         } else {
             let _ = self.proto_registry.set(None);
         }
