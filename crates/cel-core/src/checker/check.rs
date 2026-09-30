@@ -1594,4 +1594,95 @@ mod tests {
             CheckErrorKind::NoMatchingOverload { function, .. } if function == "_+_"
         )));
     }
+
+    #[test]
+    fn test_dyn_binding_stays_dyn() {
+        for (source, expected) in [
+            ("true ? dyn(1) : 1", CelType::Dyn),
+            ("true ? [dyn(1)] : [1]", CelType::list(CelType::Dyn)),
+        ] {
+            let ast = parse(source).ast.expect("parse should succeed");
+            let result = check(&ast, &standard_variables(), &standard_functions(), "");
+            assert!(result.is_ok(), "{source}: {:?}", result.errors);
+            assert_eq!(result.get_type(ast.id), Some(&expected), "{source}");
+        }
+    }
+
+    #[test]
+    fn test_empty_lists_infer_element_type() {
+        for source in ["true ? [] : [1]", "true ? [1] : []"] {
+            let ast = parse(source).ast.expect("parse should succeed");
+            let result = check(&ast, &standard_variables(), &standard_functions(), "");
+            assert!(result.is_ok(), "{source}: {:?}", result.errors);
+            assert_eq!(
+                result.get_type(ast.id),
+                Some(&CelType::list(CelType::Int)),
+                "{source}"
+            );
+        }
+    }
+
+    fn assert_no_matching_overload(result: &CheckResult, source: &str, expected: &str) {
+        assert_eq!(result.errors.len(), 1, "{source}: {:?}", result.errors);
+        assert!(
+            matches!(
+                &result.errors[0].kind,
+                CheckErrorKind::NoMatchingOverload { function, .. } if function == expected
+            ),
+            "{source}: {:?}",
+            result.errors
+        );
+    }
+
+    #[test]
+    fn test_incompatible_type_param_arguments_report_no_matching_overload() {
+        for (source, function) in [
+            (r#""s" == 3"#, "_==_"),
+            (r#"3 == "s""#, "_==_"),
+            (r#""s" != 3"#, "_!=_"),
+            (r#"3 in ["a"]"#, "@in"),
+            (r#"3 in {"a": 1}"#, "@in"),
+            (r#"[1] == ["a"]"#, "_==_"),
+            (r#"{1: 1} == {1: "a"}"#, "_==_"),
+            (r#"true ? 1 : "a""#, "_?_:_"),
+            ("true ? [] : {}", "_?_:_"),
+            ("timestamp(0) == duration('1s')", "_==_"),
+            ("1 == 1.0", "_==_"),
+            ("null == 1", "_==_"),
+            ("1 == null", "_==_"),
+        ] {
+            assert_no_matching_overload(&check_expr(source), source, function);
+        }
+        for source in [r#"x == "x""#, r#""x" == x"#] {
+            let result = check_expr_with_var(source, "x", CelType::wrapper(CelType::Int));
+            assert_no_matching_overload(&result, source, "_==_");
+        }
+    }
+
+    #[test]
+    fn test_dyn_and_nullable_arguments_remain_compatible() {
+        for source in [
+            r#"dyn("s") == 3"#,
+            r#"3 == dyn("s")"#,
+            r#"dyn("a") in [1, 2]"#,
+            "null == timestamp(0)",
+            "timestamp(0) == null",
+        ] {
+            let result = check_expr(source);
+            assert!(result.is_ok(), "{source}: {:?}", result.errors);
+        }
+        for source in ["x == null", "null == x", "x == 1", "1 == x"] {
+            let result = check_expr_with_var(source, "x", CelType::wrapper(CelType::Int));
+            assert!(result.is_ok(), "{source}: {:?}", result.errors);
+        }
+    }
+
+    #[test]
+    fn test_type_value_bindings_still_widen_to_dyn() {
+        // Known gap: a type value and an int still widen to Dyn, so `int == 1` checks.
+        // Rejection applies to the outer type, so the same pair inside lists fails.
+        let result = check_expr("int == 1");
+        assert!(result.is_ok(), "{:?}", result.errors);
+        assert_no_matching_overload(&check_expr("[int] == [1]"), "[int] == [1]", "_==_");
+    }
 }

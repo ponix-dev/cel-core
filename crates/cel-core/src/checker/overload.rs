@@ -220,6 +220,27 @@ fn try_match_overload(
     Some(substitute_type(&scoped_result, substitutions))
 }
 
+/// Outer types for which an incompatible type-parameter binding fails the overload.
+/// Other types (type values, messages, abstract types) still widen the binding to Dyn,
+/// a known gap relative to cel-go rather than intended behavior.
+fn is_value_type(t: &CelType) -> bool {
+    matches!(
+        t,
+        CelType::Bool
+            | CelType::Int
+            | CelType::UInt
+            | CelType::Double
+            | CelType::String
+            | CelType::Bytes
+            | CelType::Timestamp
+            | CelType::Duration
+            | CelType::Null
+            | CelType::Wrapper(_)
+            | CelType::List(_)
+            | CelType::Map(_, _)
+    )
+}
+
 /// Check if an argument type is assignable to a parameter type.
 fn is_assignable(
     arg: &CelType,
@@ -232,23 +253,23 @@ fn is_assignable(
             // Already bound - check compatibility
             if is_types_compatible(&bound, arg, substitutions) {
                 // If bound is less specific than arg, widen to the arg type.
-                // Null widens to any nullable type, TypeVar/Dyn widen to concrete types.
+                // Null widens to any nullable type, TypeVar widens to concrete types.
                 if should_widen_binding(&bound, arg) {
                     substitutions.insert(name.clone(), arg.clone());
                 }
                 return true;
             }
-            // Incompatible types widen the param to Dyn
+            // No overload, as in cel-go's `isValidTypeSubstitution`: `"s" == 3` is a check error.
+            // Dyn, boxing, and nullable arguments were already accepted as compatible above.
+            if is_value_type(&bound) && is_value_type(arg) {
+                return false;
+            }
             substitutions.insert(name.clone(), CelType::Dyn);
             return true;
         } else {
-            // Bind the type parameter
-            // If arg contains TypeVars, bind to Dyn instead (concrete types will widen later)
-            if contains_type_var(arg) {
-                substitutions.insert(name.clone(), CelType::Dyn);
-            } else {
-                substitutions.insert(name.clone(), arg.clone());
-            }
+            // Bind the type parameter. An arg with TypeVars binds as-is and widens to the first
+            // concrete arg (`should_widen_binding`), so a Dyn binding always means dyn.
+            substitutions.insert(name.clone(), arg.clone());
             return true;
         }
     }
@@ -346,7 +367,8 @@ fn contains_type_var(ty: &CelType) -> bool {
 /// Check if a binding should be widened from `bound` to `arg`.
 ///
 /// This implements the cel-go behavior where less specific types
-/// (Null, Dyn, types with TypeVars) are replaced by more specific types.
+/// (Null, types with TypeVars) are replaced by more specific types. A Dyn
+/// binding stays Dyn.
 fn should_widen_binding(bound: &CelType, arg: &CelType) -> bool {
     if bound == arg {
         return false;
@@ -355,10 +377,8 @@ fn should_widen_binding(bound: &CelType, arg: &CelType) -> bool {
     if matches!(bound, CelType::Null) && !matches!(arg, CelType::Null) {
         return true;
     }
-    // TypeVar/Dyn should be widened to concrete types
-    if (matches!(bound, CelType::TypeVar(_)) || matches!(bound, CelType::Dyn))
-        && !matches!(arg, CelType::TypeVar(_) | CelType::Dyn)
-    {
+    // TypeVar should be widened to concrete types; Dyn stays Dyn
+    if matches!(bound, CelType::TypeVar(_)) && !matches!(arg, CelType::TypeVar(_) | CelType::Dyn) {
         return true;
     }
     // Types with TypeVars should be widened to types without

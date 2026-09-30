@@ -382,7 +382,7 @@ mod tests {
             .with_variable("value", CelType::Int);
 
         let ast = env
-            .compile("a > 0 && b.contains('x') ? [1, 2, 3] : {'key': value}")
+            .compile("a > 0 && b.contains('x') ? [1, 2, 3] : [value]")
             .unwrap();
 
         // Test ParsedExpr roundtrip
